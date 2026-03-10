@@ -376,46 +376,75 @@ def run_live_loop(settings: Settings) -> None:
     accumulated_new_bars = 0
 
     while True:
-        frames = data_service.fetch_multi_timeframe_data(source=settings.market.live_data_source)
-        execution_frame = frames[settings.market.execution_timeframe]
-        latest_bar_time = pd.to_datetime(execution_frame.iloc[-1]["time"], utc=True)
-        if last_seen_bar_time is None:
-            last_seen_bar_time = latest_bar_time
-        elif latest_bar_time > last_seen_bar_time:
-            accumulated_new_bars += int((execution_frame["time"] > last_seen_bar_time).sum())
-            last_seen_bar_time = latest_bar_time
+        try:
+            frames = data_service.fetch_multi_timeframe_data(source=settings.market.live_data_source)
+            execution_frame = frames[settings.market.execution_timeframe]
+            latest_bar_time = pd.to_datetime(execution_frame.iloc[-1]["time"], utc=True)
+            if last_seen_bar_time is None:
+                last_seen_bar_time = latest_bar_time
+            elif latest_bar_time > last_seen_bar_time:
+                accumulated_new_bars += int((execution_frame["time"] > last_seen_bar_time).sum())
+                last_seen_bar_time = latest_bar_time
 
-        if settings.training.live_learning_enabled and accumulated_new_bars >= settings.training.live_learning_min_new_bars:
-            dataset, metrics = _train_on_frames(settings, trainer, strategy, frames)
-            accumulated_new_bars = 0
-            learning_event = {
-                "event": "live_retrain",
-                "timestamp": latest_bar_time.isoformat(),
-                "rows": len(dataset),
-                "train_rows": int(metrics.get("train_rows", 0)),
-                "test_rows": int(metrics.get("test_rows", 0)),
-                "selected_threshold": metrics.get("selected_threshold"),
-                "precision": metrics.get("precision"),
-                "recall": metrics.get("recall"),
-                "f1": metrics.get("f1"),
-            }
-            if len(dataset) >= settings.training.live_learning_min_rows:
-                _log_live_learning_event(settings, learning_event)
-                LOGGER.info("Live learning retrain complete: %s", learning_event)
-            else:
-                LOGGER.info("Live learning skipped due to insufficient rows: %s", len(dataset))
+            if settings.training.live_learning_enabled and accumulated_new_bars >= settings.training.live_learning_min_new_bars:
+                dataset, metrics = _train_on_frames(settings, trainer, strategy, frames)
+                accumulated_new_bars = 0
+                learning_event = {
+                    "event": "live_retrain",
+                    "timestamp": latest_bar_time.isoformat(),
+                    "rows": len(dataset),
+                    "train_rows": int(metrics.get("train_rows", 0)),
+                    "test_rows": int(metrics.get("test_rows", 0)),
+                    "selected_threshold": metrics.get("selected_threshold"),
+                    "precision": metrics.get("precision"),
+                    "recall": metrics.get("recall"),
+                    "f1": metrics.get("f1"),
+                }
+                if len(dataset) >= settings.training.live_learning_min_rows:
+                    _log_live_learning_event(settings, learning_event)
+                    LOGGER.info("Live learning retrain complete: %s", learning_event)
+                else:
+                    LOGGER.info("Live learning skipped due to insufficient rows: %s", len(dataset))
 
-        live_frame = build_live_feature_frame(settings, frames, strategy)
-        signal = trainer.score_live_row(live_frame)
-        decision = strategy.build_trade_decision(frames, live_frame.iloc[-1], signal)
+            live_frame = build_live_feature_frame(settings, frames, strategy)
+            signal = trainer.score_live_row(live_frame)
+            decision = strategy.build_trade_decision(frames, live_frame.iloc[-1], signal)
+            latest_row = live_frame.iloc[-1]
 
-        if decision.should_trade:
+            # Log every tick to paper_trade_log for dashboard visibility
+            log_path = Path(settings.app.paper_trade_log_path)
+            log_path.parent.mkdir(parents=True, exist_ok=True)
             order_plan = risk_manager.build_order_plan(decision, frames[settings.market.execution_timeframe].iloc[-1])
-            notifier.send_signal(decision, order_plan)
-            if settings.execution.auto_trade:
-                executor.place_order(order_plan)
-        else:
-            LOGGER.info("No trade: %s", decision.reason)
+            signal_row = pd.DataFrame([{
+                "time": str(latest_bar_time),
+                "should_trade": decision.should_trade,
+                "side": decision.side,
+                "confidence": decision.confidence,
+                "reason": decision.reason,
+                "entry_price": order_plan.entry_price,
+                "stop_loss": order_plan.stop_loss,
+                "take_profit": order_plan.take_profit,
+                "strategy_score": float(latest_row["strategy_score"]) if "strategy_score" in latest_row.index else 0.0,
+                "volatility_regime": int(latest_row["volatility_regime"]) if "volatility_regime" in latest_row.index else 1,
+            }])
+            if log_path.exists():
+                signal_row.to_csv(log_path, mode="a", header=False, index=False)
+            else:
+                signal_row.to_csv(log_path, index=False)
+
+            if decision.should_trade:
+                notifier.send_signal(decision, order_plan)
+                if settings.execution.auto_trade:
+                    try:
+                        result = executor.place_order(order_plan)
+                        LOGGER.info("MT5 order placed: %s", result)
+                    except Exception as order_err:
+                        LOGGER.error("MT5 order failed (auto_trade skipped): %s", order_err)
+            else:
+                LOGGER.info("No trade: %s", decision.reason)
+
+        except Exception as loop_err:
+            LOGGER.error("Live loop error (will retry in %ss): %s", settings.app.poll_seconds, loop_err, exc_info=True)
 
         time.sleep(settings.app.poll_seconds)
 

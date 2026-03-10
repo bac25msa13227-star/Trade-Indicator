@@ -1,5 +1,11 @@
+# ============================================================
+# CONFIG TEST - NGƯỠNG THẤP ĐỂ KIỂM TRA BOT VÀO LỆNH
+# Dùng: .venv\Scripts\python.exe -m xauusd_ai.main live --config configs/live_mt5_test.yaml
+# SAU KHI TEST XONG: quay lại configs/live_mt5.yaml
+# ============================================================
+
 app:
-  poll_seconds: 60
+  poll_seconds: 15                      # Kiểm tra mỗi 15s (thay vì 60s)
   model_path: outputs/model.pkl
   scaler_path: outputs/scaler.pkl
   model_meta_path: outputs/model_meta.json
@@ -11,11 +17,11 @@ app:
   backtest_trades_plot_path: outputs/backtest_trades.png
   walkforward_report_path: outputs/walkforward_report.json
   walkforward_trades_path: outputs/walkforward_trades.csv
-  paper_trade_log_path: outputs/paper_trade_signals.csv
+  paper_trade_log_path: outputs/paper_trade_signals_TEST.csv  # File riêng không ghi đè live
   live_learning_log_path: outputs/live_learning_log.jsonl
   dashboard_host: 0.0.0.0
   dashboard_port: 8501
-  log_level: INFO
+  log_level: DEBUG                      # DEBUG để xem chi tiết
 
 market:
   symbol: XAUUSDm
@@ -41,7 +47,7 @@ strategy:
     order_flow_proxy: true
     rsi: true
     macd: true
-    news_filter: true
+    news_filter: false                  # TẮT news filter khi test
   rsi_period: 14
   macd_fast: 12
   macd_slow: 26
@@ -49,26 +55,22 @@ strategy:
   liquidity_lookback: 20
   swing_lookback: 10
   volatility_window: 20
-  signal_threshold: 0.55
+  signal_threshold: 0.30               # ↓ Giảm từ 0.55 → 0.30 (dễ vào lệnh hơn)
   sideways_volatility_threshold: 0.004
   strong_volatility_threshold: 0.012
-  news_block_minutes: 30
-  rsi_long_threshold: 55
-  rsi_short_threshold: 45
+  news_block_minutes: 0                # TẮT chặn giờ news
+  rsi_long_threshold: 50               # ↓ Nới lỏng từ 55 → 50
+  rsi_short_threshold: 50              # ↑ Nới lỏng từ 45 → 50
   ict_weight: 0.25
   wyckoff_weight: 0.35
   momentum_weight: 0.40
-  min_strategy_score: 0.3
-  sideway_min_strategy_score: 0.15
-  strong_volatility_min_strategy_score: 0.2
-  require_trend_alignment: false
-  blocked_hours_utc: [7, 10, 11, 22]
+  min_strategy_score: 0.0             # ↓ = 0 để bỏ qua hoàn toàn cho test
+  sideway_min_strategy_score: 0.0     # ↓ = 0 sideway market đang flat score
+  strong_volatility_min_strategy_score: 0.0  # ↓ = 0
+  require_trend_alignment: false       # TẮT yêu cầu trend alignment
+  blocked_hours_utc: []               # XÓA tất cả giờ bị block
   blocked_weekdays_utc: []
-  blocked_weekday_hours_utc:
-    Thursday: [0, 1, 4, 6, 8, 12, 23]
-    Tuesday: [16, 18]
-    Wednesday: [5, 8, 9]
-    Monday: [18]
+  blocked_weekday_hours_utc: {}       # XÓA block theo ngày
   allowed_weekday_hours_utc: {}
 
 risk:
@@ -77,18 +79,18 @@ risk:
   max_open_positions: 1
   stop_loss_atr_multiple: 1.8
   take_profit_rr: 2.2
-  min_confidence: 0.55
-  fixed_lot: 0.01
+  min_confidence: 0.30               # ↓ Giảm từ 0.55 → 0.30 (key condition)
+  fixed_lot: 0.01                    # Lot tối thiểu để test
   max_risk_fraction: 0.011
   sideway_risk_multiplier: 0.3
   normal_risk_multiplier: 0.9
   strong_volatility_risk_multiplier: 0.55
 
 execution:
-  auto_trade: true
+  auto_trade: true                   # Đặt lệnh thật lên MT5
   deviation: 20
-  magic_number: 20260309
-  comment: xauusd-ai-live
+  magic_number: 20260399             # Magic khác với live thật (99 = test)
+  comment: xauusd-ai-TEST            # Label rõ ràng là TEST
   paper_trade_max_loops: 1
   paper_data_source: csv_folder
 
@@ -96,11 +98,11 @@ training:
   train_split: 0.75
   label_horizon: 12
   min_return_threshold: 0.0006
-  retrain_on_startup: false
-  live_learning_enabled: true
+  retrain_on_startup: false          # Dùng model đã train sẵn
+  live_learning_enabled: false       # Tắt live learning khi test
   live_learning_min_new_bars: 12
   live_learning_min_rows: 1000
-  save_dataset: true
+  save_dataset: false                # Không ghi đè dataset cũ
   dataset_path: outputs/training_dataset.csv
   optimize_threshold: true
   validation_split: 0.15

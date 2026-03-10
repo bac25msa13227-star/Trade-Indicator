@@ -2,5 +2,15 @@
 .venv2/
 __pycache__/
 *.pyc
+*.pyo
 .env
 outputs/
+
+# Cloudflare tunnel binary (large, OS-specific)
+cloudflared.exe
+
+# Debug / scratch files
+debug_signal.py
+
+# egg-info (auto-generated, no need to track)
+src/*.egg-info/

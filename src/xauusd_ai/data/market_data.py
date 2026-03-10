@@ -96,6 +96,7 @@ class MarketDataService:
             "D1": mt5.TIMEFRAME_D1,
         }
         timeframe = mt5_timeframe_map[timeframe_name]
+        mt5.symbol_select(self.settings.market.symbol, True)
         rates = mt5.copy_rates_from_pos(self.settings.market.symbol, timeframe, 0, bars)
         if rates is None or len(rates) == 0:
             raise RuntimeError(f"No rates returned for {self.settings.market.symbol} {timeframe_name}")
