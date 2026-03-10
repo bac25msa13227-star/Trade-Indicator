@@ -1,0 +1,145 @@
+app:
+  poll_seconds: 60
+  model_path: outputs/scenarios/train_2024_2025_trade_2026/model.pkl
+  scaler_path: outputs/scenarios/train_2024_2025_trade_2026/scaler.pkl
+  model_meta_path: outputs/scenarios/train_2024_2025_trade_2026/model_meta.json
+  training_report_path: outputs/scenarios/train_2024_2025_trade_2026/training_report.json
+  training_plot_path: outputs/scenarios/train_2024_2025_trade_2026/training_metrics.png
+  backtest_report_path: outputs/scenarios/train_2024_2025_trade_2026/backtest_report.json
+  backtest_trades_path: outputs/scenarios/train_2024_2025_trade_2026/backtest_trades.csv
+  backtest_equity_plot_path: outputs/scenarios/train_2024_2025_trade_2026/backtest_equity.png
+  backtest_trades_plot_path: outputs/scenarios/train_2024_2025_trade_2026/backtest_trades.png
+  walkforward_report_path: outputs/scenarios/train_2024_2025_trade_2026/walkforward_report.json
+  walkforward_trades_path: outputs/scenarios/train_2024_2025_trade_2026/walkforward_trades.csv
+  paper_trade_log_path: outputs/scenarios/train_2024_2025_trade_2026/paper_trade_signals.csv
+  dashboard_host: 0.0.0.0
+  dashboard_port: 8501
+  log_level: INFO
+
+market:
+  symbol: XAUUSD
+  training_symbol: XAUUSD=X
+  training_data_source: csv_folder
+  live_data_source: mt5
+  csv_data_path: data/xauusd_m15.csv
+  csv_folder_path: src/xauusd_ai/real_data
+  csv_timeframe: M15
+  higher_timeframe: D1
+  mid_timeframe: H1
+  execution_timeframe: M15
+  bars:
+    D1: 1500
+    H1: 25000
+    M15: 100000
+  timezone: UTC
+
+strategy:
+  enabled:
+    ict: true
+    wyckoff: true
+    order_flow_proxy: true
+    rsi: true
+    macd: true
+    news_filter: true
+  rsi_period: 14
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  liquidity_lookback: 20
+  swing_lookback: 10
+  volatility_window: 20
+  signal_threshold: 0.55
+  sideways_volatility_threshold: 0.004
+  strong_volatility_threshold: 0.012
+  news_block_minutes: 30
+  rsi_long_threshold: 55
+  rsi_short_threshold: 45
+  ict_weight: 0.25
+  wyckoff_weight: 0.35
+  momentum_weight: 0.40
+  min_strategy_score: 0.3
+  sideway_min_strategy_score: 0.15
+  strong_volatility_min_strategy_score: 0.2
+  require_trend_alignment: false
+  blocked_hours_utc: [7, 10, 11, 22]
+  blocked_weekdays_utc: []
+  blocked_weekday_hours_utc:
+    Thursday: [0, 1, 4, 6, 8, 12, 23]
+    Tuesday: [16, 18]
+    Wednesday: [5, 8, 9]
+    Monday: [18]
+
+risk:
+  mode: fixed_fractional
+  risk_per_trade: 0.0065
+  max_open_positions: 1
+  stop_loss_atr_multiple: 1.8
+  take_profit_rr: 2.2
+  min_confidence: 0.55
+  fixed_lot: 0.01
+  max_risk_fraction: 0.011
+  sideway_risk_multiplier: 0.3
+  normal_risk_multiplier: 0.9
+  strong_volatility_risk_multiplier: 0.55
+
+execution:
+  auto_trade: false
+  deviation: 20
+  magic_number: 20260309
+  comment: xauusd-ai
+  paper_trade_max_loops: 1
+  paper_data_source: csv_folder
+
+training:
+  train_split: 0.75
+  train_start_date: 2024-01-01T00:00:00Z
+  train_end_date: 2025-12-31T23:59:59Z
+  test_start_date: 2026-01-01T00:00:00Z
+  test_end_date: 2026-12-31T23:59:59Z
+  label_horizon: 12
+  min_return_threshold: 0.0006
+  retrain_on_startup: true
+  save_dataset: true
+  dataset_path: outputs/scenarios/train_2024_2025_trade_2026/training_dataset.csv
+  optimize_threshold: true
+  validation_split: 0.15
+  threshold_min: 0.40
+  threshold_max: 0.80
+  threshold_step: 0.02
+  min_precision_floor: 0.42
+  walkforward_train_size: 22000
+  walkforward_test_size: 6000
+  walkforward_step_size: 6000
+  walkforward_ict_weights: [0.25, 0.35, 0.45]
+  walkforward_wyckoff_weights: [0.15, 0.25, 0.35]
+  walkforward_momentum_weights: [0.3, 0.4, 0.5]
+  walkforward_min_strategy_scores: [0.1, 0.2, 0.3]
+  walkforward_sideway_min_strategy_scores: [0.15, 0.25, 0.35]
+  walkforward_strong_volatility_min_strategy_scores: [0.15, 0.2, 0.3]
+  walkforward_min_confidences: [0.55, 0.58, 0.6]
+  walkforward_require_trend_alignment: [true, false]
+  walkforward_label_horizons: [6, 8, 12]
+  walkforward_return_thresholds: [0.0006, 0.0008, 0.001]
+  walkforward_max_combinations: 15
+  walkforward_max_avg_drawdown_pct: 18.0
+  walkforward_min_avg_profit_factor: 1.0
+  walkforward_min_avg_precision: 0.42
+  walkforward_min_avg_return_pct: 2.0
+  walkforward_min_avg_trades: 25.0
+
+notifications:
+  telegram_enabled: false
+  verbose_message: true
+
+integrations:
+  mt5:
+    enabled: true
+    login_env: MT5_LOGIN
+    password_env: MT5_PASSWORD
+    server_env: MT5_SERVER
+  telegram:
+    token_env: TELEGRAM_BOT_TOKEN
+    chat_id_env: TELEGRAM_CHAT_ID
+  news:
+    enabled: false
+    provider: stub

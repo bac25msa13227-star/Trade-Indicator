@@ -1,0 +1,182 @@
+Metadata-Version: 2.4
+Name: xauusd-ai
+Version: 0.1.0
+Summary: Configurable AI-assisted XAUUSD trading system with MT5 integration
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: pandas>=2.2.3
+Requires-Dist: numpy>=1.26.4
+Requires-Dist: scikit-learn>=1.5.2
+Requires-Dist: PyYAML>=6.0.2
+Requires-Dist: pydantic>=2.9.2
+Requires-Dist: requests>=2.32.3
+Requires-Dist: matplotlib>=3.9.2
+Requires-Dist: python-dotenv>=1.0.1
+Requires-Dist: yfinance>=0.2.54
+Requires-Dist: streamlit>=1.41.1
+
+# XAUUSD AI Trading System
+
+AI trading project for XAUUSD with configurable multi-timeframe analysis, hybrid rule-based strategy logic, ML scoring, Telegram alerts, and optional MetaTrader 5 auto-execution.
+
+## Scope
+
+This project is designed around these goals:
+
+- Combine ICT-style structure, Wyckoff-inspired accumulation/distribution logic, and order-flow proxies.
+- Use RSI and MACD as confirmation filters.
+- Analyze Daily, Hourly, and Minute timeframes before issuing a trade decision.
+- Adapt behavior to ranging and high-volatility conditions.
+- Ingest market data continuously and retrain the model.
+- Send signals to Telegram and optionally place orders in MT5.
+- Keep all trading behavior configurable through YAML.
+
+## Important constraints
+
+- True Bookmap or level-2 order book features require a compatible live data feed. This repository includes a pluggable order-flow adapter and a candle-volume fallback proxy.
+- News handling is implemented as a filter interface. You can connect a real economic calendar API later.
+- No trading strategy can guarantee profit. Start in paper trading or demo mode.
+- Docker training/backtesting uses Yahoo Finance `XAUUSD=X` by default as a spot-style proxy. You can also switch to `csv` and point to your own broker-exported XAUUSD file.
+
+## Project structure
+
+```text
+src/xauusd_ai/
+  config.py
+  main.py
+  data/
+  execution/
+  features/
+  model/
+  notifications/
+  strategies/
+  visualization/
+configs/
+  settings.example.yaml
+outputs/
+```
+
+## Quick start
+
+1. Create a Python 3.11+ environment.
+2. Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+3. Copy config:
+
+```bash
+cp configs/settings.example.yaml configs/settings.yaml
+cp .env.example .env
+```
+
+4. Fill in your MT5 and Telegram settings.
+5. Train the model:
+
+```bash
+python -m xauusd_ai.main train --config configs/settings.yaml
+```
+
+6. Run signal loop:
+
+```bash
+python -m xauusd_ai.main live --config configs/settings.yaml
+```
+
+## Docker workflow
+
+The project is designed to run through Docker.
+
+1. Prepare config and secrets:
+
+```bash
+cp .env.example .env
+cp configs/settings.example.yaml configs/settings.yaml
+```
+
+2. Build image:
+
+```bash
+docker compose build
+```
+
+3. Train model inside container:
+
+```bash
+docker compose run --rm trainer
+```
+
+4. Run live loop inside container:
+
+```bash
+docker compose run --rm live
+```
+
+Notes:
+
+- Training and backtesting in Docker use Yahoo Finance by default, specifically `GC=F` gold futures as the closest widely available proxy feed.
+- `MetaTrader5` inside Docker often depends on host-specific terminal access. For live execution on macOS, the common practical pattern is to keep MT5 terminal running on Windows or a VPS and run this service there, or expose execution through a bridge service.
+- If you have a broker feed or CSV export for spot XAUUSD, replace the training source with that feed for closer alignment.
+
+## Main commands
+
+- `train`: fetch data, build features, train model, save artifacts, export charts.
+- `backtest`: run a simple walk-forward backtest on the prepared dataset.
+- `walkforward`: search a compact parameter grid on rolling folds of real data.
+- `paper`: log paper-trade signals without sending live orders.
+- `live`: poll market data, score trades, send Telegram messages, optionally execute through MT5.
+
+## CSV data source
+
+If you have broker-exported XAUUSD spot data, set:
+
+```yaml
+market:
+  training_data_source: csv
+  csv_data_path: data/xauusd_m15.csv
+  csv_timeframe: M15
+```
+
+Expected CSV columns:
+
+- `time`
+- `open`
+- `high`
+- `low`
+- `close`
+- optional `tick_volume`
+- optional `spread_points`
+
+## Backtest outputs
+
+After running backtest, inspect these artifacts:
+
+- `outputs/backtest_report.json`
+- `outputs/backtest_trades.csv`
+- `outputs/backtest_equity.png`
+- `outputs/backtest_trades.png`
+
+## Additional outputs
+
+- `outputs/walkforward_report.json`
+- `outputs/walkforward_trades.csv`
+- `outputs/paper_trade_signals.csv`
+
+## Dashboard
+
+Run the lightweight dashboard with:
+
+```bash
+docker compose up dashboard
+```
+
+Then open `http://localhost:8501`.
+
+## Suggested next integrations
+
+- Economic news API such as Forex Factory-compatible scraper or paid calendar provider.
+- Real order-book or DOM feed.
+- Broker-specific risk controls.
+- More robust walk-forward optimization and experiment tracking.

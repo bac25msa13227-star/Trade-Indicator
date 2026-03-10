@@ -1,0 +1,47 @@
+services:
+  trainer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        INSTALL_DASHBOARD: "false"
+    image: xauusd-ai-core:latest
+    env_file:
+      - .env
+    volumes:
+      - ./configs:/app/configs
+      - ./outputs:/app/outputs
+      - ./src:/app/src
+    command: ["python", "-m", "xauusd_ai.main", "train", "--config", "configs/settings.yaml"]
+
+  live:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        INSTALL_DASHBOARD: "false"
+    image: xauusd-ai-core:latest
+    env_file:
+      - .env
+    volumes:
+      - ./configs:/app/configs
+      - ./outputs:/app/outputs
+      - ./src:/app/src
+    command: ["python", "-m", "xauusd_ai.main", "live", "--config", "configs/settings.yaml"]
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        INSTALL_DASHBOARD: "true"
+    image: xauusd-ai-dashboard:latest
+    env_file:
+      - .env
+    volumes:
+      - ./configs:/app/configs
+      - ./outputs:/app/outputs
+      - ./src:/app/src
+    ports:
+      - "8501:8501"
+    command: ["streamlit", "run", "src/xauusd_ai/dashboard/app.py", "--server.address=0.0.0.0", "--server.port=8501"]
