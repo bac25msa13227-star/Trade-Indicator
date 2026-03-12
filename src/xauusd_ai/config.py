@@ -94,6 +94,27 @@ class RiskSettings(BaseModel):
     strong_volatility_risk_multiplier: float = 0.75
 
 
+class TrailingSlSettings(BaseModel):
+    """Diịch SL động theo giá để bảo vệ lợi nhuậnChức năng:
+      1. Breakeven: chuyển SL về hoà vốn sau breakeven_at_rr R lợi nhuận
+      2. Trail: diời SL theo giá sau activation_rr R lợi nhuận
+    """
+    enabled: bool = False
+    breakeven_at_rr: float = 0.5       # Chuyển SL về entry sau 0.5R lợi nhuận
+    activation_rr: float = 1.0         # Bắt đầu trail SL sau 1R lợi nhuận
+    trail_atr_multiple: float = 1.0    # Trail distance = N × ATR
+
+
+class DcaSettings(BaseModel):
+    """Dollar Cost Averaging — mở thêm lệnh khi giá đi ngược chiều.
+    Cảnh báo: DCA tăng exposure, dùng thận trọng."""
+    enabled: bool = False
+    max_dca_count: int = 2             # Tối đa 2 lần DCA mỗi lệnh
+    trigger_atr_multiple: float = 1.5  # DCA khi giá đi ngược N × ATR
+    lot_multiplier: float = 1.5        # Lot DCA = lot trước × multiplier
+    max_total_risk_pct: float = 0.03   # Tổng risk tối đa 3% balance (an toàn)
+
+
 class ExecutionSettings(BaseModel):
     auto_trade: bool = False
     deviation: int = 20
@@ -101,6 +122,8 @@ class ExecutionSettings(BaseModel):
     comment: str = "xauusd-ai"
     paper_trade_max_loops: int = 1
     paper_data_source: str = "csv_folder"
+    trailing_sl: TrailingSlSettings = Field(default_factory=TrailingSlSettings)
+    dca: DcaSettings = Field(default_factory=DcaSettings)
 
 
 class TrainingSettings(BaseModel):
@@ -163,7 +186,14 @@ class TelegramIntegrationSettings(BaseModel):
 
 class NewsIntegrationSettings(BaseModel):
     enabled: bool = False
-    provider: str = "stub"
+    provider: str = "forexfactory"   # "forexfactory" | "stub"
+    cache_hours: int = 6             # Tự động refresh cache sau N giờ
+    trade_before_news: bool = False  # True = cho phép trade trước tin (scalp)
+    trade_after_news: bool = False   # True = cho phép trade sau tin (breakout)
+    minutes_before: int = 30         # Block N phút trước tin
+    minutes_after: int = 30          # Block N phút sau tin
+    high_impact_only: bool = True    # Chỉ filter tin High Impact
+    currencies: list[str] = Field(default_factory=lambda: ["USD"])  # Tiền tệ liên quan
 
 
 class IntegrationSettings(BaseModel):

@@ -11,6 +11,11 @@ cloudflared.exe
 
 # Debug / scratch files
 debug_signal.py
+pip_err.txt
+pip_out.txt
 
 # egg-info (auto-generated, no need to track)
 src/*.egg-info/
+
+# Backup files
+*.bak

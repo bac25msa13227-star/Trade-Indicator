@@ -19,6 +19,8 @@ src/xauusd_ai/execution/mt5_executor.py
 src/xauusd_ai/execution/risk.py
 src/xauusd_ai/features/dataset.py
 src/xauusd_ai/features/indicators.py
+src/xauusd_ai/learning/__init__.py
+src/xauusd_ai/learning/self_learner.py
 src/xauusd_ai/model/trainer.py
 src/xauusd_ai/notifications/telegram.py
 src/xauusd_ai/strategies/hybrid.py

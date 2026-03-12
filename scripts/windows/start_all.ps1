@@ -1,10 +1,63 @@
 # ============================================================
-# start_all.ps1 — Khoi dong tat ca: Bot + Dashboard + Tunnel
-# Chay script nay mot lan de co moi thu hoat dong
+# start_all.ps1 — Khoi dong: Live Bot + Dashboard
 # ============================================================
 
-$Root     = "f:\Trading_BOT_AUTO\Trade-Indicator"
-$Python   = Join-Path $Root ".venv\Scripts\python.exe"
+$pypath = "$env:LOCALAPPDATA\Programs\Python\Python312"
+$env:PATH = "$pypath;$pypath\Scripts;" + [System.Environment]::GetEnvironmentVariable("PATH","Machine")
+
+$Root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+Set-Location $Root
+
+function Test-Port($port) {
+    $conn = New-Object System.Net.Sockets.TcpClient
+    try { $conn.Connect("127.0.0.1", $port); $conn.Close(); return $true }
+    catch { return $false }
+}
+
+Write-Host ""
+Write-Host "================================================" -ForegroundColor Cyan
+Write-Host "  XAUUSD AI Bot - Khoi dong he thong" -ForegroundColor Cyan
+Write-Host "================================================" -ForegroundColor Cyan
+
+# ── 1. Kill tien trinh cu ────────────────────────────────
+Write-Host "`n[1/3] Don dep tien trinh cu..." -ForegroundColor Yellow
+Get-Process -Name python -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 2
+Write-Host "      Done." -ForegroundColor Green
+
+# ── 2. Khoi dong Live Bot ────────────────────────────────
+Write-Host "`n[2/3] Khoi dong Live Bot..." -ForegroundColor Yellow
+$botProc = Start-Process -FilePath "python" `
+    -ArgumentList "src/xauusd_ai/main.py live --config configs/settings.yaml" `
+    -WorkingDirectory $Root -NoNewWindow -PassThru
+Start-Sleep -Seconds 3
+if (Get-Process -Id $botProc.Id -ErrorAction SilentlyContinue) {
+    Write-Host "      Live Bot dang chay: PID $($botProc.Id)" -ForegroundColor Green
+} else {
+    Write-Host "      [WARN] Bot co the da crash. Kiem tra log." -ForegroundColor Red
+}
+
+# ── 3. Khoi dong Dashboard ───────────────────────────────
+Write-Host "`n[3/3] Khoi dong Dashboard (port 8501)..." -ForegroundColor Yellow
+$dashProc = Start-Process -FilePath "python" `
+    -ArgumentList "-m streamlit run src/xauusd_ai/dashboard/app.py --server.port 8501 --server.headless true" `
+    -WorkingDirectory $Root -NoNewWindow -PassThru
+$waited = 0
+while (-not (Test-Port 8501) -and $waited -lt 20) { Start-Sleep -Seconds 1; $waited++ }
+if (Test-Port 8501) {
+    Write-Host "      Dashboard: http://localhost:8501  (PID $($dashProc.Id))" -ForegroundColor Green
+} else {
+    Write-Host "      [WARN] Dashboard chua san sang." -ForegroundColor Red
+}
+
+Write-Host ""
+Write-Host "================================================" -ForegroundColor Cyan
+Write-Host "  Tat ca da khoi dong!" -ForegroundColor Green
+Write-Host "  Dashboard : http://localhost:8501" -ForegroundColor Green
+Write-Host "================================================" -ForegroundColor Cyan
+
+# Mo browser
+Start-Process "http://localhost:8501"
 $CFExe    = Join-Path $Root "cloudflared.exe"
 $OutDir   = Join-Path $Root "outputs"
 $UrlFile  = Join-Path $OutDir "tunnel_url.txt"

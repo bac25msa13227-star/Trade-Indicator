@@ -72,17 +72,19 @@ class MarketDataService:
     def _initialize_mt5(self) -> None:
         if mt5 is None:
             raise RuntimeError("MetaTrader5 package is not installed in this environment")
-        if not mt5.initialize():
-            raise RuntimeError(f"MT5 initialize failed: {mt5.last_error()}")
 
         if self.settings.integrations.mt5.enabled:
             login = os.getenv(self.settings.integrations.mt5.login_env)
             password = os.getenv(self.settings.integrations.mt5.password_env)
             server = os.getenv(self.settings.integrations.mt5.server_env)
             if login and password and server:
-                authorized = mt5.login(login=int(login), password=password, server=server)
-                if not authorized:
-                    raise RuntimeError(f"MT5 login failed: {mt5.last_error()}")
+                # Truyền credentials trực tiếp vào initialize() để lấy được historical data
+                if not mt5.initialize(login=int(login), password=password, server=server):
+                    raise RuntimeError(f"MT5 initialize failed: {mt5.last_error()}")
+                return
+
+        if not mt5.initialize():
+            raise RuntimeError(f"MT5 initialize failed: {mt5.last_error()}")
 
     def _fetch_rates_mt5(self, timeframe_name: str, bars: int) -> pd.DataFrame:
         self._initialize_mt5()
@@ -97,7 +99,14 @@ class MarketDataService:
         }
         timeframe = mt5_timeframe_map[timeframe_name]
         mt5.symbol_select(self.settings.market.symbol, True)
-        rates = mt5.copy_rates_from_pos(self.settings.market.symbol, timeframe, 0, bars)
+        # Retry — MT5 cần thời gian download history sau khi khởi động lần đầu
+        rates = None
+        for _attempt in range(30):  # 30 × 3s = tối đa 90 giây
+            rates = mt5.copy_rates_from_pos(self.settings.market.symbol, timeframe, 0, bars)
+            if rates is not None and len(rates) > 0:
+                break
+            import time as _time
+            _time.sleep(3)
         if rates is None or len(rates) == 0:
             raise RuntimeError(f"No rates returned for {self.settings.market.symbol} {timeframe_name}")
 
@@ -272,7 +281,7 @@ class MarketDataService:
         ).fillna(0)
         return result
 
-    def fetch_multi_timeframe_data(self, source: str | None = None) -> dict[str, pd.DataFrame]:
+    def fetch_multi_timeframe_data(self, source: str | None = None, all_bars: bool = False) -> dict[str, pd.DataFrame]:
         frames: dict[str, pd.DataFrame] = {}
         required = {
             self.settings.market.higher_timeframe,
@@ -281,7 +290,8 @@ class MarketDataService:
         }
         resolved_source = source or self.settings.market.live_data_source
         for timeframe_name in required:
-            bars = self.settings.market.bars[timeframe_name]
+            # all_bars=True dùng cho training — load toàn bộ CSV không giới hạn
+            bars = 999_999_999 if all_bars else self.settings.market.bars[timeframe_name]
             frames[timeframe_name] = self._fetch_rates(timeframe_name, bars, resolved_source)
         return frames
 

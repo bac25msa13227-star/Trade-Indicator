@@ -15,6 +15,7 @@ from xauusd_ai.data.market_data import MarketDataService
 from xauusd_ai.execution.mt5_executor import MT5Executor
 from xauusd_ai.execution.risk import RiskManager
 from xauusd_ai.features.dataset import build_live_feature_frame, prepare_training_dataset
+from xauusd_ai.learning.self_learner import SelfLearner
 from xauusd_ai.model.trainer import ModelTrainer
 from xauusd_ai.notifications.telegram import TelegramNotifier
 from xauusd_ai.strategies.hybrid import HybridStrategy
@@ -41,6 +42,14 @@ def _bootstrap(settings: Settings) -> tuple[MarketDataService, ModelTrainer, Hyb
     executor = MT5Executor(settings)
     risk_manager = RiskManager(settings)
     return data_service, trainer, strategy, notifier, executor, risk_manager
+
+
+def _bootstrap_with_learner(
+    settings: Settings,
+) -> tuple[MarketDataService, ModelTrainer, HybridStrategy, TelegramNotifier, MT5Executor, RiskManager, SelfLearner]:
+    data_service, trainer, strategy, notifier, executor, risk_manager = _bootstrap(settings)
+    self_learner = SelfLearner(settings, trainer, strategy)
+    return data_service, trainer, strategy, notifier, executor, risk_manager, self_learner
 
 
 def _write_training_outputs(settings: Settings, dataset: pd.DataFrame, metrics: dict[str, float]) -> None:
@@ -70,7 +79,7 @@ def _log_live_learning_event(settings: Settings, event: dict[str, object]) -> No
 
 def run_training(settings: Settings) -> None:
     data_service, trainer, strategy, _, _, _ = _bootstrap(settings)
-    frames = data_service.fetch_multi_timeframe_data(source=settings.market.training_data_source)
+    frames = data_service.fetch_multi_timeframe_data(source=settings.market.training_data_source, all_bars=True)
     _, metrics = _train_on_frames(settings, trainer, strategy, frames)
 
     LOGGER.info("Training complete: %s", metrics)
@@ -78,7 +87,7 @@ def run_training(settings: Settings) -> None:
 
 def run_backtest(settings: Settings) -> None:
     data_service, trainer, strategy, _, _, risk_manager = _bootstrap(settings)
-    frames = data_service.fetch_multi_timeframe_data(source=settings.market.training_data_source)
+    frames = data_service.fetch_multi_timeframe_data(source=settings.market.training_data_source, all_bars=True)
     dataset = prepare_training_dataset(settings, frames, strategy)
     metrics = trainer.train(dataset)
     predictions = trainer.predict_dataset(dataset)
@@ -365,12 +374,37 @@ def run_paper_trade_loop(settings: Settings) -> None:
 
 
 def run_live_loop(settings: Settings) -> None:
-    data_service, trainer, strategy, notifier, executor, risk_manager = _bootstrap(settings)
+    data_service, trainer, strategy, notifier, executor, risk_manager, self_learner = _bootstrap_with_learner(settings)
     model_ready = trainer.load_artifacts()
     if settings.training.retrain_on_startup or not model_ready:
         LOGGER.info("Training artifacts missing or retrain enabled, starting training")
         run_training(settings)
         trainer.load_artifacts()
+
+    # ── Khởi tạo News Crawler (nếu bật) ──────────────────────────────────────
+    news_crawler = None
+    if settings.integrations.news.enabled:
+        try:
+            from xauusd_ai.data.news_crawler import NewsCrawler
+            news_crawler = NewsCrawler(settings)
+            LOGGER.info("NewsCrawler initialized")
+        except Exception as news_init_err:
+            LOGGER.warning("NewsCrawler init failed: %s", news_init_err)
+
+    # ── DCA state: track số lần DCA đã thực hiện per ticket ──────────────────
+    _dca_state_path = Path("outputs/dca_state.json")
+
+    def _load_dca_state() -> dict[str, int]:
+        if _dca_state_path.exists():
+            try:
+                return json.loads(_dca_state_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        return {}
+
+    def _save_dca_state(state: dict) -> None:
+        _dca_state_path.parent.mkdir(parents=True, exist_ok=True)
+        _dca_state_path.write_text(json.dumps(state), encoding="utf-8")
 
     last_seen_bar_time: pd.Timestamp | None = None
     accumulated_new_bars = 0
@@ -386,35 +420,169 @@ def run_live_loop(settings: Settings) -> None:
                 accumulated_new_bars += int((execution_frame["time"] > last_seen_bar_time).sum())
                 last_seen_bar_time = latest_bar_time
 
+            # ── Lấy thông tin tài khoản ────────────────────────────────────
+            account_info = executor.get_account_info()
+            account_balance = account_info.get("balance", 0.0)
+            open_positions = executor.get_open_positions_count(
+                magic_number=settings.execution.magic_number
+            )
+
+            # ── Self-learning ─────────────────────────────────────────────
             if settings.training.live_learning_enabled and accumulated_new_bars >= settings.training.live_learning_min_new_bars:
-                dataset, metrics = _train_on_frames(settings, trainer, strategy, frames)
+                learn_result = self_learner.maybe_retrain(frames)
                 accumulated_new_bars = 0
-                learning_event = {
-                    "event": "live_retrain",
-                    "timestamp": latest_bar_time.isoformat(),
-                    "rows": len(dataset),
-                    "train_rows": int(metrics.get("train_rows", 0)),
-                    "test_rows": int(metrics.get("test_rows", 0)),
-                    "selected_threshold": metrics.get("selected_threshold"),
-                    "precision": metrics.get("precision"),
-                    "recall": metrics.get("recall"),
-                    "f1": metrics.get("f1"),
-                }
-                if len(dataset) >= settings.training.live_learning_min_rows:
-                    _log_live_learning_event(settings, learning_event)
-                    LOGGER.info("Live learning retrain complete: %s", learning_event)
-                else:
-                    LOGGER.info("Live learning skipped due to insufficient rows: %s", len(dataset))
+                if learn_result:
+                    trainer.load_artifacts()
+                    LOGGER.info("Self-learning complete: %s", learn_result)
 
+            # ── Build live feature frame (cần ATR cho Trailing SL + DCA) ──
             live_frame = build_live_feature_frame(settings, frames, strategy)
-            signal = trainer.score_live_row(live_frame)
-            decision = strategy.build_trade_decision(frames, live_frame.iloc[-1], signal)
             latest_row = live_frame.iloc[-1]
+            volatility_regime = int(latest_row["volatility_regime"]) if "volatility_regime" in latest_row.index else 1
+            atr_value = float(latest_row["atr"]) if "atr" in latest_row.index else 0.0
 
-            # Log every tick to paper_trade_log for dashboard visibility
+            # ── Trailing SL — dịch SL các lệnh đang mở ────────────────────
+            if settings.execution.trailing_sl.enabled and settings.execution.auto_trade and atr_value > 0:
+                try:
+                    open_pos_list = executor.get_open_positions(
+                        magic_number=settings.execution.magic_number
+                    )
+                    for pos in open_pos_list:
+                        new_sl = risk_manager.compute_trailing_sl(pos, atr_value)
+                        if new_sl is not None:
+                            executor.modify_position_sl(pos["ticket"], new_sl)
+                            LOGGER.info(
+                                "TrailingSL: ticket=%d %s old_sl=%.2f → new_sl=%.2f | price=%.2f R=%.2f",
+                                pos["ticket"], pos["side"],
+                                pos["sl"], new_sl, pos["current_price"],
+                                (pos["current_price"] - pos["open_price"]) / (atr_value * settings.risk.stop_loss_atr_multiple)
+                                if pos["side"] == "buy" else
+                                (pos["open_price"] - pos["current_price"]) / (atr_value * settings.risk.stop_loss_atr_multiple),
+                            )
+                except Exception as trail_err:
+                    LOGGER.error("TrailingSL error: %s", trail_err)
+
+            # ── DCA — thêm lệnh khi giá đi ngược ─────────────────────────
+            if settings.execution.dca.enabled and settings.execution.auto_trade and atr_value > 0:
+                try:
+                    dca_state = _load_dca_state()
+                    open_pos_list_dca = executor.get_open_positions(
+                        magic_number=settings.execution.magic_number
+                    )
+                    total_lots = sum(p["volume"] for p in open_pos_list_dca)
+                    dca_changed = False
+                    for pos in open_pos_list_dca:
+                        ticket_str = str(pos["ticket"])
+                        dca_count = dca_state.get(ticket_str, 0)
+                        if risk_manager.should_dca(pos, atr_value, dca_count, account_balance, total_lots):
+                            dca_plan = risk_manager.build_dca_plan(pos, atr_value, dca_count, account_balance)
+                            dca_result = executor.place_order(dca_plan)
+                            dca_state[ticket_str] = dca_count + 1
+                            total_lots += dca_plan.volume
+                            dca_changed = True
+                            LOGGER.info(
+                                "DCA#%d placed: ticket=%d lot=%.2f | %s",
+                                dca_count + 1, pos["ticket"], dca_plan.volume, dca_result,
+                            )
+                            notifier.send_signal(
+                                strategy.build_trade_decision.__class__(
+                                    should_trade=True, side=dca_plan.side,
+                                    confidence=0.0, reason=dca_plan.reason,
+                                    entry_price=dca_plan.entry_price,
+                                    stop_loss=dca_plan.stop_loss,
+                                    take_profit=dca_plan.take_profit,
+                                ) if False else
+                                type("_D", (), {
+                                    "should_trade": True, "side": dca_plan.side,
+                                    "confidence": 0.0, "reason": dca_plan.reason,
+                                    "entry_price": dca_plan.entry_price,
+                                    "stop_loss": dca_plan.stop_loss,
+                                    "take_profit": dca_plan.take_profit,
+                                })(),
+                                dca_plan,
+                            )
+                    # Xóa state của lệnh đã đóng
+                    open_tickets = {str(p["ticket"]) for p in open_pos_list_dca}
+                    dca_state = {k: v for k, v in dca_state.items() if k in open_tickets}
+                    if dca_changed:
+                        _save_dca_state(dca_state)
+                except Exception as dca_err:
+                    LOGGER.error("DCA error: %s", dca_err)
+
+            # ── Refresh news cache mỗi news.cache_hours giờ ───────────────
+            if news_crawler is not None:
+                try:
+                    news_crawler._load_or_fetch()
+                except Exception:
+                    pass
+
+            # ── Tính signal và decision ───────────────────────────────────
+            signal = trainer.score_live_row(live_frame)
+            decision = strategy.build_trade_decision(frames, latest_row, signal)
+
+            # ── News filter ───────────────────────────────────────────────
+            if decision.should_trade and news_crawler is not None:
+                import datetime as _dt
+                now_utc = _dt.datetime.now(_dt.timezone.utc)
+                news_cfg = settings.integrations.news
+                is_near, news_reason, is_before = news_crawler.is_near_news(
+                    now=now_utc,
+                    minutes_before=news_cfg.minutes_before,
+                    minutes_after=news_cfg.minutes_after,
+                    currencies=news_cfg.currencies,
+                    high_impact_only=news_cfg.high_impact_only,
+                )
+                if is_near:
+                    block = (is_before and not news_cfg.trade_before_news) or \
+                            (not is_before and not news_cfg.trade_after_news)
+                    if block:
+                        LOGGER.info("NEWS BLOCK: %s", news_reason)
+                        decision = decision.__class__(
+                            should_trade=False,
+                            side="flat",
+                            confidence=decision.confidence,
+                            reason=f"NEWS BLOCK: {news_reason}",
+                            entry_price=decision.entry_price,
+                            stop_loss=decision.stop_loss,
+                            take_profit=decision.take_profit,
+                        )
+                    else:
+                        LOGGER.info("NEWS TRADE allowed: trade_before=%s trade_after=%s | %s",
+                                    news_cfg.trade_before_news, news_cfg.trade_after_news, news_reason)
+
+            # ── Position gate ─────────────────────────────────────────────
+            position_allowed, position_reason = risk_manager.can_open_position(
+                account_balance, open_positions, volatility_regime
+            )
+            max_allowed = risk_manager.get_dynamic_max_positions(account_balance, volatility_regime)
+
+            if decision.should_trade and not position_allowed:
+                LOGGER.warning(
+                    "Position gate BLOCKED: %s | balance=%.2f open=%d max=%d",
+                    position_reason, account_balance, open_positions, max_allowed,
+                )
+                decision = decision.__class__(
+                    should_trade=False,
+                    side="flat",
+                    confidence=decision.confidence,
+                    reason=position_reason,
+                    entry_price=decision.entry_price,
+                    stop_loss=decision.stop_loss,
+                    take_profit=decision.take_profit,
+                )
+
+            # ── Build order plan với dynamic lot size ─────────────────────────
+            order_plan = risk_manager.build_order_plan(
+                decision,
+                frames[settings.market.execution_timeframe].iloc[-1],
+                account_balance=account_balance if account_balance > 0 else None,
+                current_open_positions=open_positions,
+                volatility_regime=volatility_regime,
+            )
+
+            # ── Log tín hiệu cho dashboard ────────────────────────────────────
             log_path = Path(settings.app.paper_trade_log_path)
             log_path.parent.mkdir(parents=True, exist_ok=True)
-            order_plan = risk_manager.build_order_plan(decision, frames[settings.market.execution_timeframe].iloc[-1])
             signal_row = pd.DataFrame([{
                 "time": str(latest_bar_time),
                 "should_trade": decision.should_trade,
@@ -424,24 +592,37 @@ def run_live_loop(settings: Settings) -> None:
                 "entry_price": order_plan.entry_price,
                 "stop_loss": order_plan.stop_loss,
                 "take_profit": order_plan.take_profit,
+                "volume": order_plan.volume,
                 "strategy_score": float(latest_row["strategy_score"]) if "strategy_score" in latest_row.index else 0.0,
-                "volatility_regime": int(latest_row["volatility_regime"]) if "volatility_regime" in latest_row.index else 1,
+                "volatility_regime": volatility_regime,
+                "account_balance": account_balance,
+                "open_positions": open_positions,
+                "max_positions": max_allowed,
             }])
             if log_path.exists():
                 signal_row.to_csv(log_path, mode="a", header=False, index=False)
             else:
                 signal_row.to_csv(log_path, index=False)
 
+            # ── Đặt lệnh thật ─────────────────────────────────────────────────
             if decision.should_trade:
                 notifier.send_signal(decision, order_plan)
                 if settings.execution.auto_trade:
                     try:
                         result = executor.place_order(order_plan)
-                        LOGGER.info("MT5 order placed: %s", result)
+                        LOGGER.info(
+                            "MT5 order placed: side=%s lot=%.2f bal=%.2f open=%d/%d | %s",
+                            order_plan.side, order_plan.volume,
+                            account_balance, open_positions + 1, max_allowed,
+                            result,
+                        )
                     except Exception as order_err:
-                        LOGGER.error("MT5 order failed (auto_trade skipped): %s", order_err)
+                        LOGGER.error("MT5 order failed: %s", order_err)
             else:
-                LOGGER.info("No trade: %s", decision.reason)
+                LOGGER.info(
+                    "No trade: %s | bal=%.2f open=%d/%d atr=%.2f",
+                    decision.reason, account_balance, open_positions, max_allowed, atr_value,
+                )
 
         except Exception as loop_err:
             LOGGER.error("Live loop error (will retry in %ss): %s", settings.app.poll_seconds, loop_err, exc_info=True)

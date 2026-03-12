@@ -13,7 +13,8 @@ Requires-Dist: requests>=2.32.3
 Requires-Dist: matplotlib>=3.9.2
 Requires-Dist: python-dotenv>=1.0.1
 Requires-Dist: yfinance>=0.2.54
-Requires-Dist: streamlit>=1.41.1
+Provides-Extra: dashboard
+Requires-Dist: streamlit>=1.41.1; extra == "dashboard"
 
 # XAUUSD AI Trading System
 
@@ -99,7 +100,13 @@ cp configs/settings.example.yaml configs/settings.yaml
 2. Build image:
 
 ```bash
-docker compose build
+docker compose build trainer live
+```
+
+Build dashboard only when needed:
+
+```bash
+docker compose build dashboard
 ```
 
 3. Train model inside container:
@@ -119,6 +126,7 @@ Notes:
 - Training and backtesting in Docker use Yahoo Finance by default, specifically `GC=F` gold futures as the closest widely available proxy feed.
 - `MetaTrader5` inside Docker often depends on host-specific terminal access. For live execution on macOS, the common practical pattern is to keep MT5 terminal running on Windows or a VPS and run this service there, or expose execution through a bridge service.
 - If you have a broker feed or CSV export for spot XAUUSD, replace the training source with that feed for closer alignment.
+- `trainer` and `live` now use a lighter core image. `dashboard` is built separately so `streamlit` does not slow every build.
 
 ## Main commands
 
@@ -127,6 +135,7 @@ Notes:
 - `walkforward`: search a compact parameter grid on rolling folds of real data.
 - `paper`: log paper-trade signals without sending live orders.
 - `live`: poll market data, score trades, send Telegram messages, optionally execute through MT5.
+- `mt5-check`: verify MT5 package, terminal login, symbol visibility, and tick access before turning on auto trade.
 
 ## CSV data source
 
@@ -169,10 +178,114 @@ After running backtest, inspect these artifacts:
 Run the lightweight dashboard with:
 
 ```bash
+docker compose build dashboard
 docker compose up dashboard
 ```
 
 Then open `http://localhost:8501`.
+
+## MT5 auto trade
+
+The current codebase is ready to auto trade through MT5, but the runtime must be a machine where the official `MetaTrader5` Python package is actually available.
+
+Important practical note:
+
+- On this macOS environment, `pip install MetaTrader5` fails with `No matching distribution found for MetaTrader5`.
+- In practice, you should run live execution on Windows or a Windows VPS where MT5 terminal is installed and logged into your broker account.
+
+Recommended setup:
+
+1. Use a Windows machine or VPS.
+2. Install MetaTrader 5 terminal and log into the broker account manually.
+3. Copy this project to that machine.
+4. Create `.env` from `.env.example` and fill:
+
+```bash
+MT5_LOGIN=...
+MT5_PASSWORD=...
+MT5_SERVER=...
+```
+
+5. Install dependencies there, including `MetaTrader5`.
+6. Use the live config in `configs/live_mt5.yaml`.
+7. Verify connection before trading:
+
+```bash
+python -m xauusd_ai.main mt5-check --config configs/live_mt5.yaml
+```
+
+8. If the check passes, start the live loop:
+
+```bash
+python -m xauusd_ai.main live --config configs/live_mt5.yaml
+```
+
+Online learning during auto trade:
+
+- `configs/live_mt5.yaml` now enables `training.live_learning_enabled: true`.
+- While the bot is running live, it keeps pulling fresh MT5 bars as usual.
+- After `training.live_learning_min_new_bars` new execution bars arrive, it retrains on the refreshed MT5 multi-timeframe window and keeps trading with the updated model.
+- Each retrain event is appended to `app.live_learning_log_path`, defaulting to `outputs/live_learning_log.jsonl`.
+
+Safety checklist:
+
+- Keep `execution.auto_trade: false` until `mt5-check` succeeds.
+- Start with a demo MT5 account first.
+- Confirm the broker symbol matches `market.symbol` exactly, for example `XAUUSD`, `XAUUSDm`, or broker-specific suffixes.
+- Confirm the MT5 terminal has the symbol visible in Market Watch.
+- Run the strategy on the same machine as MT5 terminal whenever possible.
+
+## Push To Git, Run On Windows
+
+If you want to push this repository to Git and run it on Windows for MT5 auto trade, use this workflow:
+
+1. Push the repository as-is, but do not commit `.env`, `outputs/`, or local virtual environments. `.gitignore` already excludes them.
+2. On the Windows machine or VPS, clone the repository.
+3. Open PowerShell in the project root.
+4. Run the bootstrap script:
+
+```powershell
+./scripts/windows/bootstrap.ps1
+```
+
+5. Edit `.env` and fill these values:
+
+```env
+MT5_LOGIN=your_account_login
+MT5_PASSWORD=your_account_password
+MT5_SERVER=your_broker_server
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+```
+
+6. Open the MetaTrader 5 terminal on that same Windows machine and log in manually.
+7. Make sure the broker symbol used by the account matches `market.symbol` in `configs/live_mt5.yaml`.
+8. Verify connection:
+
+```powershell
+./scripts/windows/mt5-check.ps1
+```
+
+9. If the check succeeds, start auto trade:
+
+```powershell
+./scripts/windows/live.ps1
+```
+
+Files to use on Windows:
+
+- `configs/live_mt5.yaml`: live auto-trading config.
+- `requirements-windows.txt`: installs the normal project dependencies plus `MetaTrader5`.
+- `scripts/windows/bootstrap.ps1`: creates venv and installs dependencies.
+- `scripts/windows/mt5-check.ps1`: validates MT5 package, terminal, account login, and symbol access.
+- `scripts/windows/live.ps1`: starts the live trading loop.
+
+Recommended git practice:
+
+- Commit `configs/live_mt5.yaml`, `.env.example`, the PowerShell scripts, and source code.
+- Do not commit `.env`.
+- Do not commit `outputs/`.
+- Do not commit `.venv/` or `.venv2/`.
 
 ## Suggested next integrations
 
