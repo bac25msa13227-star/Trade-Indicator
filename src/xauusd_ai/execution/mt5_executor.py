@@ -211,3 +211,58 @@ class MT5Executor:
             )
 
         raise RuntimeError(f"MT5 order_send failed after all filling modes: {last_error}")
+
+    def get_recently_closed_positions(
+        self,
+        since_epoch: float,
+        magic_number: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Lấy danh sách các lệnh đã đóng kể từ `since_epoch` (Unix timestamp).
+        Trả về list dict gồm: ticket, side, volume, open_price, close_price,
+        profit, swap, commission, open_time, close_time, comment.
+        Lệnh thua: profit + swap + commission < 0.
+        """
+        try:
+            self._ensure_connection()
+        except Exception:
+            return []
+        if mt5 is None:
+            return []
+
+        import datetime as _dt
+        from_dt = _dt.datetime.fromtimestamp(since_epoch, tz=_dt.timezone.utc)
+        to_dt = _dt.datetime.now(_dt.timezone.utc)
+
+        deals = mt5.history_deals_get(from_dt, to_dt)
+        if not deals:
+            return []
+
+        symbol = self.settings.market.symbol
+        result: list[dict[str, Any]] = []
+        for d in deals:
+            row = d._asdict()
+            if row.get("symbol") != symbol:
+                continue
+            if magic_number is not None and row.get("magic") != magic_number:
+                continue
+            # Chỉ lấy deal OUT (đóng lệnh), bỏ qua IN (mở lệnh) và BALANCE
+            entry = row.get("entry", -1)
+            if entry != 1:   # mt5.DEAL_ENTRY_OUT == 1
+                continue
+            result.append({
+                "ticket":      int(row.get("position_id", 0)),
+                "deal_ticket": int(row.get("ticket", 0)),
+                "side":        "buy" if row.get("type", 1) == 1 else "sell",  # DEAL_TYPE_BUY=0, SELL=1 → reversed for close
+                "volume":      float(row.get("volume", 0)),
+                "open_price":  float(row.get("price", 0)),  # close deal price; open_price from history_orders
+                "close_price": float(row.get("price", 0)),
+                "profit":      float(row.get("profit", 0)),
+                "swap":        float(row.get("swap", 0)),
+                "commission":  float(row.get("commission", 0)),
+                "open_time":   float(row.get("time_msc", 0)) / 1000,
+                "close_time":  float(row.get("time_msc", 0)) / 1000,
+                "comment":     str(row.get("comment", "")),
+                "reason":      int(row.get("reason", 0)),
+            })
+        return result

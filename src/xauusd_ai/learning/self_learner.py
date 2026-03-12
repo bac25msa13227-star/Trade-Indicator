@@ -7,6 +7,12 @@ Vòng lặp:
   3. Đánh giá model mới vs model cũ (precision, recall, roc_auc)
   4. Nếu model tốt hơn (hoặc chưa có model cũ) → lưu
   5. Ghi log sự kiện → dashboard đọc được
+
+Loss Learning (Phase 2):
+  - Mỗi khi phát hiện lệnh thua → phân tích nguyên nhân
+  - Log chi tiết features lúc vào lệnh vào outputs/loss_analysis.jsonl
+  - Sau mỗi K lệnh thua → trigger retrain với sample_weight tăng
+    cho các pattern tương tự → model học cẩn thận hơn
 """
 
 from __future__ import annotations
@@ -52,9 +58,14 @@ class SelfLearner:
         self._retrain_count: int = 0
         self._log_path = Path(settings.app.live_learning_log_path)
         self._log_path.parent.mkdir(parents=True, exist_ok=True)
+        self._loss_log_path = Path("outputs/loss_analysis.jsonl")
+        self._loss_log_path.parent.mkdir(parents=True, exist_ok=True)
         # Cache data đã tải
         self._cached_frames: dict[str, pd.DataFrame] = {}
         self._last_fetch_ts: float = 0.0
+        # Trạng thái loss learning
+        self._accumulated_losses: int = 0
+        self._loss_patterns: list[dict] = []  # features của các lệnh thua gần đây
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -223,4 +234,222 @@ class SelfLearner:
             "last_retrain": learn_events[-1]["timestamp"] if learn_events else None,
             "total_events": len(events),
             "recent_events": learn_events[-5:],
+        }
+
+    # ------------------------------------------------------------------
+    # Loss Learning — phân tích lệnh thua và học lại
+    # ------------------------------------------------------------------
+
+    # Số lệnh thua tích lũy trước khi trigger retrain (có thể ghi vào config sau)
+    LOSS_RETRAIN_THRESHOLD = 3
+
+    def analyze_loss(self, position: dict, live_row: "pd.Series") -> dict:
+        """
+        Phân tích tại sao lệnh bị thua.
+        Trả về dict mô tả nguyên nhân và các features lúc vào lệnh.
+        """
+        reasons: list[str] = []
+
+        side = position.get("side", "unknown")
+        profit = float(position.get("profit", 0))
+        swap = float(position.get("swap", 0))
+        commission = float(position.get("commission", 0))
+        net_pnl = profit + swap + commission
+
+        # --- Feature snapshot lúc vào lệnh (lấy từ live_row hiện tại) ---
+        strategy_score = float(getattr(live_row, "strategy_score", 0))
+        volatility_regime = int(getattr(live_row, "volatility_regime", 1))
+        rsi_val = float(getattr(live_row, "rsi", 50))
+        macd_hist = float(getattr(live_row, "macd_hist", 0))
+        atr_val = float(getattr(live_row, "atr", 0))
+        trend_alignment = int(getattr(live_row, "trend_alignment", 0))
+        hourly_bias = float(getattr(live_row, "hourly_bias", 0))
+        daily_bias = float(getattr(live_row, "daily_bias", 0))
+        liquidity_sweep = int(getattr(live_row, "liquidity_sweep", 0))
+        wyckoff_phase = int(getattr(live_row, "wyckoff_phase", 0))
+        order_flow_proxy = float(getattr(live_row, "order_flow_proxy", 0))
+
+        # --- Phân tích nguyên nhân ---
+        settings = self.settings
+
+        # 1. Momentum ngược chiều
+        if side == "buy" and macd_hist < 0:
+            reasons.append("MACD_HIST_NEGATIVE: momentum bán dù vào BUY")
+        if side == "sell" and macd_hist > 0:
+            reasons.append("MACD_HIST_POSITIVE: momentum mua dù vào SELL")
+
+        # 2. RSI vùng không thuận lợi
+        if side == "buy" and rsi_val > 70:
+            reasons.append(f"RSI_OVERBOUGHT: RSI={rsi_val:.1f} — mua ở đỉnh")
+        if side == "sell" and rsi_val < 30:
+            reasons.append(f"RSI_OVERSOLD: RSI={rsi_val:.1f} — bán ở đáy")
+
+        # 3. Trend không hỗ trợ
+        if side == "buy" and daily_bias < 0:
+            reasons.append("DAILY_BIAS_BEARISH: daily bias âm dù vào BUY")
+        if side == "sell" and daily_bias > 0:
+            reasons.append("DAILY_BIAS_BULLISH: daily bias dương dù vào SELL")
+        if trend_alignment != 1:
+            reasons.append(f"TREND_MISALIGNED: trend_alignment={trend_alignment}")
+
+        # 4. Volatility quá cao / quá thấp
+        if volatility_regime == 0:
+            reasons.append("REGIME_SIDEWAY: thị trường sideway — rủi ro whipsaw cao")
+        if volatility_regime == 2:
+            reasons.append("REGIME_STRONG_VOLATILE: volatility rất cao — spread rộng, SL dễ bị quét")
+
+        # 5. Wyckoff không hỗ trợ
+        if side == "buy" and wyckoff_phase == -1:
+            reasons.append("WYCKOFF_DISTRIBUTION: Wyckoff phase phân phối dù vào BUY")
+        if side == "sell" and wyckoff_phase == 1:
+            reasons.append("WYCKOFF_ACCUMULATION: Wyckoff phase tích lũy dù vào SELL")
+
+        # 6. Order flow không hỗ trợ
+        if side == "buy" and order_flow_proxy < -0.3:
+            reasons.append(f"ORDER_FLOW_SELL: order_flow_proxy={order_flow_proxy:.2f} nghiêng bán")
+        if side == "sell" and order_flow_proxy > 0.3:
+            reasons.append(f"ORDER_FLOW_BUY: order_flow_proxy={order_flow_proxy:.2f} nghiêng mua")
+
+        # 7. Strategy score yếu
+        req_score = settings.strategy.sideway_min_strategy_score if volatility_regime == 0 else settings.strategy.min_strategy_score
+        if abs(strategy_score) < req_score * 1.5:
+            reasons.append(f"WEAK_STRATEGY_SCORE: score={strategy_score:.3f} (ngưỡng={req_score:.2f}) — tín hiệu yếu")
+
+        if not reasons:
+            reasons.append("UNKNOWN: không xác định rõ nguyên nhân — có thể do thị trường đảo chiều đột ngột")
+
+        feature_snapshot = {
+            "strategy_score": round(strategy_score, 4),
+            "volatility_regime": volatility_regime,
+            "rsi": round(rsi_val, 2),
+            "macd_hist": round(macd_hist, 6),
+            "atr": round(atr_val, 2),
+            "trend_alignment": trend_alignment,
+            "hourly_bias": round(hourly_bias, 4),
+            "daily_bias": round(daily_bias, 4),
+            "liquidity_sweep": liquidity_sweep,
+            "wyckoff_phase": wyckoff_phase,
+            "order_flow_proxy": round(order_flow_proxy, 4),
+        }
+
+        return {
+            "reasons": reasons,
+            "features": feature_snapshot,
+            "net_pnl": round(net_pnl, 4),
+        }
+
+    def log_loss_analysis(self, position: dict, live_row: "pd.Series") -> dict:
+        """
+        Gọi analyze_loss() → ghi log vào outputs/loss_analysis.jsonl.
+        Trả về dict phân tích để orchestrator dùng tiếp.
+        """
+        analysis = self.analyze_loss(position, live_row)
+        event = {
+            "event": "loss_analysis",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "ticket": position.get("ticket"),
+            "side": position.get("side"),
+            "volume": position.get("volume"),
+            "profit": position.get("profit"),
+            "swap": position.get("swap"),
+            "commission": position.get("commission"),
+            "net_pnl": analysis["net_pnl"],
+            "reasons": analysis["reasons"],
+            "features": analysis["features"],
+        }
+        with self._loss_log_path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(event, default=str) + "\n")
+
+        reason_summary = " | ".join(analysis["reasons"])
+        LOGGER.warning(
+            "LOSS ANALYSIS ticket=%s side=%s net_pnl=%.2f | %s",
+            position.get("ticket"), position.get("side"),
+            analysis["net_pnl"], reason_summary,
+        )
+
+        # Lưu feature pattern để dùng cho retrain
+        self._loss_patterns.append(analysis["features"])
+        if len(self._loss_patterns) > 50:
+            self._loss_patterns = self._loss_patterns[-50:]
+
+        return analysis
+
+    def maybe_retrain_on_loss(self, frames: dict, loss_count: int) -> dict | None:
+        """
+        Trigger retrain có trọng số nếu tích lũy đủ LOSS_RETRAIN_THRESHOLD lệnh thua.
+        Upweight các sample tương tự pattern lệnh thua → model cẩn thận hơn.
+        """
+        if loss_count < self.LOSS_RETRAIN_THRESHOLD or not self._loss_patterns:
+            return None
+
+        from xauusd_ai.features.dataset import prepare_training_dataset
+
+        try:
+            frames = self._merge_with_cache(frames)
+            dataset = prepare_training_dataset(self.settings, frames, self.strategy)
+            if len(dataset) < self.settings.training.live_learning_min_rows:
+                return None
+
+            metrics = self.trainer.train_with_loss_weights(dataset, self._loss_patterns)
+            self._retrain_count += 1
+
+            roc_auc = float(metrics.get("roc_auc", 0.0))
+            if roc_auc >= self._best_roc_auc:
+                self._best_roc_auc = roc_auc
+                status = "loss_retrain_improved"
+            else:
+                status = "loss_retrain_no_improvement"
+
+            event = {
+                "event": "loss_retrain",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "retrain_count": self._retrain_count,
+                "triggered_by_losses": loss_count,
+                "loss_patterns_used": len(self._loss_patterns),
+                "dataset_rows": int(len(dataset)),
+                "roc_auc": round(roc_auc, 4),
+                "best_roc_auc": round(self._best_roc_auc, 4),
+                "precision": round(float(metrics.get("precision", 0)), 4),
+                "recall": round(float(metrics.get("recall", 0)), 4),
+                "f1": round(float(metrics.get("f1", 0)), 4),
+                "status": status,
+            }
+            self._log_event(event)
+            LOGGER.info(
+                "LossRetrain: %s | roc_auc=%.4f | losses=%d | patterns=%d",
+                status, roc_auc, loss_count, len(self._loss_patterns),
+            )
+            return event
+
+        except Exception as exc:
+            LOGGER.error("SelfLearner.maybe_retrain_on_loss error: %s", exc, exc_info=True)
+            return None
+
+    def get_loss_summary(self) -> dict:
+        """Tóm tắt thống kê lệnh thua để dashboard hiển thị."""
+        events: list[dict] = []
+        if self._loss_log_path.exists():
+            for line in self._loss_log_path.read_text(encoding="utf-8").splitlines():
+                try:
+                    events.append(json.loads(line))
+                except Exception:
+                    pass
+
+        if not events:
+            return {"total_losses": 0, "recent": []}
+
+        # Thống kê nguyên nhân phổ biến nhất
+        from collections import Counter
+        all_reasons: list[str] = []
+        for e in events:
+            all_reasons.extend(e.get("reasons", []))
+
+        reason_prefix = [r.split(":")[0] for r in all_reasons]
+        top_reasons = Counter(reason_prefix).most_common(5)
+
+        return {
+            "total_losses": len(events),
+            "top_reasons": top_reasons,
+            "recent": events[-5:],
+            "accumulated_pending": self._accumulated_losses,
         }

@@ -130,3 +130,77 @@ class ModelTrainer:
         probability = float(self.model.predict_proba(self.scaler.transform(latest))[:, 1][0])
         prediction = int(probability >= self.decision_threshold)
         return {"probability": probability, "prediction": prediction}
+
+    def train_with_loss_weights(
+        self,
+        dataset: pd.DataFrame,
+        loss_patterns: list[dict],
+        weight_factor: float = 2.5,
+    ) -> dict[str, float]:
+        """
+        Retrain với sample_weight tăng cho các hàng tương tự pattern lệnh thua.
+        Loss patterns: list[dict] với các key từ FEATURE_COLUMNS.
+        weight_factor: mức độ upweight (2.5 = các pattern thua nặng gấp 2.5×).
+
+        Cơ chế: tìm các hàng trong training set có volatility_regime + rsi_bucket + side_bias
+        giống pattern thua → upweight → model học cẩn thận hơn ở hoàn cảnh đó.
+        """
+        train_df = dataset[dataset["split"] == "train"].copy()
+        test_df = dataset[dataset["split"] == "test"]
+
+        if train_df.empty or not loss_patterns:
+            return self.train(dataset)
+
+        # --- Xây dựng sample_weight ---
+        weights = np.ones(len(train_df), dtype=float)
+
+        for pattern in loss_patterns:
+            regime = pattern.get("volatility_regime", -1)
+            rsi_p = pattern.get("rsi", 50.0)
+            score_p = pattern.get("strategy_score", 0.0)
+
+            # Tìm hàng có cùng regime VÀ RSI trong vùng ±10 VÀ strategy_score cùng dấu
+            regime_match = (train_df["volatility_regime"] == regime).values
+            rsi_match = (train_df["rsi"].between(rsi_p - 10, rsi_p + 10)).values
+            score_sign_match = (np.sign(train_df["strategy_score"].values) == np.sign(score_p))
+
+            similar_mask = regime_match & rsi_match & score_sign_match
+            weights[similar_mask] *= weight_factor
+
+        # Normalize để tổng weight không thay đổi tỷ lệ
+        weights = weights / weights.mean()
+
+        threshold = self.settings.strategy.signal_threshold
+        if self.settings.training.optimize_threshold and len(train_df) > 50:
+            threshold = self._optimize_threshold(train_df)
+        self.decision_threshold = threshold
+
+        x_train = self.scaler.fit_transform(train_df[FEATURE_COLUMNS])
+        y_train = train_df["target"]
+        x_test = self.scaler.transform(test_df[FEATURE_COLUMNS])
+        y_test = test_df["target"]
+
+        # Fit với sample_weight
+        self.model.fit(x_train, y_train, sample_weight=weights)
+
+        probabilities = self.model.predict_proba(x_test)[:, 1]
+        predictions = (probabilities >= self.decision_threshold).astype(int)
+
+        from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
+        metrics = {
+            "train_rows": float(len(train_df)),
+            "test_rows": float(len(test_df)),
+            "positive_rate_train": float(y_train.mean()),
+            "positive_rate_test": float(y_test.mean()),
+            "selected_threshold": float(self.decision_threshold),
+            "accuracy": float(accuracy_score(y_test, predictions)),
+            "precision": float(precision_score(y_test, predictions, zero_division=0)),
+            "recall": float(recall_score(y_test, predictions, zero_division=0)),
+            "f1": float(f1_score(y_test, predictions, zero_division=0)),
+            "roc_auc": float(roc_auc_score(y_test, probabilities)) if y_test.nunique() > 1 else 0.5,
+            "loss_weighted": True,
+            "loss_patterns_count": len(loss_patterns),
+            "upweighted_samples": int(weights[weights > 1.0].sum()),
+        }
+        self._save_artifacts()
+        return metrics

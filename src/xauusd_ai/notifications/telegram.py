@@ -36,3 +36,20 @@ class TelegramNotifier:
             json={"chat_id": chat_id, "text": message},
             timeout=10,
         )
+
+    def send_message(self, text: str) -> None:
+        """Gửi tin nhắn tùy ý qua Telegram (dùng cho cảnh báo, loss analysis, v.v.)."""
+        if not self.settings.notifications.telegram_enabled:
+            return
+        token = os.getenv(self.settings.integrations.telegram.token_env)
+        chat_id = os.getenv(self.settings.integrations.telegram.chat_id_env)
+        if not token or not chat_id:
+            return
+        try:
+            requests.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
+                timeout=10,
+            )
+        except Exception:
+            pass

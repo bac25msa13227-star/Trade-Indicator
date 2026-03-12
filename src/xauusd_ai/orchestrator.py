@@ -408,6 +408,10 @@ def run_live_loop(settings: Settings) -> None:
 
     last_seen_bar_time: pd.Timestamp | None = None
     accumulated_new_bars = 0
+    # ── Loss learning state ───────────────────────────────────────────────────
+    _last_closed_check_epoch: float = time.time()          # Thời điểm kiểm tra lần cuối
+    _known_loss_tickets: set[int] = set()                  # Ticket đã phân tích rồi
+    _accumulated_losses: int = 0                           # Số lệnh thua kể từ lần retrain cuối
 
     while True:
         try:
@@ -440,6 +444,58 @@ def run_live_loop(settings: Settings) -> None:
             latest_row = live_frame.iloc[-1]
             volatility_regime = int(latest_row["volatility_regime"]) if "volatility_regime" in latest_row.index else 1
             atr_value = float(latest_row["atr"]) if "atr" in latest_row.index else 0.0
+
+            # ── Loss Learning — phát hiện và phân tích lệnh thua ─────────────
+            if settings.execution.auto_trade:
+                try:
+                    now_epoch = time.time()
+                    closed = executor.get_recently_closed_positions(
+                        since_epoch=_last_closed_check_epoch - 60,  # buffer 60s
+                        magic_number=settings.execution.magic_number,
+                    )
+                    _last_closed_check_epoch = now_epoch
+                    for pos in closed:
+                        ticket = pos.get("ticket", 0)
+                        pnl = pos.get("profit", 0) + pos.get("swap", 0) + pos.get("commission", 0)
+                        if ticket in _known_loss_tickets:
+                            continue
+                        _known_loss_tickets.add(ticket)
+                        if pnl < 0:
+                            _accumulated_losses += 1
+                            self_learner._accumulated_losses = _accumulated_losses
+                            analysis = self_learner.log_loss_analysis(pos, latest_row)
+                            reason_str = " | ".join(analysis.get("reasons", []))
+                            LOGGER.warning(
+                                "LOSS detected ticket=%d side=%s pnl=%.2f | %s",
+                                ticket, pos.get("side"), pnl, reason_str,
+                            )
+                            notifier.send_message(
+                                f"⚠️ Lệnh THUA #{ticket} ({pos.get('side','?').upper()}) "
+                                f"P&L={pnl:.2f}$\n"
+                                f"Nguyên nhân:\n" +
+                                "\n".join(f"• {r}" for r in analysis.get("reasons", []))
+                            )
+                        else:
+                            LOGGER.info("Position closed in profit: ticket=%d pnl=%.2f", ticket, pnl)
+
+                    # Trigger loss-retrain sau LOSS_RETRAIN_THRESHOLD lệnh thua
+                    if _accumulated_losses >= self_learner.LOSS_RETRAIN_THRESHOLD:
+                        LOGGER.info(
+                            "LossRetrain triggered after %d losses", _accumulated_losses
+                        )
+                        loss_result = self_learner.maybe_retrain_on_loss(frames, _accumulated_losses)
+                        if loss_result:
+                            trainer.load_artifacts()
+                            _accumulated_losses = 0
+                            self_learner._accumulated_losses = 0
+                            notifier.send_message(
+                                f"🔄 Model đã học lại sau {self_learner.LOSS_RETRAIN_THRESHOLD} lệnh thua\n"
+                                f"ROC-AUC: {loss_result.get('roc_auc', 0):.4f} | "
+                                f"Precision: {loss_result.get('precision', 0):.4f}\n"
+                                f"Status: {loss_result.get('status', '?')}"
+                            )
+                except Exception as loss_err:
+                    LOGGER.error("Loss learning error: %s", loss_err)
 
             # ── Trailing SL — dịch SL các lệnh đang mở ────────────────────
             if settings.execution.trailing_sl.enabled and settings.execution.auto_trade and atr_value > 0:
