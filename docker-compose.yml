@@ -1,6 +1,6 @@
 services:
 
-  # ── BACKEND: Training ─────────────────────────────────────────────────────
+  # ── BACKEND: Training (default config) ───────────────────────────────────
   # Chạy 1 lần để train model, sau đó thoát
   # Lệnh: docker compose up train --build
   train:
@@ -14,6 +14,21 @@ services:
       - ./outputs:/app/outputs        # model.pkl, reports lưu ra đây
       - ./src:/app/src                # hot-reload code khi dev
     command: ["python", "src/xauusd_ai/main.py", "train", "--config", "configs/settings.yaml"]
+
+  # ── BACKEND: Training ICT+Wyckoff (2022-2025 train / 2026 test) ──────────
+  # GradientBoosting + 26 features: RSI, MACD, Momentum + ICT + Wyckoff
+  # Lệnh: docker compose up train-ict --build
+  train-ict:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    image: xauusd-backend:latest
+    env_file: .env
+    volumes:
+      - ./configs:/app/configs
+      - ./outputs:/app/outputs
+      - ./src:/app/src
+    command: ["python", "src/xauusd_ai/main.py", "train", "--config", "configs/train_ict_wyckoff_2022_2026.yaml"]
 
   # ── BACKEND: Live Trading ─────────────────────────────────────────────────
   # Chạy liên tục, scan mỗi poll_seconds

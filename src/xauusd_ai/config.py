@@ -38,8 +38,9 @@ class MarketSettings(BaseModel):
     csv_timeframe: str = "M15"
     higher_timeframe: str = "D1"
     mid_timeframe: str = "H1"
+    structure_timeframe: str = "H4"      # ICT structure analysis timeframe
     execution_timeframe: str = "M15"
-    bars: dict[str, int] = Field(default_factory=lambda: {"D1": 400, "H1": 1000, "M15": 3000})
+    bars: dict[str, int] = Field(default_factory=lambda: {"D1": 400, "H1": 1000, "H4": 2000, "M15": 3000})
     timezone: str = "UTC"
 
 

@@ -1,12 +1,16 @@
-"""XAUUSD AI Bot — Comprehensive Live Dashboard v2.0
+"""XAUUSD AI Bot — Comprehensive Live Dashboard v3.0 ICT+Wyckoff
+
+Model: HistGradientBoostingClassifier, 28 features
+Features: D1(1) + H4(9: ICT) + H1(3: Wyckoff) + M15(15: execution)
+Threshold: 0.55 | Walk-Forward: 19 folds, precision avg 54.7%, AUC std 0.0123
 
 Tabs:
   1. Live Monitor        — Bot status, account overview, latest signal
-  2. Phan tich Chi tiet  — 6-step decision breakdown
+  2. Phan tich Chi tiet  — 6-step decision breakdown (ICT→Wyckoff→Execution)
   3. P&L & Von           — Equity curve, drawdown, win/loss streaks
-  4. Hoc Lien Tuc        — Learning cycle, ROC-AUC improvement
-  5. Backtest            — Historical backtest results
-  6. Walk-Forward        — Walk-forward fold analysis
+  4. Hoc Lien Tuc        — Learning cycle, ROC-AUC improvement, win/loss log
+  5. Backtest            — Historical backtest results (ICT+Wyckoff model)
+  6. Walk-Forward        — 19-fold walk-forward analysis
   7. Risk & Cai dat      — Lot calculator, position sizing
 """
 from __future__ import annotations
@@ -214,8 +218,42 @@ def load_learning_events() -> list[dict]:
     return events
 
 
+def load_wf_signals() -> pd.DataFrame:
+    """Load walk-forward signals from walk-forward analysis."""
+    path = OUTPUTS / "walkforward_signals_ict_wyckoff.csv"
+    if not path.exists():
+        return pd.DataFrame()
+    try:
+        df = pd.read_csv(path, on_bad_lines="skip")
+        if "time" in df.columns:
+            df["time"] = pd.to_datetime(df["time"], utc=True, errors="coerce")
+        return df
+    except Exception:
+        return pd.DataFrame()
+
+
+def load_win_loss_events() -> tuple[list[dict], list[dict]]:
+    """Load win/loss JSONL from walk-forward analysis."""
+    wins: list[dict] = []
+    losses: list[dict] = []
+    for path, store in [
+        (OUTPUTS / "win_analysis_walkforward.jsonl", wins),
+        (OUTPUTS / "loss_analysis_walkforward.jsonl", losses),
+    ]:
+        if path.exists():
+            for line in path.read_text(encoding="utf-8").splitlines():
+                try:
+                    store.append(json.loads(line))
+                except Exception:
+                    pass
+    return wins, losses
+
+
 def load_feature_importance() -> pd.DataFrame | None:
-    mp = OUTPUTS / "model.pkl"
+    # Try ICT+Wyckoff model first, fall back to legacy model
+    mp = OUTPUTS / "model_ict_wyckoff.pkl"
+    if not mp.exists():
+        mp = OUTPUTS / "model.pkl"
     if not mp.exists():
         return None
     try:
@@ -285,7 +323,7 @@ def summarize_daily(trades: pd.DataFrame):
 # PAGE CONFIG
 # =============================================================================
 st.set_page_config(
-    page_title="XAUUSD AI Bot Dashboard",
+    page_title="XAUUSD AI Bot — ICT+Wyckoff Dashboard",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -297,7 +335,7 @@ div[data-testid="metric-container"]{
     background:#1e1e2e;border-radius:8px;padding:10px 14px;border-left:3px solid #42a5f5}
 </style>""", unsafe_allow_html=True)
 
-st.title("📈 XAUUSD AI Bot — Live Dashboard v2")
+st.title("📈 XAUUSD AI Bot — ICT+Wyckoff Dashboard v3.0")
 
 _tunnel = OUTPUTS / "tunnel_url.txt"
 if _tunnel.exists():
@@ -330,13 +368,24 @@ if _HAS_AUTOREFRESH:
 ])
 
 # --- Shared data -------------------------------------------------------
-model_meta      = load_json(OUTPUTS / "model_meta.json")
-model_path      = OUTPUTS / "model.pkl"
+model_meta      = load_json(OUTPUTS / "model_meta_ict_wyckoff.json")
+if not model_meta:
+    model_meta  = load_json(OUTPUTS / "model_meta.json")  # fallback
+model_path      = OUTPUTS / "model_ict_wyckoff.pkl"
+if not model_path.exists():
+    model_path  = OUTPUTS / "model.pkl"  # fallback
 live_signals    = load_signals()
 learn_events    = load_learning_events()
-backtest_report = load_json(OUTPUTS / "backtest_report.json")
-training_report = load_json(OUTPUTS / "training_report.json")
-trades          = load_csv(OUTPUTS / "backtest_trades.csv")
+wf_win_events, wf_loss_events = load_win_loss_events()
+backtest_report = load_json(OUTPUTS / "backtest_report_ict_wyckoff.json")
+if not backtest_report:
+    backtest_report = load_json(OUTPUTS / "backtest_report.json")  # fallback
+training_report = load_json(OUTPUTS / "training_report_ict_wyckoff.json")
+if not training_report:
+    training_report = load_json(OUTPUTS / "training_report.json")  # fallback
+trades          = load_csv(OUTPUTS / "backtest_trades_ict_wyckoff.csv")
+if trades.empty:
+    trades      = load_csv(OUTPUTS / "backtest_trades.csv")  # fallback
 if not trades.empty and "time" in trades.columns:
     trades["time"] = pd.to_datetime(trades["time"], utc=True, errors="coerce")
     if "is_win" not in trades.columns and "pnl" in trades.columns:
@@ -358,9 +407,9 @@ with tab_live:
     with hdr_l:
         if model_path.exists():
             mtime = dt.datetime.fromtimestamp(model_path.stat().st_mtime)
-            st.success(f"✅ Model aktif — trained: **{mtime.strftime('%Y-%m-%d %H:%M:%S')}**")
+            st.success(f"✅ Model ICT+Wyckoff aktif — trained: **{mtime.strftime('%Y-%m-%d %H:%M:%S')}** | HistGBC 28 features")
         else:
-            st.error("❌ Model chua duoc train — chay `python main.py train` truoc")
+            st.error("❌ Model chua duoc train — chay `python -m xauusd_ai.main train --config configs/train_ict_wyckoff_2022_2026.yaml`")
     with hdr_r:
         if st.button("🔄 Lam moi"):
             st.rerun()
@@ -421,12 +470,24 @@ with tab_live:
 
     if model_meta:
         st.divider()
-        st.subheader("🧠 Model Performance")
+        st.subheader("🧠 Model Performance — ICT+Wyckoff HistGBC")
         mm1, mm2, mm3, mm4 = st.columns(4)
         mm1.metric("Threshold", f"{threshold_val:.2f}")
         mm2.metric("Precision", _pct(model_meta.get("precision")))
         mm3.metric("Recall",    _pct(model_meta.get("recall")))
         mm4.metric("F1 Score",  _pct(model_meta.get("f1")))
+        # Walk-Forward aggregate stats
+        _wf_agg = load_json(OUTPUTS / "walkforward_report_ict_wyckoff.json").get("aggregate", {})
+        if _wf_agg:
+            st.caption("📊 Walk-Forward (19 folds, 2022–2026)")
+            wm1, wm2, wm3, wm4 = st.columns(4)
+            wm1.metric("WF Avg AUC",      f"{_wf_agg.get('avg_roc_auc', 0):.4f}",
+                       delta=f"std={_wf_agg.get('std_roc_auc', 0):.4f}")
+            wm2.metric("WF Avg Precision", _pct(_wf_agg.get("avg_precision")),
+                       delta=f"range {_wf_agg.get('min_precision', 0):.2f}–{_wf_agg.get('max_precision', 0):.2f}")
+            wm3.metric("WF Signal Win Rate", _pct(_wf_agg.get("signal_win_rate")),
+                       delta=f"{_wf_agg.get('correct_signals', 0)}/{_wf_agg.get('total_signals', 0)} signals")
+            wm4.metric("WF Avg F1",        _pct(_wf_agg.get("avg_f1")))
 
     if not live_signals.empty and bool(live_signals.iloc[0].get("should_trade", False)):
         latest = live_signals.iloc[0]
@@ -490,7 +551,7 @@ with tab_analysis:
         st.divider()
 
         # 6-step flow
-        st.subheader("Luong ra quyet dinh — 6 buoc")
+        st.subheader("Luong ra quyet dinh — 6 buoc (ICT→Wyckoff→Execution)")
         fl, fr = st.columns([1, 1])
         with fl:
             ml_pass = conf >= threshold_val
@@ -571,15 +632,19 @@ with tab_analysis:
             )
 
         for cname, cweight, cdesc, ccond in [
-            ("ICT (Liquidity Sweep + Trend Bias)", "40%",
-             "Phat hien vung thanh khoan bi quet, kiem tra bias D1 va H1",
-             "liquidity_sweep=1 + trend bias cung chieu"),
-            ("Wyckoff (Phase Analysis)", "30%",
+            ("H4 ICT Structure (BOS/ChoCH/FVG/OB/Confluence)", "60% score weight",
+             "H4 timeframe: Break-of-Structure, Change-of-Character, Fair Value Gap, Order Block, "
+             "Displacement, Equal-High/Low, Market Structure Bias, ICT Confluence, Premium/Discount",
+             "h4_bos | h4_choch | h4_fvg | h4_order_block | h4_ict_confluence | h4_premium_discount"),
+            ("H1 Wyckoff Phase Analysis", "20% score weight",
+             "Hourly bias xac nhan, VSA (Volume Spread Analysis), Wyckoff Spring/Upthrust detection. "
              "Spring(1)=Bullish, Upthrust(-1)=Bearish, 0=Neutral",
-             "wyckoff_phase != 0"),
-            ("Momentum (RSI + MACD)", "30%",
-             "RSI>55 + MACD>0 = Bull | RSI<45 + MACD<0 = Bear",
-             "rsi_long=55, rsi_short=45"),
+             "wyckoff_spring_signal != 0 | vsa_signal != 0 | hourly_bias aligned"),
+            ("M15 Execution Signals (RSI/MACD/ATR/Momentum)", "20% score weight",
+             "M15 entry timing: RSI, MACD histogram, ATR ratio, range efficiency, liquidity sweep, "
+             "order flow proxy, volatility regime, session return, tick volume zscore, spread, "
+             "kill zone flag (London/NY open), Judas swing",
+             "rsi>55+macd>0=Bull | rsi<45+macd<0=Bear | kill_zone_flag=1"),
         ]:
             with st.expander(f"{cname} — {cweight}"):
                 st.markdown(f"**Mo ta:** {cdesc}")
@@ -634,9 +699,8 @@ with tab_analysis:
         st.divider()
         st.subheader("Luong quyet dinh day du")
         st.code(
-            f"Data: D1=500, H1=2000, M15=5000 bars\n"
-            f"=> Features: RSI, MACD, ATR, ICT, Wyckoff, Momentum\n"
-            f"=> ML probability = {conf:.1%}\n"
+                f"Data: D1=100, H4=200, H1=500, M15=300 bars\n"
+                f"=> 28 Features: D1(1) + H4(9:ICT) + H1(3:Wyckoff) + M15(15:execution)\n"
             f"   [{('PASS' if conf >= threshold_val else 'FAIL')}] >= {threshold_val:.0%}?\n"
             f"=> Time filter UTC {cur_hour:02d}\n"
             f"   [{('PASS' if not is_blocked_now else 'FAIL')}] not in {blocked_hours}?\n"
@@ -673,14 +737,58 @@ with tab_analysis:
 
         # Feature importance
         st.divider()
-        st.subheader("Feature Importance (Top 25 — Model Coefficients)")
+        st.subheader("28 Features — ICT+Wyckoff Model Map")
+        feat_map_l, feat_map_r = st.columns([1, 1])
+        with feat_map_l:
+            st.markdown("""
+**D1 (1 feature — Daily Bias)**
+- `daily_bias` — D1 trend direction
+
+**H4 (9 features — ICT Structure)**
+- `h4_bos` — Break of Structure
+- `h4_choch` — Change of Character
+- `h4_fvg` — Fair Value Gap
+- `h4_order_block` — Order Block presence
+- `h4_displacement` — Displacement candle
+- `h4_ehl` — Equal High/Low detection
+- `h4_market_structure_bias` — Bias score
+- `h4_ict_confluence` — ICT multi-factor confluence
+- `h4_premium_discount` — Premium/Discount zone
+
+**H1 (3 features — Wyckoff)**
+- `hourly_bias` — H1 directional bias
+- `vsa_signal` — Volume Spread Analysis
+- `wyckoff_spring_signal` — Spring/Upthrust detection
+""")
+        with feat_map_r:
+            st.markdown("""
+**M15 (15 features — Execution)**
+- `trend_alignment` — M15 trend vs H1
+- `rsi` — RSI(14)
+- `macd_hist` — MACD histogram
+- `atr_ratio` — ATR normalized
+- `range_efficiency` — Bar efficiency
+- `liquidity_sweep` — Liquidity level swept
+- `order_flow_proxy` — Order flow direction
+- `wyckoff_phase` — Wyckoff phase (accumulation/dist.)
+- `volatility_regime` — Sideways/Normal/Strong
+- `session_return` — Session price return
+- `tick_volume_zscore` — Volume Z-score
+- `spread_points` — Current spread
+- `strategy_score` — Combined ICT+Wyckoff+Mom score
+- `kill_zone_flag` — London/NY open active
+- `judas_swing_signal` — Fake move detection
+""")
+
+        st.divider()
+        st.subheader("Feature Importance (Top 25 — HistGBC)")
         fi_df = load_feature_importance()
         if fi_df is not None and not fi_df.empty:
             st.bar_chart(fi_df.set_index("feature")["importance"].sort_values(), height=400)
             st.dataframe(fi_df[["feature", "importance", "abs_importance"]].round(6),
                          use_container_width=True)
         else:
-            st.info("Chua load duoc model.pkl — can co model trained.")
+            st.info("Chua load duoc model_ict_wyckoff.pkl — can co model trained. Chay: python -m xauusd_ai.main train --config configs/train_ict_wyckoff_2022_2026.yaml")
 
 
 # =============================================================================
@@ -789,7 +897,7 @@ with tab_pnl:
                   if c in trades.columns]
         st.dataframe(trades[dcols].tail(200), use_container_width=True)
     else:
-        st.info("Chua co backtest data. Chay: python main.py backtest --config configs/settings.yaml")
+        st.info("Chua co backtest data. Chay: python scripts/backtest_ict_wyckoff.py")
 
     if not live_signals.empty and "account_balance" in live_signals.columns:
         st.divider()
@@ -808,7 +916,7 @@ with tab_pnl:
 # =============================================================================
 with tab_learning:
     st.header("🧠 Hoc Lien Tuc — Self-Learning Monitor")
-    st.caption("Bot tu retrain model khi co du du lieu moi, so sanh model moi vs cu, chi giu neu tot hon")
+    st.caption("Bot tu retrain HistGBC khi co du du lieu moi, so sanh model moi vs cu, chi giu neu tot hon — 28 features ICT+Wyckoff")
 
     # Learning cycle diagram
     st.subheader("Vong lap hoc lien tuc (Live Learning Cycle)")
@@ -825,7 +933,7 @@ with tab_learning:
         '<div style="color:#555;font-size:1.4rem;padding:0 4px">→</div>'
         '<div style="background:#4a148c22;border:1px solid #7b1fa2;border-radius:8px;padding:10px 14px;text-align:center;min-width:110px">'
         '<div style="font-size:1.2rem">🤖</div><div style="color:#ce93d8;font-weight:700;font-size:0.78rem">BUOC 3</div>'
-        '<div style="color:#fff;font-size:0.82rem">Retrain Model</div><div style="color:#888;font-size:0.7rem">LogisticRegression</div></div>'
+        '<div style="color:#fff;font-size:0.82rem">Retrain Model</div><div style="color:#888;font-size:0.7rem">HistGBC 28feat</div></div>'
         '<div style="color:#555;font-size:1.4rem;padding:0 4px">→</div>'
         '<div style="background:#e65100 22;border:1px solid #e65100;border-radius:8px;padding:10px 14px;text-align:center;min-width:110px">'
         '<div style="font-size:1.2rem">📊</div><div style="color:#ffba79;font-weight:700;font-size:0.78rem">BUOC 4</div>'
@@ -836,7 +944,7 @@ with tab_learning:
         '<div style="color:#fff;font-size:0.82rem">Deploy/Skip</div><div style="color:#888;font-size:0.7rem">Neu AUC tot hon</div></div>'
         '</div>'
         '<div style="color:#666;font-size:0.8rem;margin-top:12px;text-align:center">'
-        'Lap lai sau moi 12 nen M15 moi (= 3 gio giao dich). Data bo sung tu yfinance moi 1 gio.'
+        'Lap lai sau moi 12 nen M15 moi (= 3 gio giao dich). Data bo sung tu MT5 history + yfinance.'
         '</div></div>',
         unsafe_allow_html=True,
     )
@@ -904,38 +1012,99 @@ with tab_learning:
         )
 
     st.divider()
+    st.subheader("📊 Walk-Forward Signal Win/Loss Analysis")
+    st.caption("Du lieu tu 19 folds walk-forward (2022–2026) — log thang/thua theo tung tin hieu")
+    if wf_win_events or wf_loss_events:
+        n_wins   = len(wf_win_events)
+        n_losses = len(wf_loss_events)
+        n_total  = n_wins + n_losses
+        wl1, wl2, wl3, wl4 = st.columns(4)
+        wl_c = GREEN if n_wins / max(n_total, 1) >= 0.50 else AMBER
+        wl1.markdown(_card("Total Signals", f"{n_total:,}", "Walk-Forward 19 folds", BLUE), unsafe_allow_html=True)
+        wl2.markdown(_card("Correct (Win)", f"{n_wins:,}", f"{n_wins/max(n_total,1):.1%}", GREEN), unsafe_allow_html=True)
+        wl3.markdown(_card("Wrong (Loss)", f"{n_losses:,}", f"{n_losses/max(n_total,1):.1%}", RED), unsafe_allow_html=True)
+        wl4.markdown(_card("Win Rate WF", f"{n_wins/max(n_total,1):.1%}", "target >= 50%", wl_c), unsafe_allow_html=True)
+
+        if wf_win_events:
+            win_df  = pd.DataFrame(wf_win_events)
+            loss_df = pd.DataFrame(wf_loss_events) if wf_loss_events else pd.DataFrame()
+            st.markdown("**Phan phoi tin hieu thang/thua theo fold:**")
+            if "fold" in win_df.columns:
+                fold_wins   = win_df.groupby("fold").size().rename("Wins")
+                fold_losses = loss_df.groupby("fold").size().rename("Losses") if not loss_df.empty and "fold" in loss_df.columns else pd.Series(dtype=int, name="Losses")
+                fold_chart  = pd.concat([fold_wins, fold_losses], axis=1).fillna(0)
+                st.bar_chart(fold_chart, height=220)
+            if "confidence" in win_df.columns:
+                conf_cmp = pd.DataFrame({
+                    "Confidence — Win":  win_df["confidence"].dropna(),
+                    "Confidence — Loss": loss_df["confidence"].dropna() if not loss_df.empty and "confidence" in loss_df.columns else pd.Series(dtype=float),
+                })
+                w_l, w_r = st.columns(2)
+                with w_l:
+                    st.markdown("**Avg Confidence: Win vs Loss**")
+                    st.dataframe(pd.DataFrame({
+                        "Nhom": ["Wins (correct)", "Losses (wrong)"],
+                        "Count": [n_wins, n_losses],
+                        "Avg Confidence": [
+                            f"{win_df['confidence'].mean():.3f}" if "confidence" in win_df.columns else "n/a",
+                            f"{loss_df['confidence'].mean():.3f}" if not loss_df.empty and "confidence" in loss_df.columns else "n/a",
+                        ],
+                    }), use_container_width=True, hide_index=True)
+                with w_r:
+                    if "side" in win_df.columns:
+                        side_wr = pd.DataFrame({
+                            "Side": win_df["side"].dropna().value_counts().index.tolist(),
+                            "Wins": win_df["side"].dropna().value_counts().values.tolist(),
+                        })
+                        st.markdown("**Wins by Side:**")
+                        st.dataframe(side_wr, use_container_width=True, hide_index=True)
+    else:
+        st.info("Chua co win/loss log tu walk-forward. Chay `scripts/walkforward_ict_wyckoff.py` truoc.")
+
+    st.divider()
     st.subheader("Feature Importance — Dieu model dang hoc")
     fi_df = load_feature_importance()
     if fi_df is not None and not fi_df.empty:
-        pos = fi_df[fi_df["importance"] > 0].sort_values("importance", ascending=False).head(12)
-        neg = fi_df[fi_df["importance"] < 0].sort_values("importance").head(12)
+        # HistGBC uses feature_importances_, no negative coef → show top/bottom by abs
+        top_n = fi_df.head(15)
         fc1, fc2 = st.columns(2)
         with fc1:
-            st.markdown(f"**Top BUY signals (coef > 0) — {len(pos)} features:**")
-            if not pos.empty:
-                st.bar_chart(pos.set_index("feature")["importance"], height=300)
+            st.markdown(f"**Top 15 features quan trong nhat:**")
+            if not top_n.empty:
+                st.bar_chart(top_n.set_index("feature")["abs_importance"], height=320)
         with fc2:
-            st.markdown(f"**Top SELL signals (coef < 0) — {len(neg)} features:**")
-            if not neg.empty:
-                st.bar_chart(neg.set_index("feature")["importance"], height=300)
+            has_coef = fi_df["importance"].lt(0).any()
+            if has_coef:
+                neg = fi_df[fi_df["importance"] < 0].sort_values("importance").head(12)
+                st.markdown(f"**Top SELL signals (coef < 0) — {len(neg)} features:**")
+                if not neg.empty:
+                    st.bar_chart(neg.set_index("feature")["importance"], height=320)
+            else:
+                # HistGBC: show bottom 10 as least important
+                bot = fi_df.tail(10)
+                st.markdown("**10 features it quan trong nhat:**")
+                if not bot.empty:
+                    st.bar_chart(bot.set_index("feature")["abs_importance"], height=320)
         with st.expander("Bang day du feature importance"):
             st.dataframe(fi_df[["feature", "importance", "abs_importance"]].round(6),
                          use_container_width=True)
     else:
-        st.info("Chua co model. Chay training de xem feature importance.")
+        st.info("Chua co model. Chay: python -m xauusd_ai.main train --config configs/train_ict_wyckoff_2022_2026.yaml")
 
     st.divider()
     st.subheader("Cau hinh Self-Learning hien tai")
     st.code("""
-# settings.yaml
+# configs/train_ict_wyckoff_2022_2026.yaml
 training:
   live_learning_enabled: true          # Bat/tat tu hoc
   live_learning_min_new_bars: 12       # Toi thieu 12 nen M15 moi (3 gio)
   live_learning_min_rows: 1000         # Dataset toi thieu 1000 hang
   live_learning_interval_hours: 1      # Tan suat fetch yfinance
 
-# Nguon data bo sung: yfinance XAUUSD=X / GC=F / GLD
-# Gop voi data MT5 lich su -> dataset lon dan -> model hoc duoc nhieu hon
+# Model: HistGradientBoostingClassifier (max_iter=500, lr=0.05, depth=6, balanced)
+# 28 features: D1(1) + H4(9:ICT) + H1(3:Wyckoff) + M15(15:execution)
+# Walk-Forward: 19 folds, AUC avg=0.6415 (std=0.0123), Precision avg=54.7%
+# Signal threshold: 0.55 (saved in model_meta_ict_wyckoff.json)
 """, language="yaml")
 
 
@@ -943,7 +1112,7 @@ training:
 # TAB 5 — BACKTEST
 # =============================================================================
 with tab_backtest:
-    st.header("📊 Backtest Results")
+    st.header("📊 Backtest Results — ICT+Wyckoff Model")
 
     b1, b2, b3, b4 = st.columns(4)
     b1.metric("Return %",        backtest_report.get("return_pct", "n/a"))
@@ -990,9 +1159,9 @@ with tab_backtest:
             st.subheader("PnL Distribution")
             st.bar_chart(trades["pnl"].value_counts(bins=30).sort_index(), height=200)
 
-        with st.expander("Backtest Report JSON"):
+        with st.expander("Backtest Report JSON (ICT+Wyckoff)"):
             st.json(backtest_report)
-        with st.expander("Training Report JSON"):
+        with st.expander("Training Report JSON (ICT+Wyckoff)"):
             st.json(training_report)
 
         st.subheader("Trade List (tail 200)")
@@ -1008,35 +1177,165 @@ with tab_backtest:
 # TAB 6 — WALK-FORWARD
 # =============================================================================
 with tab_walkforward:
-    st.header("🔄 Walk-Forward Analysis")
-    wf_r = load_json(OUTPUTS / "walkforward_report.json")
-    wf_t = load_csv(OUTPUTS / "walkforward_trades.csv")
+    st.header("🔄 Walk-Forward Analysis — ICT+Wyckoff 19 Folds")
+    st.caption("Train=20,000 bars (~7 tháng) | Test=4,000 bars (~1.5 tháng) | Step=4,000 bars | 2022-10 → 2026-01")
+
+    wf_r = load_json(OUTPUTS / "walkforward_report_ict_wyckoff.json")
+    if not wf_r:
+        wf_r = load_json(OUTPUTS / "walkforward_report.json")  # fallback
 
     if wf_r:
+        agg = wf_r.get("aggregate", {})
+        wf_info = wf_r.get("walk_forward", {})
+
+        # ── Top-level aggregate metrics ──────────────────────────────────────
+        st.subheader("Tong ket Walk-Forward")
         wf1, wf2, wf3, wf4 = st.columns(4)
-        wf1.metric("Avg Return %",       wf_r.get("avg_return_pct",    "n/a"))
-        wf2.metric("Avg Profit Factor",  wf_r.get("avg_profit_factor", "n/a"))
-        wf3.metric("Avg Precision",      _pct(wf_r.get("avg_precision")))
-        wf4.metric("Avg Recall",         _pct(wf_r.get("avg_recall")))
+        auc_avg = agg.get("avg_roc_auc", 0)
+        auc_std = agg.get("std_roc_auc", 0)
+        auc_c = GREEN if auc_std < 0.04 else AMBER
+        wf1.markdown(_card("Avg ROC-AUC", f"{auc_avg:.4f}",
+                           f"std={auc_std:.4f} {'✅ on dinh' if auc_std < 0.04 else '⚠️ cao'}",
+                           auc_c), unsafe_allow_html=True)
 
-        wf5, wf6, wf7 = st.columns(3)
-        wf5.metric("Avg Drawdown %",   wf_r.get("avg_max_drawdown_pct", "n/a"))
-        wf6.metric("Avg Trades/Fold",  wf_r.get("avg_trades",           "n/a"))
-        wf7.metric("Fallback Used",    "Yes" if wf_r.get("fallback_used") else "No")
+        prec_avg = agg.get("avg_precision", 0)
+        prec_c = GREEN if prec_avg >= 0.52 else AMBER
+        wf2.markdown(_card("Avg Precision", f"{prec_avg:.1%}",
+                           f"range {agg.get('min_precision', 0):.2f}–{agg.get('max_precision', 0):.2f}",
+                           prec_c), unsafe_allow_html=True)
 
-        st.subheader("Best Params")
-        st.json(wf_r.get("params", {}))
-        if wf_r.get("folds"):
-            fd = pd.DataFrame(wf_r["folds"])
-            if "return_pct" in fd.columns:
-                st.bar_chart(fd.set_index("fold")["return_pct"])
-            st.dataframe(fd, use_container_width=True)
+        sig_wr = agg.get("signal_win_rate", 0)
+        sig_c = GREEN if sig_wr >= 0.50 else AMBER
+        wf3.markdown(_card("Signal Win Rate", f"{sig_wr:.1%}",
+                           f"{agg.get('correct_signals', 0):,} / {agg.get('total_signals', 0):,}",
+                           sig_c), unsafe_allow_html=True)
+
+        wf4.markdown(_card("Folds", f"{wf_info.get('n_folds', 'n/a')}",
+                           f"model: HistGBC 28 feat", BLUE), unsafe_allow_html=True)
+
+        wf5, wf6, wf7, wf8 = st.columns(4)
+        wf5.metric("Avg Precision",    _pct(agg.get("avg_precision")))
+        wf6.metric("Avg Recall",       _pct(agg.get("avg_recall")))
+        wf7.metric("Avg F1",           _pct(agg.get("avg_f1")))
+        wf8.metric("Avg Accuracy",     _pct(agg.get("avg_accuracy")))
+
+        wf9, wf10, wf11, wf12 = st.columns(4)
+        wf9.metric("AUC Min",          f"{agg.get('min_roc_auc', 0):.4f}")
+        wf10.metric("AUC Max",         f"{agg.get('max_roc_auc', 0):.4f}")
+        wf11.metric("Avg Signal Rate", _pct(agg.get("avg_signal_rate")))
+        n_prec50 = sum(1 for f in wf_r.get("folds", []) if f.get("precision", 0) >= 0.50)
+        wf12.metric("Folds prec ≥ 50%", f"{n_prec50} / {wf_info.get('n_folds', 0)}")
+
+        # ── Per-fold charts ──────────────────────────────────────────────────
+        folds = wf_r.get("folds", [])
+        if folds:
+            st.divider()
+            st.subheader("Ket qua tung fold")
+            fd = pd.DataFrame(folds)
+
+            # AUC + Precision line chart
+            chart_l, chart_r = st.columns(2)
+            with chart_l:
+                st.markdown("**ROC-AUC theo fold:**")
+                auc_df = fd.set_index("fold")[["roc_auc"]].copy()
+                auc_df["threshold_0.62"] = 0.62
+                st.line_chart(auc_df, height=220)
+            with chart_r:
+                st.markdown("**Precision theo fold:**")
+                prec_df = fd.set_index("fold")[["precision"]].copy()
+                prec_df["target_0.50"] = 0.50
+                prec_df["target_0.52"] = 0.52
+                st.line_chart(prec_df, height=220)
+
+            # Signals per fold
+            chart_l2, chart_r2 = st.columns(2)
+            with chart_l2:
+                st.markdown("**So tin hieu (n_signals) / fold:**")
+                if "n_signals" in fd.columns:
+                    st.bar_chart(fd.set_index("fold")["n_signals"], height=200)
+            with chart_r2:
+                st.markdown("**F1 Score theo fold:**")
+                if "f1" in fd.columns:
+                    st.bar_chart(fd.set_index("fold")["f1"], height=200)
+
+            # Fold table
+            st.divider()
+            st.subheader("Bang chi tiet 19 folds")
+            display_cols = [c for c in [
+                "fold", "test_start", "test_end", "threshold",
+                "roc_auc", "precision", "recall", "f1", "accuracy",
+                "n_signals", "signal_rate", "elapsed_s"
+            ] if c in fd.columns]
+
+            def _highlight_fold(row):
+                prec_ok = row.get("precision", 0) >= 0.50
+                auc_ok  = row.get("roc_auc", 0) >= 0.62
+                if prec_ok and auc_ok:
+                    return ["background-color: #1b3a1b"] * len(row)
+                elif prec_ok:
+                    return ["background-color: #1a2a0a"] * len(row)
+                else:
+                    return ["background-color: #2a1a1a"] * len(row)
+
+            styled = fd[display_cols].style.apply(_highlight_fold, axis=1).format({
+                "roc_auc":     "{:.4f}",
+                "precision":   "{:.4f}",
+                "recall":      "{:.4f}",
+                "f1":          "{:.4f}",
+                "accuracy":    "{:.4f}",
+                "signal_rate": "{:.3f}",
+                "threshold":   "{:.2f}",
+                "elapsed_s":   "{:.1f}",
+            }, na_rep="n/a")
+            st.dataframe(styled, use_container_width=True)
+            st.caption("Xanh dam: precision ≥ 50% & AUC ≥ 0.62 | Xanh nhat: precision ≥ 50% | Do: precision < 50%")
+
+        # ── Model info ───────────────────────────────────────────────────────
+        st.divider()
+        st.subheader("Thong tin Model Walk-Forward")
+        mi_l, mi_r = st.columns(2)
+        with mi_l:
+            st.json({
+                "model":       wf_info.get("model", "HistGBC"),
+                "train_bars":  wf_info.get("train_bars", 20000),
+                "test_bars":   wf_info.get("test_bars", 4000),
+                "step_bars":   wf_info.get("step_bars", 4000),
+                "n_folds":     wf_info.get("n_folds", 19),
+                "n_features":  len(wf_info.get("features", [])),
+            })
+        with mi_r:
+            feats = wf_info.get("features", [])
+            if feats:
+                st.markdown(f"**{len(feats)} Features:**")
+                grps = {
+                    "D1 (1)":  [f for f in feats if f.startswith("daily_")],
+                    "H4 (9)":  [f for f in feats if f.startswith("h4_")],
+                    "H1 (3)":  [f for f in feats if f in ("hourly_bias", "vsa_signal", "wyckoff_spring_signal")],
+                    "M15 (15)": [f for f in feats if f not in [x for g in [
+                        [f for f in feats if f.startswith("daily_")],
+                        [f for f in feats if f.startswith("h4_")],
+                        [f for f in feats if f in ("hourly_bias", "vsa_signal", "wyckoff_spring_signal")],
+                    ] for x in g]],
+                }
+                for grp, names in grps.items():
+                    if names:
+                        st.markdown(f"**{grp}:** `{'`, `'.join(names)}`")
+
+        # ── Walk-Forward signals CSV ─────────────────────────────────────────
+        wf_signals = load_wf_signals()
+        if not wf_signals.empty:
+            st.divider()
+            st.subheader(f"Walk-Forward Signals ({len(wf_signals):,} rows)")
+            disp_wf = [c for c in ["time", "fold", "side", "confidence", "predicted",
+                                    "actual", "correct", "strategy_score"] if c in wf_signals.columns]
+            st.dataframe(wf_signals[disp_wf].tail(200) if disp_wf else wf_signals.tail(200),
+                         use_container_width=True)
+
     else:
-        st.info("Chua co walk-forward data. Chay: python main.py walkforward --config configs/settings.yaml")
-
-    if not wf_t.empty:
-        st.subheader("Walk-Forward Trades")
-        st.dataframe(wf_t.tail(200), use_container_width=True)
+        st.info(
+            "Chua co walk-forward data. Chay:\n"
+            "```\npython scripts/walkforward_ict_wyckoff.py\n```"
+        )
 
 
 # =============================================================================

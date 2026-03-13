@@ -29,6 +29,7 @@ market:
   execution_timeframe: M15
   bars:
     D1: 500
+    H4: 1500
     H1: 2000
     M15: 5000
   timezone: UTC
@@ -165,7 +166,7 @@ integrations:
     token_env: TELEGRAM_BOT_TOKEN
     chat_id_env: TELEGRAM_CHAT_ID
   news:
-    enabled: false               # true = bật lịch tin tức
+    enabled: true                # true = bật lịch tin tức
     provider: forexfactory       # Nguồn: forexfactory JSON API (miễn phí)
     cache_hours: 6               # Tự động refresh cache sau 6 giờ
     trade_before_news: false     # false = block trade trước tin | true = cho scalp

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
 from sklearn.preprocessing import StandardScaler
 
@@ -17,7 +17,15 @@ from xauusd_ai.features.dataset import FEATURE_COLUMNS
 class ModelTrainer:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.model = LogisticRegression(max_iter=2000, class_weight="balanced")
+        self.model = HistGradientBoostingClassifier(
+            max_iter=500,
+            learning_rate=0.05,
+            max_depth=6,
+            min_samples_leaf=20,
+            class_weight="balanced",
+            early_stopping=False,
+            random_state=42,
+        )
         self.scaler = StandardScaler()
         self.decision_threshold = settings.strategy.signal_threshold
 
@@ -62,7 +70,11 @@ class ModelTrainer:
             return self.settings.strategy.signal_threshold
 
         local_scaler = StandardScaler()
-        local_model = LogisticRegression(max_iter=2000, class_weight="balanced")
+        local_model = HistGradientBoostingClassifier(
+            max_iter=200, learning_rate=0.1, max_depth=5,
+            min_samples_leaf=20, class_weight="balanced",
+            early_stopping=False, random_state=42,
+        )
         x_subtrain = local_scaler.fit_transform(subtrain_df[FEATURE_COLUMNS])
         y_subtrain = subtrain_df["target"]
         x_validation = local_scaler.transform(validation_df[FEATURE_COLUMNS])
@@ -76,16 +88,15 @@ class ModelTrainer:
             self.settings.training.threshold_step,
         )
         best_threshold = self.settings.strategy.signal_threshold
-        best_score = (-1.0, -1.0)
+        best_f1 = 0.0
         for candidate in candidates:
             predictions = (probabilities >= candidate).astype(int)
             precision = precision_score(y_validation, predictions, zero_division=0)
-            recall = recall_score(y_validation, predictions, zero_division=0)
             if precision < self.settings.training.min_precision_floor:
                 continue
-            score = (recall, precision)
-            if score > best_score:
-                best_score = score
+            f1_val = f1_score(y_validation, predictions, zero_division=0)
+            if f1_val > best_f1:
+                best_f1 = f1_val
                 best_threshold = float(candidate)
 
         return best_threshold

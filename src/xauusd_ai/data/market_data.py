@@ -286,6 +286,7 @@ class MarketDataService:
         required = {
             self.settings.market.higher_timeframe,
             self.settings.market.mid_timeframe,
+            self.settings.market.structure_timeframe,
             self.settings.market.execution_timeframe,
         }
         resolved_source = source or self.settings.market.live_data_source
