@@ -19,36 +19,70 @@ class SimulationResult:
 
 
 def simulate_prediction_backtest(predictions: pd.DataFrame, settings: Settings, risk_manager: RiskManager) -> SimulationResult:
-    test_rows = predictions[predictions["split"] == "test"].copy()
+    test_rows = predictions[predictions["split"] == "test"].copy().reset_index(drop=True)
     strategy = HybridStrategy(settings)
-    balance = 10000.0
+
+    # Start balance from configured account size (e.g. $100)
+    balance = settings.risk.account_balance
     peak_balance = balance
     wins = 0
     losses = 0
     trades: list[dict[str, object]] = []
     skipped_by_filters = 0
+    skipped_by_position_limit = 0
 
-    for row in test_rows.itertuples(index=False):
+    # Each entry: {"close_bar_idx": int, "risk_fraction": float}
+    # A position opened at bar idx expires (closes) at bar idx + label_horizon
+    open_positions: list[dict[str, object]] = []
+    max_concurrent_used = 0
+
+    for idx, row in enumerate(test_rows.itertuples(index=False)):
+        # Remove positions whose holding period has elapsed
+        open_positions = [p for p in open_positions if p["close_bar_idx"] > idx]
+
         if row.prediction == 0:
             continue
+
         allowed, reason = strategy.should_allow_row(row, float(row.probability))
         if not allowed:
             skipped_by_filters += 1
             continue
-        risk_fraction = risk_manager.risk_fraction(
-            float(row.probability),
-            int(getattr(row, "volatility_regime", 1)),
-            float(getattr(row, "strategy_score", 0.0)),
+
+        open_count = len(open_positions)
+        total_deployed_risk = sum(float(p["risk_fraction"]) for p in open_positions)
+
+        # Dynamic gate: model calculates if another position is safe right now
+        can_open, risk_fraction = risk_manager.can_open_position(
+            balance=balance,
+            open_positions_count=open_count,
+            total_deployed_risk_fraction=total_deployed_risk,
+            confidence=float(row.probability),
+            volatility_regime=int(getattr(row, "volatility_regime", 1)),
+            strategy_score=float(getattr(row, "strategy_score", 0.0)),
         )
+
+        if not can_open:
+            skipped_by_position_limit += 1
+            continue
+
+        # Register this position; it lives for label_horizon bars
+        open_positions.append({
+            "close_bar_idx": idx + settings.training.label_horizon,
+            "risk_fraction": risk_fraction,
+        })
+        max_concurrent_used = max(max_concurrent_used, len(open_positions))
+
         pnl = balance * risk_fraction * row.realized_rr
         balance_before = balance
         balance += pnl
         peak_balance = max(peak_balance, balance)
         drawdown = (balance - peak_balance) / peak_balance if peak_balance else 0.0
+
         if pnl >= 0:
             wins += 1
         else:
             losses += 1
+
         trades.append(
             {
                 "time": row.time.isoformat() if hasattr(row.time, "isoformat") else str(row.time),
@@ -60,6 +94,9 @@ def simulate_prediction_backtest(predictions: pd.DataFrame, settings: Settings, 
                 "realized_rr": float(row.realized_rr),
                 "probability": float(row.probability),
                 "risk_fraction": float(risk_fraction),
+                "concurrent_open_before": open_count,
+                "max_concurrent_allowed": risk_manager.calculate_max_concurrent_positions(balance),
+                "total_deployed_risk_before": round(total_deployed_risk, 6),
                 "pnl": float(pnl),
                 "balance_before": float(balance_before),
                 "balance_after": float(balance),
@@ -78,6 +115,7 @@ def simulate_prediction_backtest(predictions: pd.DataFrame, settings: Settings, 
     gross_loss = 0.0
     avg_win = 0.0
     avg_loss = 0.0
+    avg_concurrent = 0.0
     if not trades_df.empty:
         gross_profit = float(trades_df.loc[trades_df["pnl"] > 0, "pnl"].sum())
         gross_loss = float(-trades_df.loc[trades_df["pnl"] < 0, "pnl"].sum())
@@ -87,14 +125,16 @@ def simulate_prediction_backtest(predictions: pd.DataFrame, settings: Settings, 
         sharpe = float((trades_df["pnl"].mean() / pnl_std) * (len(trades_df) ** 0.5)) if pnl_std > 0 else 0.0
         avg_win = float(trades_df.loc[trades_df["pnl"] > 0, "pnl"].mean()) if wins > 0 else 0.0
         avg_loss = float(trades_df.loc[trades_df["pnl"] < 0, "pnl"].mean()) if losses > 0 else 0.0
+        avg_concurrent = float(trades_df["concurrent_open_before"].mean())
 
     report = {
-        "starting_balance": 10000.0,
+        "starting_balance": settings.risk.account_balance,
         "ending_balance": round(balance, 2),
-        "net_profit": round(balance - 10000.0, 2),
-        "return_pct": round((balance / 10000.0 - 1) * 100, 2),
+        "net_profit": round(balance - settings.risk.account_balance, 2),
+        "return_pct": round((balance / settings.risk.account_balance - 1) * 100, 2),
         "trades": len(trades),
         "signals_filtered_out": skipped_by_filters,
+        "skipped_by_position_limit": skipped_by_position_limit,
         "wins": wins,
         "losses": losses,
         "win_rate": round(wins / max(wins + losses, 1), 4),
@@ -108,6 +148,12 @@ def simulate_prediction_backtest(predictions: pd.DataFrame, settings: Settings, 
         "worst_trade": round(float(trades_df["pnl"].min()) if not trades_df.empty else 0.0, 2),
         "sharpe_like": round(sharpe, 4),
         "avg_holding_bars": round(avg_holding_bars, 2),
+        # Position management stats
+        "max_concurrent_positions_used": max_concurrent_used,
+        "avg_concurrent_positions": round(avg_concurrent, 2),
+        "dynamic_max_concurrent_cap": risk_manager.calculate_max_concurrent_positions(balance),
+        "risk_per_trade_pct": round(settings.risk.risk_per_trade * 100, 3),
+        "max_portfolio_risk_pct": round(settings.risk.max_portfolio_risk_fraction * 100, 2),
     }
     return SimulationResult(report=report, trades=trades_df)
 

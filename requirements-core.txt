@@ -7,3 +7,7 @@ requests>=2.32.3
 matplotlib>=3.9.2
 python-dotenv>=1.0.1
 yfinance>=0.2.54
+# News crawler dependencies
+beautifulsoup4>=4.12.3
+lxml>=5.2.0
+pytz>=2024.1

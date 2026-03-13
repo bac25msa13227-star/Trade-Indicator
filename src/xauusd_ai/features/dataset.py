@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
 from xauusd_ai.config import Settings
 from xauusd_ai.features.indicators import atr, macd, rsi, zscore
 
+LOGGER = logging.getLogger(__name__)
 
 FEATURE_COLUMNS = [
     "daily_bias",
@@ -23,7 +27,48 @@ FEATURE_COLUMNS = [
     "tick_volume_zscore",
     "spread_points",
     "strategy_score",
+    # ---- News features (5 columns added by NewsAnalyzer) ----
+    "news_impact_score",
+    "news_deviation_norm",
+    "news_gold_bias",
+    "news_in_window",
+    "news_upcoming_impact",
 ]
+
+
+def _load_news_df(settings: Settings) -> pd.DataFrame:
+    """Load the cached news CSV if the news module is enabled."""
+    if not settings.news.enabled:
+        return pd.DataFrame()
+    cache_path = Path(settings.news.cache_path)
+    if not cache_path.exists():
+        LOGGER.info(
+            "News cache not found at %s – news features will be zero. "
+            "Run: python -m xauusd_ai news-fetch --from 2023-01-01",
+            cache_path,
+        )
+        return pd.DataFrame()
+    try:
+        from xauusd_ai.news.crawler import ForexFactoryCrawler
+
+        crawler = ForexFactoryCrawler(cache_path=str(cache_path))
+        return crawler.load_as_dataframe()
+    except Exception as exc:  # noqa: BLE001
+        LOGGER.warning("Could not load news data: %s", exc)
+        return pd.DataFrame()
+
+
+def _attach_news_features(settings: Settings, frame: pd.DataFrame) -> pd.DataFrame:
+    """Merge NewsAnalyzer features into *frame* using cached news data."""
+    news_df = _load_news_df(settings)
+    from xauusd_ai.news.analyzer import NewsAnalyzer
+
+    analyzer = NewsAnalyzer(
+        pre_window_minutes=settings.news.pre_window_minutes,
+        post_window_minutes=settings.news.post_window_minutes,
+        upcoming_hours=settings.news.upcoming_hours,
+    )
+    return analyzer.build_features(frame, news_df)
 
 
 def _build_date_mask(series: pd.Series, start: str | None, end: str | None) -> pd.Series:
@@ -95,6 +140,8 @@ def _merge_context(settings: Settings, frames: dict[str, pd.DataFrame]) -> pd.Da
         [0, 2],
         default=1,
     )
+    # Attach news features (zeros when no cache exists)
+    merged = _attach_news_features(settings, merged)
     return merged
 
 

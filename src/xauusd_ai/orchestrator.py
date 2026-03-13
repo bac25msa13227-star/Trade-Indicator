@@ -4,6 +4,7 @@ import itertools
 import json
 import logging
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -320,10 +321,19 @@ def run_paper_trade_loop(settings: Settings) -> None:
         run_training(settings)
         trainer.load_artifacts()
 
+    notifier.send_startup()
+
     log_path = Path(settings.app.paper_trade_log_path)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     loops = 0
     last_logged_time: str | None = None
+    last_signal_side: str | None = None
+
+    LOGGER.info(
+        "Signal bot started. Balance=$%.0f  Risk=%.0f%%  Sending trades to Telegram.",
+        settings.risk.account_balance,
+        settings.risk.risk_per_trade * 100,
+    )
 
     while True:
         frames = data_service.fetch_multi_timeframe_data(source=settings.execution.paper_data_source)
@@ -354,9 +364,17 @@ def run_paper_trade_loop(settings: Settings) -> None:
                 signal_row.to_csv(log_path, mode="a", header=False, index=False)
             else:
                 signal_row.to_csv(log_path, index=False)
-            notifier.send_signal(decision, order_plan)
+
+            # Only send Telegram alert when there is an actual trade signal
+            # (avoids spamming with flat/no-signal bars)
+            if decision.should_trade and decision.side != last_signal_side:
+                notifier.send_signal(decision, order_plan)
+                last_signal_side = decision.side
+            elif not decision.should_trade:
+                last_signal_side = None  # reset so next signal of same side is sent
+
             last_logged_time = latest_time
-            LOGGER.info("Paper trade signal logged: %s", signal_row.to_dict(orient="records")[0])
+            LOGGER.info("Bar %s | side=%s | conf=%.2f | trade=%s", latest_time, decision.side, decision.confidence, decision.should_trade)
 
         loops += 1
         if settings.execution.paper_trade_max_loops > 0 and loops >= settings.execution.paper_trade_max_loops:
@@ -371,6 +389,17 @@ def run_live_loop(settings: Settings) -> None:
         LOGGER.info("Training artifacts missing or retrain enabled, starting training")
         run_training(settings)
         trainer.load_artifacts()
+
+    # Start the news scheduler in the background
+    news_scheduler = None
+    if settings.news.enabled:
+        try:
+            from xauusd_ai.news.scheduler import create_scheduler
+            news_scheduler = create_scheduler(settings)
+            news_scheduler.start()
+            LOGGER.info("News scheduler started (cache: %s).", settings.news.cache_path)
+        except Exception as ns_exc:  # noqa: BLE001
+            LOGGER.warning("Could not start news scheduler: %s", ns_exc)
 
     last_seen_bar_time: pd.Timestamp | None = None
     accumulated_new_bars = 0
@@ -448,9 +477,185 @@ def run_live_loop(settings: Settings) -> None:
 
         time.sleep(settings.app.poll_seconds)
 
+    # Cleanup on exit (e.g. KeyboardInterrupt propagated up)
+    if news_scheduler is not None:
+        news_scheduler.stop()
+
 
 def run_mt5_check(settings: Settings) -> None:
     _, _, _, _, executor, _ = _bootstrap(settings)
     status = executor.connection_status()
     LOGGER.info("MT5 connection status: %s", status)
     print(json.dumps(status, indent=2, default=str))
+
+
+# ---------------------------------------------------------------------------
+# News commands
+# ---------------------------------------------------------------------------
+
+def run_news_fetch(
+    settings: Settings,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    use_fred: bool = False,
+) -> None:
+    """Fetch and cache news/economic calendar data.
+
+    Workflow:
+    - Default (no flags): fetch current week from Forex Factory.
+    - ``--from DATE``: historical FF crawl (may hit Cloudflare 403 for old weeks).
+    - ``--from DATE --fred``: BLS (free, no key) + optionally FRED (free key needed)
+      for historical USD macro events; always supplements with current-week FF data.
+
+    Both FF and BLS/FRED data are stored in the same CSV cache so ``NewsAnalyzer``
+    consumes them uniformly.
+    """
+    _configure_logging(settings.app.log_level)
+    from xauusd_ai.news.crawler import ForexFactoryCrawler
+
+    fred_key = getattr(settings.news, "fred_api_key", "")
+
+    if use_fred and from_date:
+        from xauusd_ai.news.fred import (
+            fetch_bls_news,
+            fetch_fred_news,
+            generate_synthetic_calendar,
+            upsert_to_cache,
+        )
+
+        end_date = to_date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        total_added = 0
+
+        # 1. Try BLS first (free, no key)
+        LOGGER.info("Fetching BLS data (NFP, Unemployment, CPI) %s–%s", from_date, end_date)
+        try:
+            bls_events = fetch_bls_news(int(from_date[:4]), int(end_date[:4]), request_delay=0.5)
+            if bls_events:
+                added = upsert_to_cache(settings.news.cache_path, bls_events)
+                total_added += added
+                print(f"BLS: {len(bls_events)} events fetched, {added} new rows added")
+            else:
+                raise RuntimeError("BLS returned no events")
+        except Exception as exc:
+            LOGGER.warning("BLS unavailable (%s). Using synthetic calendar instead.", exc)
+            synthetic = generate_synthetic_calendar(from_date, end_date)
+            added = upsert_to_cache(settings.news.cache_path, synthetic)
+            total_added += added
+            print(f"Synthetic calendar: {len(synthetic)} events, {added} new rows added")
+
+        # 2. Try FRED if API key provided
+        if fred_key:
+            LOGGER.info("Fetching FRED data (GDP, Retail Sales, PCE) %s–%s", from_date, end_date)
+            try:
+                fred_events = fetch_fred_news(from_date, end_date, api_key=fred_key,
+                                              request_delay=settings.news.request_delay_seconds)
+                if fred_events:
+                    added = upsert_to_cache(settings.news.cache_path, fred_events)
+                    total_added += added
+                    print(f"FRED: {len(fred_events)} events fetched, {added} new rows added")
+            except Exception as exc:
+                LOGGER.warning("FRED fetch failed: %s", exc)
+        else:
+            print("FRED skipped (no fred_api_key in settings – register free at fred.stlouisfed.org).")
+
+        # 3. Always supplement with current-week Forex Factory data (all currencies)
+        LOGGER.info("Fetching current week from Forex Factory…")
+        crawler = ForexFactoryCrawler(
+            cache_path=settings.news.cache_path,
+            request_delay=settings.news.request_delay_seconds,
+        )
+        try:
+            current = crawler.crawl_current_week()
+            total_added += len(current)
+            print(f"Forex Factory current week: {len(current)} events")
+        except Exception as exc:
+            LOGGER.warning("FF current-week crawl failed: %s", exc)
+
+        print(f"Total new rows added to cache: {total_added}")
+        print(f"Cache saved to: {settings.news.cache_path}")
+        return
+
+    crawler = ForexFactoryCrawler(
+        cache_path=settings.news.cache_path,
+        request_delay=settings.news.request_delay_seconds,
+    )
+    if from_date:
+        LOGGER.info("Starting historical FF crawl from %s to %s", from_date, to_date or "today")
+        LOGGER.info("Tip: if 403 errors appear, re-run with --fred to use BLS/FRED instead.")
+        total = crawler.crawl_historical(start_date=from_date, end_date=to_date)
+        print(f"Historical news fetch complete. Total events: {total}")
+    else:
+        LOGGER.info("Fetching current-week news calendar…")
+        events = crawler.crawl_current_week()
+        print(f"Fetched {len(events)} events for current week. Saved to: {settings.news.cache_path}")
+
+
+def run_news_backtest(settings: Settings) -> None:
+    """Train + backtest with news features and print an extended report.
+
+    Compared with standard ``run_backtest``, this command:
+    - Loads and merges historical Forex Factory data into the training dataset.
+    - Includes the 5 news feature columns in the model.
+    - Reports news-enhanced performance metrics.
+    """
+    _configure_logging(settings.app.log_level)
+    data_service, trainer, strategy, _, _, risk_manager = _bootstrap(settings)
+
+    news_cache = Path(settings.news.cache_path)
+    if not news_cache.exists():
+        LOGGER.warning(
+            "No news cache found at %s. News features will be zero.\n"
+            "Run: python -m xauusd_ai news-fetch --from 2023-01-01\n"
+            "to build the cache before re-running this command.",
+            news_cache,
+        )
+
+    frames = data_service.fetch_multi_timeframe_data(source=settings.market.training_data_source)
+    dataset = prepare_training_dataset(settings, frames, strategy)
+
+    # Report how many bars have non-zero news features
+    news_cols = ["news_impact_score", "news_deviation_norm", "news_gold_bias", "news_in_window", "news_upcoming_impact"]
+    available_cols = [c for c in news_cols if c in dataset.columns]
+    if available_cols:
+        bars_with_news = int((dataset[available_cols].abs().sum(axis=1) > 0).sum())
+        LOGGER.info("Dataset rows with news activity: %d / %d (%.1f%%)",
+                    bars_with_news, len(dataset), 100 * bars_with_news / max(len(dataset), 1))
+
+    metrics = trainer.train(dataset)
+    predictions = trainer.predict_dataset(dataset)
+    result = simulate_prediction_backtest(predictions, settings, risk_manager)
+
+    train_rows = predictions[predictions["split"] == "train"].copy()
+    test_rows = predictions[predictions["split"] == "test"].copy()
+
+    backtest_report = {
+        "mode": "news_backtest",
+        "news_cache_path": str(news_cache),
+        "news_cache_exists": news_cache.exists(),
+        "bars_with_news_activity": bars_with_news if available_cols else 0,
+        "train_metrics": metrics,
+        "train_start": str(train_rows["time"].min()) if not train_rows.empty else None,
+        "train_end": str(train_rows["time"].max()) if not train_rows.empty else None,
+        "test_start": str(test_rows["time"].min()) if not test_rows.empty else None,
+        "test_end": str(test_rows["time"].max()) if not test_rows.empty else None,
+        **result.report,
+    }
+
+    # Compute additional news-trade statistics on test predictions
+    if not result.trades.empty and available_cols:
+        test_with_news = predictions[
+            (predictions["split"] == "test") & (predictions.get("news_in_window", pd.Series(0)) == 1)
+        ]
+        backtest_report["news_window_bars"] = int(len(test_with_news))
+
+    write_backtest_outputs(
+        backtest_report,
+        result.trades,
+        test_rows,
+        Path(settings.app.backtest_report_path),
+        Path(settings.app.backtest_trades_path),
+        Path(settings.app.backtest_equity_plot_path),
+        Path(settings.app.backtest_trades_plot_path),
+    )
+    LOGGER.info("News-backtest report: %s", backtest_report)
+    print(json.dumps(backtest_report, indent=2))

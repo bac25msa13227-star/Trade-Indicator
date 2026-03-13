@@ -44,6 +44,56 @@ class RiskManager:
 
         return min(base_fraction * regime_multiplier * score_multiplier, self.settings.risk.max_risk_fraction)
 
+    def calculate_max_concurrent_positions(self, balance: float | None = None) -> int:
+        """
+        Dynamically calculate the maximum number of concurrent open positions.
+
+        Logic:
+          max_by_budget = floor(max_portfolio_risk_fraction / risk_per_trade)
+          e.g. with max_portfolio=3%, risk_per_trade=0.75% → max 4 concurrent trades.
+          Apply hard cap max_concurrent_positions_cap as absolute safety valve.
+          Balance is accepted but not used in the current fraction-based formula;
+          it can be used in future lot-size aware variants.
+        """
+        _ = balance  # reserved for lot-size-aware variant
+        if self.settings.risk.risk_per_trade <= 0:
+            return 1
+        max_by_budget = int(
+            self.settings.risk.max_portfolio_risk_fraction / self.settings.risk.risk_per_trade
+        )
+        return max(1, min(max_by_budget, self.settings.risk.max_concurrent_positions_cap))
+
+    def can_open_position(
+        self,
+        balance: float,
+        open_positions_count: int,
+        total_deployed_risk_fraction: float,
+        confidence: float,
+        volatility_regime: int | None = None,
+        strategy_score: float | None = None,
+    ) -> tuple[bool, float]:
+        """
+        Decide dynamically whether to open a new position.
+
+        Returns (can_open, risk_fraction_for_this_trade).
+
+        Rules:
+          1. Number of currently open positions must be below the calculated max.
+          2. Adding this trade's risk fraction must not breach max_portfolio_risk_fraction.
+          3. Balance is tracked so that max calculation can be made balance-aware
+             in the future (e.g. absolute dollar risk caps).
+        """
+        max_concurrent = self.calculate_max_concurrent_positions(balance)
+        if open_positions_count >= max_concurrent:
+            return False, 0.0
+
+        risk_frac = self.risk_fraction(confidence, volatility_regime, strategy_score)
+
+        if total_deployed_risk_fraction + risk_frac > self.settings.risk.max_portfolio_risk_fraction:
+            return False, 0.0
+
+        return True, risk_frac
+
     def build_order_plan(self, decision: TradeDecision, latest_bar: pd.Series) -> OrderPlan:
         volume = self.settings.risk.fixed_lot
         return OrderPlan(

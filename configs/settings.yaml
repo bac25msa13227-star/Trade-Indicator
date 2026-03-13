@@ -18,7 +18,7 @@ app:
 
 market:
   symbol: XAUUSD
-  training_symbol: XAUUSD=X
+  training_symbol: GC=F
   training_data_source: csv_folder
   live_data_source: mt5
   csv_data_path: data/xauusd_m15.csv
@@ -71,26 +71,35 @@ strategy:
 
 risk:
   mode: fixed_fractional
-  risk_per_trade: 0.0065
-  max_open_positions: 1
+  account_balance: 200.0           # your real account size in USD
+  risk_per_trade: 0.05             # 5% of balance per trade
+  max_portfolio_risk_fraction: 0.20  # max 20% total open risk at once
+  max_concurrent_positions_cap: 6  # allow 6 concurrent positions
   stop_loss_atr_multiple: 1.8
-  take_profit_rr: 2.2
-  min_confidence: 0.55
+  take_profit_rr: 2.5
+  min_confidence: 0.53
   fixed_lot: 0.01
+  min_lot_size: 0.01
+  max_lot_size: 0.10
   max_risk_fraction: 0.011
   sideway_risk_multiplier: 0.3
   normal_risk_multiplier: 0.9
   strong_volatility_risk_multiplier: 0.55
 
 execution:
-  auto_trade: false
+  auto_trade: true
   deviation: 20
   magic_number: 20260309
   comment: xauusd-ai
-  paper_trade_max_loops: 1
-  paper_data_source: csv_folder
+  paper_trade_max_loops: 0
+  paper_data_source: yfinance
 
 training:
+  # Date-based split: train 2023-2025, test 2026
+  train_start_date: "2023-01-01"
+  train_end_date: "2025-12-31"
+  test_start_date: "2026-01-01"
+  test_end_date: null
   train_split: 0.75
   label_horizon: 12
   min_return_threshold: 0.0006
@@ -124,7 +133,7 @@ training:
   walkforward_min_avg_trades: 25.0
 
 notifications:
-  telegram_enabled: false
+  telegram_enabled: true
   verbose_message: true
 
 integrations:
@@ -139,3 +148,30 @@ integrations:
   news:
     enabled: false
     provider: stub
+
+# ============================================================
+# News (Forex Factory) crawler & scheduler settings
+# ============================================================
+news:
+  enabled: true
+  cache_path: outputs/news_data.csv
+
+  # Crawler
+  request_delay_seconds: 3.0   # polite delay between historical week requests
+
+  # Scheduler (active in 'live' mode)
+  refresh_interval_seconds: 300   # background poll every 5 min
+  pre_crawl_minutes: 15           # crawl N min before a scheduled event
+  post_crawl_seconds: 90          # crawl N sec after event for Actual value
+  min_scheduled_impact: "Medium"  # impact level to trigger event-specific crawls
+
+  # Feature builder windows (must match strategy.news_block_minutes for coherence)
+  pre_window_minutes: 30          # tag bars within 30 min BEFORE event
+  post_window_minutes: 60         # tag bars within 60 min AFTER event
+  upcoming_hours: 4               # look-ahead for news_upcoming_impact feature
+
+  # Strategy weight for news signal (0 = disabled, 0.20 = 20% of composite score)
+  news_weight: 0.20
+
+  # Currencies relevant for XAUUSD
+  relevant_currencies: [USD, EUR, GBP, AUD, CHF, CAD, XAU]

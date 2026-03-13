@@ -20,6 +20,10 @@ src/xauusd_ai/execution/risk.py
 src/xauusd_ai/features/dataset.py
 src/xauusd_ai/features/indicators.py
 src/xauusd_ai/model/trainer.py
+src/xauusd_ai/news/__init__.py
+src/xauusd_ai/news/analyzer.py
+src/xauusd_ai/news/crawler.py
+src/xauusd_ai/news/scheduler.py
 src/xauusd_ai/notifications/telegram.py
 src/xauusd_ai/strategies/hybrid.py
 src/xauusd_ai/visualization/reports.py

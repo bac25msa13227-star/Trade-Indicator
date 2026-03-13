@@ -82,12 +82,17 @@ class StrategySettings(BaseModel):
 
 class RiskSettings(BaseModel):
     mode: str = "fixed_fractional"
-    risk_per_trade: float = 0.0075
-    max_open_positions: int = 1
+    account_balance: float = 100.0  # reference account size in USD
+    risk_per_trade: float = 0.0075  # fraction of balance risked per trade
+    # Dynamic concurrent-position management (replaces fixed max_open_positions)
+    max_portfolio_risk_fraction: float = 0.03   # max total open risk at any time (e.g. 3%)
+    max_concurrent_positions_cap: int = 5       # hard safety cap regardless of budget
     stop_loss_atr_multiple: float = 1.8
     take_profit_rr: float = 2.2
     min_confidence: float = 0.60
     fixed_lot: float = 0.01
+    min_lot_size: float = 0.01
+    max_lot_size: float = 0.10
     max_risk_fraction: float = 0.015
     sideway_risk_multiplier: float = 0.45
     normal_risk_multiplier: float = 1.0
@@ -172,6 +177,34 @@ class IntegrationSettings(BaseModel):
     news: NewsIntegrationSettings = Field(default_factory=NewsIntegrationSettings)
 
 
+class NewsSettings(BaseModel):
+    """Settings for the Forex Factory news crawler and scheduler."""
+
+    enabled: bool = True
+    # Path to store the cached news CSV
+    cache_path: str = "outputs/news_data.csv"
+    # Crawler behaviour
+    request_delay_seconds: float = 3.0  # polite delay between historical week fetches
+    # Scheduler timing
+    refresh_interval_seconds: int = 300   # background poll every 5 minutes
+    pre_crawl_minutes: int = 15           # crawl N min before a scheduled event
+    post_crawl_seconds: int = 90          # crawl N sec after event for Actual value
+    min_scheduled_impact: str = "Medium" # minimum impact to schedule event-specific crawls
+    # Feature builder windows
+    pre_window_minutes: int = 30          # bars within this window before event are tagged
+    post_window_minutes: int = 60         # bars within this window after event are tagged
+    upcoming_hours: int = 4              # look-ahead for news_upcoming_impact feature
+    # Weight of news signal inside the hybrid strategy score
+    news_weight: float = 0.20
+    # Only include these currencies when building ML features
+    relevant_currencies: list[str] = Field(
+        default_factory=lambda: ["USD", "EUR", "GBP", "AUD", "CHF", "CAD", "XAU"]
+    )
+    # FRED (St. Louis Federal Reserve) API key — free at fred.stlouisfed.org/docs/api/api_key.html
+    # Leave empty to use the public endpoint (rate-limited but sufficient for historical backfill)
+    fred_api_key: str = ""
+
+
 class Settings(BaseModel):
     app: AppSettings = Field(default_factory=AppSettings)
     market: MarketSettings = Field(default_factory=MarketSettings)
@@ -181,6 +214,7 @@ class Settings(BaseModel):
     training: TrainingSettings = Field(default_factory=TrainingSettings)
     notifications: NotificationSettings = Field(default_factory=NotificationSettings)
     integrations: IntegrationSettings = Field(default_factory=IntegrationSettings)
+    news: NewsSettings = Field(default_factory=NewsSettings)
 
 
 def load_settings(path: Path) -> Settings:
