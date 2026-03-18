@@ -17,10 +17,12 @@ from xauusd_ai.features.dataset import FEATURE_COLUMNS
 class ModelTrainer:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        # class_weight='balanced': standard balanced approach for imbalanced datasets
+        # Threshold optimizer will enforce precision floor (WR target) post-training.
         self.model = HistGradientBoostingClassifier(
-            max_iter=500,
-            learning_rate=0.05,
-            max_depth=6,
+            max_iter=600,
+            learning_rate=0.03,
+            max_depth=5,
             min_samples_leaf=20,
             class_weight="balanced",
             early_stopping=False,
@@ -29,12 +31,12 @@ class ModelTrainer:
         self.scaler = StandardScaler()
         self.decision_threshold = settings.strategy.signal_threshold
 
-    def train(self, dataset: pd.DataFrame) -> dict[str, float]:
+    def train(self, dataset: pd.DataFrame, save_artifacts: bool = True) -> dict[str, float]:
         train_df = dataset[dataset["split"] == "train"]
         test_df = dataset[dataset["split"] == "test"]
 
         threshold = self.settings.strategy.signal_threshold
-        if self.settings.training.optimize_threshold and len(train_df) > 50:
+        if save_artifacts and self.settings.training.optimize_threshold and len(train_df) > 50:
             threshold = self._optimize_threshold(train_df)
         self.decision_threshold = threshold
 
@@ -59,7 +61,8 @@ class ModelTrainer:
             "f1": float(f1_score(y_test, predictions, zero_division=0)),
             "roc_auc": float(roc_auc_score(y_test, probabilities)) if y_test.nunique() > 1 else 0.5,
         }
-        self._save_artifacts()
+        if save_artifacts:
+            self._save_artifacts()
         return metrics
 
     def _optimize_threshold(self, train_df: pd.DataFrame) -> float:
@@ -71,7 +74,7 @@ class ModelTrainer:
 
         local_scaler = StandardScaler()
         local_model = HistGradientBoostingClassifier(
-            max_iter=200, learning_rate=0.1, max_depth=5,
+            max_iter=300, learning_rate=0.05, max_depth=5,
             min_samples_leaf=20, class_weight="balanced",
             early_stopping=False, random_state=42,
         )
@@ -87,17 +90,40 @@ class ModelTrainer:
             self.settings.training.threshold_max + self.settings.training.threshold_step,
             self.settings.training.threshold_step,
         )
-        best_threshold = self.settings.strategy.signal_threshold
-        best_f1 = 0.0
+        # Dùng threshold_max làm fallback — nếu không có threshold nào đạt precision floor
+        # thì chọn threshold có precision cao nhất (không dùng threshold_min = precision thấp nhất)
+        best_threshold = float(self.settings.training.threshold_max)
+        best_score = -float("inf")
+        # Fallback: track highest-precision threshold in case precision floor is never met
+        best_fallback_threshold = float(self.settings.training.threshold_max)
+        best_fallback_precision = 0.0
         for candidate in candidates:
             predictions = (probabilities >= candidate).astype(int)
+            n_pred = int(predictions.sum())
+            if n_pred < 3:
+                continue
             precision = precision_score(y_validation, predictions, zero_division=0)
+            # Track best-precision threshold as fallback (even below floor)
+            if precision > best_fallback_precision:
+                best_fallback_precision = precision
+                best_fallback_threshold = float(candidate)
             if precision < self.settings.training.min_precision_floor:
                 continue
-            f1_val = f1_score(y_validation, predictions, zero_division=0)
-            if f1_val > best_f1:
-                best_f1 = f1_val
+            recall = recall_score(y_validation, predictions, zero_division=0)
+            if recall < 0.01:
+                continue  # bỏ qua threshold cho quá ít lệnh (< 1% recall)
+            # F-beta score với beta=1.5: recall quan trọng hơn precision 1.5 lần
+            # → balance giữa WR cao và số lệnh đủ nhiều
+            # score cao hơn ở threshold ~0.60-0.75 thay vì 0.85-0.90
+            beta = 1.5
+            score = (1 + beta ** 2) * precision * recall / (beta ** 2 * precision + recall)
+            if score > best_score:
+                best_score = score
                 best_threshold = float(candidate)
+
+        # If no threshold met the precision floor, use the highest-precision threshold found
+        if best_score == -float("inf"):
+            best_threshold = best_fallback_threshold
 
         return best_threshold
 

@@ -143,7 +143,13 @@ def _weekday_skip(dt: datetime) -> datetime:
 
 #  Layer 1: Finnhub 
 
+# Process-level flag: set True after first 401/403 so we stop retrying all session
+_finnhub_disabled: bool = False
+
+
 def _get_finnhub_key() -> str | None:
+    if _finnhub_disabled:
+        return None
     key = os.environ.get("FINNHUB_API_KEY", "").strip()
     return key if key else None
 
@@ -179,6 +185,7 @@ def _save_finnhub_cache(year: int, events: list[dict]) -> None:
 
 
 def _fetch_finnhub_year(key: str, year: int) -> list[dict]:
+    global _finnhub_disabled
     quarters = [
         (f"{year}-01-01", f"{year}-03-31"),
         (f"{year}-04-01", f"{year}-06-30"),
@@ -202,6 +209,11 @@ def _fetch_finnhub_year(key: str, year: int) -> list[dict]:
                     all_events.append(ev)
             LOGGER.info("Finnhub: fetched %s%s", from_d, to_d)
         except Exception as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            if status in (401, 403):
+                LOGGER.warning("Finnhub key invalid/quota exceeded (%s) — disabling for this session", status)
+                _finnhub_disabled = True
+                return all_events  # stop retrying remaining quarters
             LOGGER.warning("Finnhub fetch failed %s%s: %s", from_d, to_d, exc)
     return all_events
 

@@ -18,6 +18,7 @@ app:
   walkforward_trades_path: outputs/walkforward_trades_ict_wyckoff.csv
   paper_trade_log_path: outputs/paper_trade_signals.csv
   live_learning_log_path: outputs/live_learning_log.jsonl
+  live_closed_trades_path: outputs/live_closed_trades.csv
   dashboard_host: 0.0.0.0
   dashboard_port: 8501
   log_level: INFO
@@ -48,7 +49,7 @@ strategy:
   liquidity_lookback: 15
   swing_lookback: 20
   volatility_window: 20
-  signal_threshold: 0.55             # Threshold từ model_meta_ict_wyckoff.json
+  signal_threshold: 0.61             # Sync với trained model (threshold tối ưu từ backtest v3)
   sideways_volatility_threshold: 0.003
   strong_volatility_threshold: 0.010
   news_block_minutes: 0
@@ -57,26 +58,31 @@ strategy:
   ict_weight: 0.40
   wyckoff_weight: 0.35
   momentum_weight: 0.25
-  min_strategy_score: 0.10
+  min_strategy_score: 0.05          # Sync với training config — model confidence là cổng chính
   sideway_min_strategy_score: 0.05
   strong_volatility_min_strategy_score: 0.10
-  require_trend_alignment: false
-  blocked_hours_utc: []             # Không block giờ nào
+  require_trend_alignment: false    # Tắt — sync với training config (tránh lọc quá nhiều)
+  blocked_hours_utc: [7, 10, 11, 22]  # Chặn giờ thấp chất lượng (Asia/London gap)
   blocked_weekdays_utc: []
   blocked_weekday_hours_utc: {}
 
 risk:
   mode: fixed_fractional
-  risk_per_trade: 0.005             # 0.5% risk mỗi lệnh (thận trọng live)
-  max_open_positions: 1             # Chỉ 1 lệnh cùng lúc
-  stop_loss_atr_multiple: 1.8
-  take_profit_rr: 2.2
-  min_confidence: 0.55             # Khớp với threshold model_meta
+  risk_per_trade: 0.06            # 6% risk/lệnh — compound mạnh, target $6k-8k/fold
+  # ── Regime-based SL/TP (thực hiện trong hybrid.py) ──
+  sideway_sl_atr_multiple: 1.0
+  sideway_take_profit_rr: 2.0
+  volatile_sl_atr_multiple: 2.5
+  volatile_take_profit_rr: 4.0
+  max_open_positions: 5             # giảm concurrent để kiểm soát tốt hơn
+  stop_loss_atr_multiple: 1.5
+  take_profit_rr: 3.0              # RR 1:3 — tối thiểu 1:3
+  min_confidence: 0.70             # Nâng ngưỡng tin cậy tối thiểu
   fixed_lot: 0.01
-  max_risk_fraction: 0.010
-  sideway_risk_multiplier: 0.3
-  normal_risk_multiplier: 0.9
-  strong_volatility_risk_multiplier: 0.55
+  max_risk_fraction: 0.08          # 8% cap tổng risk
+  sideway_risk_multiplier: 0.5
+  normal_risk_multiplier: 1.0
+  strong_volatility_risk_multiplier: 0.8
 
 execution:
   auto_trade: true                  # ← BẬT GIAO DỊCH THẬT
@@ -98,25 +104,27 @@ execution:
     max_total_risk_pct: 0.03
 
 training:
-  train_start_date: "2022-01-01"
-  train_end_date:   "2025-12-31"
-  test_start_date:  "2026-01-01"
-  test_end_date:    "2026-03-13"
+  train_start_date: null
+  train_end_date:   null
+  test_start_date:  null
+  test_end_date:    null
   train_split: 0.80
   label_horizon: 6
   min_return_threshold: 0.0006
   retrain_on_startup: false         # Không retrain — dùng model đã train
   live_learning_enabled: true       # Bật tự học
-  live_learning_min_new_bars: 12
+  live_learning_interval_minutes: 30  # Tự học mỗi 30 phút
+  live_learning_min_new_bars: 0      # Không dùng số nến, chỉ dùng thời gian
   live_learning_min_rows: 500
   save_dataset: false
   dataset_path: outputs/training_dataset_ict_wyckoff.csv
   optimize_threshold: true
   validation_split: 0.15
-  threshold_min: 0.45
+  threshold_min: 0.50              # Cho phép live learning tìm threshold thấp hơn (khớp training)
   threshold_max: 0.80
   threshold_step: 0.01
-  min_precision_floor: 0.52
+  min_precision_floor: 0.50         # Đồng bộ với training config — cho phép WR >= 50%
+  backtest_initial_balance: 200.0   # vốn khởi đầu
 
 notifications:
   telegram_enabled: true            # ← BẬT Telegram thông báo
@@ -128,9 +136,10 @@ integrations:
     login_env: MT5_LOGIN
     password_env: MT5_PASSWORD
     server_env: MT5_SERVER
+    terminal_path: "C:\\Program Files\\MetaTrader 5\\terminal64.exe"
   telegram:
-    token_env: TELEGRAM_BOT_TOKEN
-    chat_id_env: TELEGRAM_CHAT_ID
+    token_env: TELEGRAM_BOT_TOKEN_ACC1
+    chat_id_env: TELEGRAM_CHAT_ID_ACC1
   news:
     enabled: false
     provider: stub

@@ -74,12 +74,18 @@ class MarketDataService:
             raise RuntimeError("MetaTrader5 package is not installed in this environment")
 
         if self.settings.integrations.mt5.enabled:
-            login = os.getenv(self.settings.integrations.mt5.login_env)
-            password = os.getenv(self.settings.integrations.mt5.password_env)
-            server = os.getenv(self.settings.integrations.mt5.server_env)
+            mt5cfg = self.settings.integrations.mt5
+            # Prefer direct config values (login, server) over env vars
+            # to avoid session conflicts when running 2 accounts simultaneously
+            login    = str(mt5cfg.login)    if mt5cfg.login    else os.getenv(mt5cfg.login_env)
+            password = mt5cfg.password      or  os.getenv(mt5cfg.password_env)
+            server   = mt5cfg.server        or  os.getenv(mt5cfg.server_env)
+            path     = mt5cfg.terminal_path or None
             if login and password and server:
-                # Truyền credentials trực tiếp vào initialize() để lấy được historical data
-                if not mt5.initialize(login=int(login), password=password, server=server):
+                kwargs: dict = dict(login=int(login), password=password, server=server)
+                if path:
+                    kwargs["path"] = path
+                if not mt5.initialize(**kwargs):
                     raise RuntimeError(f"MT5 initialize failed: {mt5.last_error()}")
                 return
 

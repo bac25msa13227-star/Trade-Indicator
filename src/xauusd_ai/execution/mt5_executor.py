@@ -21,11 +21,16 @@ class MT5Executor:
             raise RuntimeError("MetaTrader5 package is not installed in this environment")
 
         if self.settings.integrations.mt5.enabled:
-            login = os.getenv(self.settings.integrations.mt5.login_env)
-            password = os.getenv(self.settings.integrations.mt5.password_env)
-            server = os.getenv(self.settings.integrations.mt5.server_env)
+            mt5cfg = self.settings.integrations.mt5
+            login = str(mt5cfg.login) if mt5cfg.login else os.getenv(mt5cfg.login_env)
+            password = mt5cfg.password or os.getenv(mt5cfg.password_env)
+            server = mt5cfg.server or os.getenv(mt5cfg.server_env)
+            path = mt5cfg.terminal_path or None
             if login and password and server:
-                if not mt5.initialize(login=int(login), password=password, server=server):
+                kwargs: dict = dict(login=int(login), password=password, server=server)
+                if path:
+                    kwargs["path"] = path
+                if not mt5.initialize(**kwargs):
                     raise RuntimeError(f"MT5 initialize failed: {mt5.last_error()}")
                 return
 
@@ -125,6 +130,62 @@ class MT5Executor:
             })
         return result
 
+    def close_position(self, ticket: int, volume: float) -> dict[str, Any]:
+        """
+        Đóng một lệnh đang mở theo ticket bằng cách gửi lệnh ngược chiều.
+        Dùng TRADE_ACTION_DEAL với position=ticket.
+        """
+        self._ensure_connection()
+        if mt5 is None:
+            raise RuntimeError("MetaTrader5 not available")
+        positions = mt5.positions_get(ticket=ticket)
+        if not positions:
+            raise RuntimeError(f"Position {ticket} not found")
+        pos = positions[0]
+        # Lệnh đóng: ngược chiều với lệnh đang mở
+        # BUY (type=0) → đóng bằng SELL; SELL (type=1) → đóng bằng BUY
+        close_type = mt5.ORDER_TYPE_SELL if pos.type == 0 else mt5.ORDER_TYPE_BUY
+        tick = mt5.symbol_info_tick(pos.symbol)
+        if tick is None:
+            raise RuntimeError(f"No tick data for {pos.symbol}")
+        price = tick.bid if close_type == mt5.ORDER_TYPE_SELL else tick.ask
+
+        filling_modes = [
+            mt5.ORDER_FILLING_RETURN,
+            mt5.ORDER_FILLING_IOC,
+            mt5.ORDER_FILLING_FOK,
+        ]
+        last_error = None
+        for filling in filling_modes:
+            request = {
+                "action":       mt5.TRADE_ACTION_DEAL,
+                "symbol":       pos.symbol,
+                "volume":       volume,
+                "type":         close_type,
+                "position":     ticket,
+                "price":        price,
+                "deviation":    self.settings.execution.deviation,
+                "magic":        self.settings.execution.magic_number,
+                "comment":      "close-opposite",
+                "type_time":    mt5.ORDER_TIME_GTC,
+                "type_filling": filling,
+            }
+            result = mt5.order_send(request)
+            if result is None:
+                last_error = f"order_send None: {mt5.last_error()}"
+                continue
+            r = result._asdict()
+            if r.get("retcode") == 10009:
+                return r
+            if r.get("retcode") == 10030:
+                last_error = f"INVALID_FILL filling={filling}"
+                continue
+            raise RuntimeError(
+                f"close_position failed: retcode={r.get('retcode')} "
+                f"comment={r.get('comment')} ticket={ticket}"
+            )
+        raise RuntimeError(f"close_position failed all filling modes: {last_error}")
+
     def modify_position_sl(self, ticket: int, new_sl: float) -> dict[str, Any]:
         """
         Sửa Stop Loss của một lệnh đang mở.
@@ -157,9 +218,25 @@ class MT5Executor:
 
     def place_order(self, plan: OrderPlan) -> dict[str, Any]:
         self._ensure_connection()
+        # Log trạng thái AutoTrading để debug
+        _tinfo = mt5.terminal_info()
+        if _tinfo is not None:
+            import logging as _log
+            _log.getLogger(__name__).info(
+                "MT5 terminal: trade_allowed=%s path=%s account=%s",
+                _tinfo.trade_allowed,
+                getattr(_tinfo, "path", "?"),
+                mt5.account_info().login if mt5.account_info() else "?"
+            )
         tick = mt5.symbol_info_tick(plan.symbol)
         if tick is None:
             raise RuntimeError(f"No tick data for {plan.symbol}")
+
+        # Round SL/TP to symbol's decimal precision so broker stores them correctly
+        _sinfo = mt5.symbol_info(plan.symbol)
+        _digits = _sinfo.digits if _sinfo is not None else 5
+        _sl = round(plan.stop_loss, _digits) if plan.stop_loss else 0.0
+        _tp = round(plan.take_profit, _digits) if plan.take_profit else 0.0
 
         order_type = mt5.ORDER_TYPE_BUY if plan.side == "buy" else mt5.ORDER_TYPE_SELL
         price = tick.ask if plan.side == "buy" else tick.bid
@@ -179,8 +256,8 @@ class MT5Executor:
                 "volume": plan.volume,
                 "type": order_type,
                 "price": price,
-                "sl": plan.stop_loss,
-                "tp": plan.take_profit,
+                "sl": _sl,
+                "tp": _tp,
                 "deviation": self.settings.execution.deviation,
                 "magic": self.settings.execution.magic_number,
                 "comment": self.settings.execution.comment,
@@ -250,13 +327,26 @@ class MT5Executor:
             entry = row.get("entry", -1)
             if entry != 1:   # mt5.DEAL_ENTRY_OUT == 1
                 continue
+            # Fetch open price from the corresponding IN deal for this position
+            close_price = float(row.get("price", 0))
+            open_price = close_price  # fallback
+            try:
+                pos_id = int(row.get("position_id", 0))
+                if pos_id:
+                    pos_deals = mt5.history_deals_get(position=pos_id)
+                    if pos_deals:
+                        in_deal = next((pd for pd in pos_deals if pd.entry == 0), None)
+                        if in_deal:
+                            open_price = float(in_deal.price)
+            except Exception:
+                pass
             result.append({
                 "ticket":      int(row.get("position_id", 0)),
                 "deal_ticket": int(row.get("ticket", 0)),
                 "side":        "buy" if row.get("type", 1) == 1 else "sell",  # DEAL_TYPE_BUY=0, SELL=1 → reversed for close
                 "volume":      float(row.get("volume", 0)),
-                "open_price":  float(row.get("price", 0)),  # close deal price; open_price from history_orders
-                "close_price": float(row.get("price", 0)),
+                "open_price":  open_price,
+                "close_price": close_price,
                 "profit":      float(row.get("profit", 0)),
                 "swap":        float(row.get("swap", 0)),
                 "commission":  float(row.get("commission", 0)),

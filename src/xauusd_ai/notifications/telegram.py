@@ -39,17 +39,34 @@ class TelegramNotifier:
 
     def send_message(self, text: str) -> None:
         """Gửi tin nhắn tùy ý qua Telegram (dùng cho cảnh báo, loss analysis, v.v.)."""
+        import logging as _log
+        _logger = _log.getLogger(__name__)
         if not self.settings.notifications.telegram_enabled:
             return
         token = os.getenv(self.settings.integrations.telegram.token_env)
         chat_id = os.getenv(self.settings.integrations.telegram.chat_id_env)
         if not token or not chat_id:
+            _logger.warning("Telegram send_message: token/chat_id missing (env=%s/%s)",
+                            self.settings.integrations.telegram.token_env,
+                            self.settings.integrations.telegram.chat_id_env)
             return
         try:
-            requests.post(
+            resp = requests.post(
                 f"https://api.telegram.org/bot{token}/sendMessage",
                 json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
                 timeout=10,
             )
-        except Exception:
-            pass
+            if not resp.ok:
+                # HTML parse_mode failed — retry without parse_mode
+                _logger.warning("Telegram send_message HTML failed (%s): %s — retrying as plain text",
+                                resp.status_code, resp.text[:200])
+                resp2 = requests.post(
+                    f"https://api.telegram.org/bot{token}/sendMessage",
+                    json={"chat_id": chat_id, "text": text},
+                    timeout=10,
+                )
+                if not resp2.ok:
+                    _logger.error("Telegram send_message plain text also failed (%s): %s",
+                                  resp2.status_code, resp2.text[:200])
+        except Exception as e:
+            _logger.error("Telegram send_message network error: %s", e)

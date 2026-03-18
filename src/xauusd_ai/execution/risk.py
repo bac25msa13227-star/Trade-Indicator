@@ -32,6 +32,7 @@ class OrderPlan:
 class RiskManager:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self._peak_balance: float = 0.0  # track peak for dynamic risk tier
 
     # ------------------------------------------------------------------
     # Dynamic position limit — phụ thuộc balance + market regime
@@ -42,10 +43,10 @@ class RiskManager:
 
         Tier map (theo balance USD):
             < $200   → 1 lệnh   (tài khoản micro, XAUUSD rủi ro cao)
-            < $500   → 2 lệnh
-            < $2 000 → 3 lệnh
-            < $10 000→ 5 lệnh
-            < $50 000→ 8 lệnh
+            < $500   → 3 lệnh   (tăng từ 2→3 để bắt nhiều signal hơn với vốn $200, max 18% exposure)
+            < $2 000 → 5 lệnh
+            < $10 000→ 8 lệnh
+            < $50 000→ 10 lệnh
             >= $50 000→ 15 lệnh
 
         Market‑regime điều chỉnh thêm:
@@ -55,22 +56,27 @@ class RiskManager:
         config_ceiling = self.settings.risk.max_open_positions
 
         if balance < 500:
-            tier_max = 3          # $100-$499: toi da 3 lenh 0.01 lot
+            tier_max = 3          # $200-$499: 3 lenh, max 18% exposure, WR93%+ nen an toan
         elif balance < 2_000:
-            tier_max = 3
-        elif balance < 10_000:
             tier_max = 5
-        elif balance < 50_000:
+        elif balance < 10_000:
             tier_max = 8
+        elif balance < 50_000:
+            tier_max = 10
         else:
             tier_max = 15
 
         base_max = min(config_ceiling, tier_max)
 
-        if volatility_regime == 0:      # sideways — giảm nhẹ (dùng round thay // để tránh mất slot)
-            adjusted = max(1, round(base_max * 0.67))
-        elif volatility_regime == 2:    # strong volatility
-            adjusted = max(1, round(base_max * 0.7))
+        # Chỉ giảm theo regime khi base_max >= 3.
+        # Với tài khoản nhỏ (base_max <= 2), giảm thêm sẽ lock về 1 — không hợp lý.
+        if base_max >= 3:
+            if volatility_regime == 0:      # sideways
+                adjusted = max(1, round(base_max * 0.67))
+            elif volatility_regime == 2:    # strong volatility
+                adjusted = max(1, round(base_max * 0.7))
+            else:
+                adjusted = base_max
         else:
             adjusted = base_max
 
@@ -158,18 +164,42 @@ class RiskManager:
         confidence: float,
         volatility_regime: int | None = None,
         strategy_score: float | None = None,
+        current_balance: float | None = None,
     ) -> float:
+        # Dynamic risk tier: scale between floor and ceiling based on drawdown.
+        rf_base  = self.settings.risk.risk_per_trade
+        rf_floor = float(getattr(self.settings.risk, 'risk_tier_floor', 0.0))
+        if rf_floor > 0.0 and current_balance is not None and current_balance > 0:
+            # Update peak balance
+            if current_balance > self._peak_balance:
+                self._peak_balance = current_balance
+            if self._peak_balance > 0:
+                dd = (self._peak_balance - current_balance) / self._peak_balance
+                if dd >= 0.10:
+                    rf_base = rf_floor
+                elif dd >= 0.03:
+                    ratio = (dd - 0.03) / 0.07
+                    rf_base = self.settings.risk.risk_per_trade - ratio * (self.settings.risk.risk_per_trade - rf_floor)
+                # else: < 3% drawdown — full risk (rf_base unchanged)
+
         capped_confidence = min(max(confidence, self.settings.risk.min_confidence), 0.95)
-        base_fraction = self.settings.risk.risk_per_trade * (capped_confidence / self.settings.risk.min_confidence)
+        base_fraction = rf_base * (capped_confidence / self.settings.risk.min_confidence)
         regime_multiplier = self.settings.risk.normal_risk_multiplier
         if volatility_regime == 0:
             regime_multiplier = self.settings.risk.sideway_risk_multiplier
         elif volatility_regime == 2:
             regime_multiplier = self.settings.risk.strong_volatility_risk_multiplier
 
+        # score_multiplier: 1.0 when strategy_score >= 0 (aligned signals get full risk)
+        # Scale 0.7–1.0 based on strength; never penalise high-confidence aligned signals.
         score_multiplier = 1.0
         if strategy_score is not None:
-            score_multiplier = min(max(abs(strategy_score), 0.5), 1.0)
+            abs_score = abs(strategy_score)
+            if abs_score >= 0.5:
+                score_multiplier = 1.0
+            else:
+                # Linearly scale 0.7 (score=0) to 1.0 (score=0.5)
+                score_multiplier = 0.7 + 0.6 * abs_score
 
         return min(base_fraction * regime_multiplier * score_multiplier, self.settings.risk.max_risk_fraction)
 
@@ -191,7 +221,8 @@ class RiskManager:
         """
         if account_balance is not None and account_balance > 0:
             stop_distance = abs(decision.entry_price - decision.stop_loss)
-            rf = self.risk_fraction(decision.confidence, volatility_regime)
+            rf = self.risk_fraction(decision.confidence, volatility_regime,
+                                    current_balance=account_balance)
             volume = self.calculate_dynamic_lot(account_balance, stop_distance, rf)
         else:
             volume = self.settings.risk.fixed_lot

@@ -59,10 +59,13 @@ FEATURE_COLUMNS = [
 
 def _build_date_mask(series: pd.Series, start: str | None, end: str | None) -> pd.Series:
     mask = pd.Series(True, index=series.index)
+    series_tz = series.dt.tz  # timezone of the data (UTC or None)
     if start:
-        mask &= series >= pd.to_datetime(start, utc=True)
+        ts = pd.Timestamp(start, tz="UTC") if series_tz is not None else pd.Timestamp(start)
+        mask &= series >= ts
     if end:
-        mask &= series <= pd.to_datetime(end, utc=True)
+        ts = pd.Timestamp(end, tz="UTC") if series_tz is not None else pd.Timestamp(end)
+        mask &= series <= ts
     return mask
 
 
@@ -190,8 +193,15 @@ def _merge_context(settings: Settings, frames: dict[str, pd.DataFrame]) -> pd.Da
     return merged
 
 
-def prepare_training_dataset(settings: Settings, frames: dict[str, pd.DataFrame], strategy) -> pd.DataFrame:
-    merged = _merge_context(settings, frames)
+def build_merged_context(settings: Settings, frames: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Build the expensive merged context frame once and cache for reuse.
+    The result is independent of strategy weights and label settings."""
+    return _merge_context(settings, frames)
+
+
+def prepare_training_dataset(settings: Settings, frames: dict[str, pd.DataFrame], strategy,
+                              cached_merged: pd.DataFrame | None = None) -> pd.DataFrame:
+    merged = cached_merged if cached_merged is not None else _merge_context(settings, frames)
     strategy_output = strategy.annotate_dataset(merged)
     dataset = merged.join(strategy_output)
     future_close = dataset["close"].shift(-settings.training.label_horizon)
@@ -230,8 +240,17 @@ def prepare_training_dataset(settings: Settings, frames: dict[str, pd.DataFrame]
         filtered.loc[train_mask.loc[filtered.index], "split"] = "train"
         filtered.loc[test_mask.loc[filtered.index], "split"] = "test"
         filtered = filtered[filtered["split"].isin(["train", "test"])].reset_index(drop=True)
-        if filtered[filtered["split"] == "train"].empty or filtered[filtered["split"] == "test"].empty:
-            raise RuntimeError("Date-based split produced empty train or test set")
+        train_count = (filtered["split"] == "train").sum()
+        test_count = (filtered["split"] == "test").sum()
+        if train_count == 0 or test_count == 0:
+            raise RuntimeError(
+                f"Date-based split produced empty train or test set "
+                f"(train={train_count}, test={test_count}, "
+                f"dataset_rows={len(dataset)}, "
+                f"time_min={dataset['time'].min()}, time_max={dataset['time'].max()}, "
+                f"time_tz={dataset['time'].dt.tz}, "
+                f"train_mask_true={int(train_mask.sum())}, test_mask_true={int(test_mask.sum())})"
+            )
         return filtered
 
     split_index = int(len(dataset) * settings.training.train_split)

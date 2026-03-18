@@ -1,0 +1,149 @@
+# ─────────────────────────────────────────────────────────────────
+# LIVE TRADING CONFIG — Account 2 (433326057 / Exness-MT5Trial7)
+# Model:  outputs/model2_weekly500.pkl  (Model2 — weekly $500 target)
+# Symbol: XAUUSDm  |  Threshold: 0.55  |  Risk: 3-5% dynamic
+# ─────────────────────────────────────────────────────────────────
+app:
+  poll_seconds: 300
+  model_path:          outputs/model2_weekly500.pkl
+  scaler_path:         outputs/scaler2_weekly500.pkl
+  model_meta_path:     outputs/model_meta2_weekly500.json
+  training_report_path: outputs/training_report_acc2.json
+  training_plot_path:  outputs/training_metrics_acc2.png
+  backtest_report_path: outputs/backtest_report_acc2.json
+  backtest_trades_path: outputs/backtest_trades_acc2.csv
+  backtest_equity_plot_path: outputs/backtest_equity_acc2.png
+  backtest_trades_plot_path: outputs/backtest_trades_plot_acc2.png
+  walkforward_report_path: outputs/walkforward_report_acc2.json
+  walkforward_trades_path: outputs/walkforward_trades_acc2.csv
+  paper_trade_log_path: outputs/paper_trade_signals_acc2.csv
+  live_learning_log_path: outputs/live_learning_log_acc2.jsonl
+  live_closed_trades_path: outputs/live_closed_trades_acc2.csv
+  dashboard_host: 0.0.0.0
+  dashboard_port: 8501
+  log_level: INFO
+
+market:
+  symbol: XAUUSDm
+  training_symbol: XAUUSD=X
+  training_data_source: csv_folder
+  live_data_source: mt5
+  csv_folder_path: src/xauusd_ai/real_data
+  csv_timeframe: M15
+  higher_timeframe: D1
+  mid_timeframe: H1
+  structure_timeframe: H4
+  execution_timeframe: M15
+  bars:
+    D1: 100
+    H1: 500
+    H4: 200
+    M15: 300
+  timezone: UTC
+
+strategy:
+  rsi_period: 14
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  liquidity_lookback: 15
+  swing_lookback: 20
+  volatility_window: 20
+  signal_threshold: 0.55             # ACC2 Model2: threshold tối ưu từ backtest (0.55)
+  sideways_volatility_threshold: 0.003
+  strong_volatility_threshold: 0.010
+  news_block_minutes: 0
+  rsi_long_threshold: 52
+  rsi_short_threshold: 48
+  ict_weight: 0.40
+  wyckoff_weight: 0.35
+  momentum_weight: 0.25
+  min_strategy_score: 0.05
+  sideway_min_strategy_score: 0.05
+  strong_volatility_min_strategy_score: 0.10
+  require_trend_alignment: false    # Tắt — model confidence là cổng chính cho hướng
+  force_trade: false
+  blocked_hours_utc: []             # ACC2: không block giờ nào
+  blocked_weekdays_utc: []
+  blocked_weekday_hours_utc: {}
+
+risk:
+  mode: fixed_fractional
+  risk_per_trade: 0.05              # 5% max — dynamic (giảm dần khi drawdown)
+  risk_tier_floor: 0.03             # 3% floor khi drawdown >= 10%
+  max_open_positions: 3             # giới hạn concurrent
+  stop_loss_atr_multiple: 1.5
+  take_profit_rr: 3.5              # ACC2 Model2: RR 1:3.5
+  volatile_take_profit_rr: 5.0     # Volatile regime RR 1:5
+  sideway_take_profit_rr: 2.5      # Sideways regime RR 1:2.5
+  min_confidence: 0.55
+  fixed_lot: 0.01
+  max_risk_fraction: 0.08          # 8% cap tổng risk
+  sideway_risk_multiplier: 0.5
+  normal_risk_multiplier: 1.0
+  strong_volatility_risk_multiplier: 0.8
+
+execution:
+  auto_trade: true
+  deviation: 20
+  magic_number: 20260316            # Different magic number from acc1
+  comment: xauusd-ai-live-acc2
+  close_opposite_on_signal: true    # Chốt lệnh ngược chiều đang lời khi tín hiệu mới ngược hướng
+
+  trailing_sl:
+    enabled: true
+    breakeven_at_rr: 0.5
+    activation_rr: 1.0
+    trail_atr_multiple: 1.0
+
+  dca:
+    enabled: false
+    max_dca_count: 2
+    trigger_atr_multiple: 1.5
+    lot_multiplier: 1.5
+    max_total_risk_pct: 0.03
+
+training:
+  # ── RATIO SPLIT 70/30 — toàn bộ dữ liệu từ D1 đến M1 ────────────────────────
+  train_start_date: null
+  train_end_date:   null
+  test_start_date:  null
+  test_end_date:    null
+  train_split: 0.70                  # 70% train, 30% test — ~30k M15 bars test
+  label_horizon: 12                  # 12 × M15 = 3 giờ — TP 2:1 dễ đạt hơn
+  min_return_threshold: 0.0015       # Nhãn win ≥0.15% — thêm nhiều trade cơ hội
+  retrain_on_startup: false
+  live_learning_enabled: true
+  live_learning_interval_minutes: 30
+  live_learning_min_new_bars: 0
+  live_learning_min_rows: 500
+  save_dataset: true
+  dataset_path: outputs/training_dataset_acc2.csv
+  optimize_threshold: true
+  validation_split: 0.15
+  threshold_min: 0.30                # Model2: cho phép tìm từ 0.30 — nhiều lệnh hơn
+  threshold_max: 0.75
+  threshold_step: 0.01
+  min_precision_floor: 0.45          # WR >= 45% (EV dương với RR 3.5)
+  backtest_initial_balance: 200.0    # vốn khởi đầu
+
+notifications:
+  telegram_enabled: true
+  verbose_message: true
+
+integrations:
+  mt5:
+    enabled: true
+    login_env: MT5_LOGIN_ACC2
+    password_env: MT5_PASSWORD_ACC2
+    server_env: MT5_SERVER_ACC2
+    login: 433326057
+    password: "07032001bB@"
+    server: "Exness-MT5Trial7"
+    terminal_path: "C:\\Program Files\\MetaTrader 5 EXNESS\\terminal64.exe"
+  telegram:
+    token_env: TELEGRAM_BOT_TOKEN_ACC2
+    chat_id_env: TELEGRAM_CHAT_ID_ACC2
+  news:
+    enabled: false
+    provider: stub

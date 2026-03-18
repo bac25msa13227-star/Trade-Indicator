@@ -25,8 +25,8 @@ Write-Host "  Nhan Ctrl+C de dung tunnel" -ForegroundColor Yellow
 Write-Host "======================================================" -ForegroundColor Cyan
 Write-Host ""
 
-# Chạy tunnel và parse URL ra file
-& $CFExe tunnel --url http://localhost:8501 2>&1 | ForEach-Object {
+# Chạy tunnel với --protocol http2 (tránh QUIC bị block bởi firewall)
+& $CFExe tunnel --url http://localhost:8501 --protocol http2 2>&1 | ForEach-Object {
     $line = $_
     Write-Host $line
     if ($line -match "https://[a-z0-9\-]+\.trycloudflare\.com") {

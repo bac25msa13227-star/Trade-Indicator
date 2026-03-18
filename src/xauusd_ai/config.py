@@ -23,6 +23,7 @@ class AppSettings(BaseModel):
     walkforward_trades_path: str = "outputs/walkforward_trades.csv"
     paper_trade_log_path: str = "outputs/paper_trade_signals.csv"
     live_learning_log_path: str = "outputs/live_learning_log.jsonl"
+    live_closed_trades_path: str = "outputs/live_closed_trades.csv"
     dashboard_host: str = "0.0.0.0"
     dashboard_port: int = 8501
     log_level: str = "INFO"
@@ -75,6 +76,7 @@ class StrategySettings(BaseModel):
     sideway_min_strategy_score: float = 0.25
     strong_volatility_min_strategy_score: float = 0.2
     require_trend_alignment: bool = True
+    force_trade: bool = False  # Bypass ALL filters, trade every signal (for testing)
     blocked_hours_utc: list[int] = Field(default_factory=list)
     blocked_weekdays_utc: list[str] = Field(default_factory=list)
     blocked_weekday_hours_utc: dict[str, list[int]] = Field(default_factory=dict)
@@ -93,6 +95,17 @@ class RiskSettings(BaseModel):
     sideway_risk_multiplier: float = 0.45
     normal_risk_multiplier: float = 1.0
     strong_volatility_risk_multiplier: float = 0.75
+    # ── Regime-adaptive TP/SL multipliers ──────────────────────────────
+    # Sideways: SL chặt hơn (1.0× ATR), TP dễ hơn (RR 2.0) — ít room biến động
+    sideway_sl_atr_multiple: float = 1.0
+    sideway_take_profit_rr: float = 2.0
+    # Strong volatile: SL rộng hơn (2.5× ATR), TP lớn hơn (RR 4.0) — cho giá chạy xa
+    volatile_sl_atr_multiple: float = 2.5
+    volatile_take_profit_rr: float = 4.0
+    # Dynamic risk tier: tự điều chỉnh risk theo drawdown từ peak
+    # risk_tier_floor = 3% → dùng khi drawdown >= 10% từ peak balance
+    # risk_per_trade   = 5% → dùng khi balance ở peak (không có drawdown)
+    risk_tier_floor: float = 0.0  # 0 = disabled (flat risk). Set to e.g. 0.03 for 3% floor
 
 
 class TrailingSlSettings(BaseModel):
@@ -123,6 +136,7 @@ class ExecutionSettings(BaseModel):
     comment: str = "xauusd-ai"
     paper_trade_max_loops: int = 1
     paper_data_source: str = "csv_folder"
+    close_opposite_on_signal: bool = False  # Chốt lệnh ngược chiều đang lời khi có tín hiệu mới
     trailing_sl: TrailingSlSettings = Field(default_factory=TrailingSlSettings)
     dca: DcaSettings = Field(default_factory=DcaSettings)
 
@@ -136,7 +150,7 @@ class TrainingSettings(BaseModel):
     label_horizon: int = 8
     min_return_threshold: float = 0.0008
     retrain_on_startup: bool = True
-    live_learning_enabled: bool = False
+    live_learning_enabled: bool = True
     live_learning_min_new_bars: int = 12
     live_learning_min_rows: int = 500
     save_dataset: bool = True
@@ -161,11 +175,17 @@ class TrainingSettings(BaseModel):
     walkforward_label_horizons: list[int] = Field(default_factory=lambda: [6, 8, 12])
     walkforward_return_thresholds: list[float] = Field(default_factory=lambda: [0.0006, 0.0008, 0.001])
     walkforward_max_combinations: int = 30
+    walkforward_max_folds_per_combination: int = 0   # 0 = unlimited
     walkforward_max_avg_drawdown_pct: float = 18.0
     walkforward_min_avg_profit_factor: float = 1.0
     walkforward_min_avg_precision: float = 0.42
     walkforward_min_avg_return_pct: float = 2.0
     walkforward_min_avg_trades: float = 25.0
+    backtest_initial_balance: float = 200.0
+    # Cap compounding in backtest to prevent astronomical values.
+    # Effective balance for PnL is limited to start_bal × this multiplier.
+    # 0 = no cap (default). E.g. 200 caps at 200× initial = $40k for $200 start.
+    backtest_max_balance_multiplier: float = 200.0
 
 
 class NotificationSettings(BaseModel):
@@ -178,6 +198,11 @@ class Mt5IntegrationSettings(BaseModel):
     login_env: str = "MT5_LOGIN"
     password_env: str = "MT5_PASSWORD"
     server_env: str = "MT5_SERVER"
+    # Direct credentials (override env vars when set)
+    login: int | None = None
+    password: str | None = None
+    server: str | None = None
+    terminal_path: str | None = None  # Path to MT5 terminal64.exe folder
 
 
 class TelegramIntegrationSettings(BaseModel):

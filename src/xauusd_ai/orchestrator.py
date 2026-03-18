@@ -1,5 +1,7 @@
 ﻿from __future__ import annotations
 
+import datetime
+import html
 import itertools
 import json
 import logging
@@ -16,7 +18,7 @@ from xauusd_ai.config import Settings
 from xauusd_ai.data.market_data import MarketDataService
 from xauusd_ai.execution.mt5_executor import MT5Executor
 from xauusd_ai.execution.risk import RiskManager
-from xauusd_ai.features.dataset import build_live_feature_frame, prepare_training_dataset
+from xauusd_ai.features.dataset import build_live_feature_frame, prepare_training_dataset, build_merged_context
 from xauusd_ai.learning.self_learner import SelfLearner
 from xauusd_ai.model.trainer import ModelTrainer
 from xauusd_ai.notifications.telegram import TelegramNotifier
@@ -48,7 +50,7 @@ class _LearnerThread(threading.Thread):
         self._frames_q: queue.Queue[dict[str, pd.DataFrame]] = queue.Queue(maxsize=1)
         # HÃ ng Ä‘á»£i loss-retrain (loss_count, frames)
         self._loss_q: queue.Queue[tuple[int, dict[str, pd.DataFrame]]] = queue.Queue(maxsize=5)
-        self._stop = threading.Event()
+        self._stop_event = threading.Event()  # renamed to avoid conflict with Thread._stop() internal method
 
     # ------------------------------------------------------------------
     # Public API (gá»i tá»« main thread)
@@ -76,14 +78,14 @@ class _LearnerThread(threading.Thread):
             LOGGER.debug("LearnerThread: loss queue Ä‘áº§y, bá» qua láº§n nÃ y")
 
     def stop(self) -> None:
-        self._stop.set()
+        self._stop_event.set()
 
     # ------------------------------------------------------------------
     # Thread body
     # ------------------------------------------------------------------
     def run(self) -> None:
         LOGGER.info("LearnerThread: started (background learning)")
-        while not self._stop.is_set():
+        while not self._stop_event.is_set():
             # Æ¯u tiÃªn loss-retrain trÆ°á»›c (ngáº¯n hÆ¡n regular retrain)
             try:
                 loss_count, frames = self._loss_q.get_nowait()
@@ -220,6 +222,12 @@ def run_walkforward(settings: Settings) -> None:
     data_service, _, _, _, _, risk_manager = _bootstrap(settings)
     frames = data_service.fetch_multi_timeframe_data(source=settings.market.training_data_source)
 
+    # Build the expensive base merged frame once (includes news features fetch).
+    # Only strategy_score and labels need to be recomputed per combination.
+    LOGGER.info("WalkForward: building base merged context (once for all combinations)...")
+    base_merged = build_merged_context(settings, frames)
+    LOGGER.info("WalkForward: base merged context ready (%d rows)", len(base_merged))
+
     full_candidate_grid = list(
         itertools.product(
         settings.training.walkforward_ict_weights,
@@ -252,7 +260,45 @@ def run_walkforward(settings: Settings) -> None:
     else:
         candidate_grid = full_candidate_grid
 
-    for (
+    n_combos = len(candidate_grid)
+    progress_path = Path(settings.app.walkforward_report_path).parent / "walkforward_progress.json"
+    _wf_started_at = datetime.datetime.now()
+
+    def _write_progress(
+        completed: int,
+        status: str = "running",
+        current_params: dict | None = None,
+        best_so_far: dict | None = None,
+    ) -> None:
+        elapsed = (datetime.datetime.now() - _wf_started_at).total_seconds()
+        condensed: dict | None = None
+        if best_so_far:
+            condensed = {
+                "params": best_so_far.get("params", {}),
+                "avg_return_pct": best_so_far.get("avg_return_pct"),
+                "avg_profit_factor": best_so_far.get("avg_profit_factor"),
+                "avg_max_drawdown_pct": best_so_far.get("avg_max_drawdown_pct"),
+                "avg_precision": best_so_far.get("avg_precision"),
+                "avg_recall": best_so_far.get("avg_recall"),
+                "avg_trades": best_so_far.get("avg_trades"),
+            }
+        try:
+            progress_path.write_text(json.dumps({
+                "status": status,
+                "total_combinations": n_combos,
+                "completed_combinations": completed,
+                "pct_done": round(completed / n_combos * 100, 1) if n_combos > 0 else 0,
+                "elapsed_seconds": round(elapsed, 1),
+                "started_at": _wf_started_at.isoformat(),
+                "last_updated": datetime.datetime.now().isoformat(),
+                "current_params": current_params,
+                "best_so_far": condensed,
+            }, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+    _write_progress(0)
+    for combo_idx, (
         ict_weight,
         wyckoff_weight,
         momentum_weight,
@@ -263,7 +309,7 @@ def run_walkforward(settings: Settings) -> None:
         require_trend_alignment,
         label_horizon,
         return_threshold,
-    ) in candidate_grid:
+    ) in enumerate(candidate_grid):
         candidate_settings = settings.model_copy(deep=True)
         candidate_settings.strategy.ict_weight = ict_weight
         candidate_settings.strategy.wyckoff_weight = wyckoff_weight
@@ -278,7 +324,7 @@ def run_walkforward(settings: Settings) -> None:
 
         trainer = ModelTrainer(candidate_settings)
         strategy = HybridStrategy(candidate_settings)
-        dataset = prepare_training_dataset(candidate_settings, frames, strategy)
+        dataset = prepare_training_dataset(candidate_settings, frames, strategy, cached_merged=base_merged)
 
         fold_reports: list[dict[str, object]] = []
         fold_trade_frames: list[pd.DataFrame] = []
@@ -286,7 +332,11 @@ def run_walkforward(settings: Settings) -> None:
         test_size = candidate_settings.training.walkforward_test_size
         step_size = candidate_settings.training.walkforward_step_size
 
-        for fold_start in range(0, max(len(dataset) - train_size - test_size + 1, 0), step_size):
+        max_folds = candidate_settings.training.walkforward_max_folds_per_combination
+        fold_indices = range(0, max(len(dataset) - train_size - test_size + 1, 0), step_size)
+        if max_folds > 0:
+            fold_indices = list(fold_indices)[-max_folds:]
+        for fold_start in fold_indices:
             train_end = fold_start + train_size
             test_end = train_end + test_size
             fold_train = dataset.iloc[fold_start:train_end].copy()
@@ -297,7 +347,7 @@ def run_walkforward(settings: Settings) -> None:
             fold_dataset = pd.concat([fold_train, fold_test], ignore_index=True)
             fold_dataset["split"] = "train"
             fold_dataset.loc[len(fold_train):, "split"] = "test"
-            metrics = trainer.train(fold_dataset)
+            metrics = trainer.train(fold_dataset, save_artifacts=False)
             predictions = trainer.predict_dataset(fold_dataset)
             simulation = simulate_prediction_backtest(predictions, candidate_settings, risk_manager)
             fold_report = {
@@ -326,6 +376,11 @@ def run_walkforward(settings: Settings) -> None:
                 fold_trade_frames.append(trades)
 
         if not fold_reports:
+            _write_progress(combo_idx + 1, current_params={
+                "ict_weight": ict_weight, "wyckoff_weight": wyckoff_weight,
+                "momentum_weight": momentum_weight,
+            }, best_so_far=best_summary or best_fallback_summary)
+            LOGGER.info("WalkForward: combo %d/%d | no valid folds, skipping", combo_idx + 1, n_combos)
             continue
 
         avg_recall = sum(report["train_metrics"]["recall"] for report in fold_reports) / len(fold_reports)
@@ -385,6 +440,17 @@ def run_walkforward(settings: Settings) -> None:
             best_fallback_score = composite_score
             fallback_trade_frames = fold_trade_frames
 
+        _write_progress(combo_idx + 1, current_params={
+            "ict_weight": ict_weight, "wyckoff_weight": wyckoff_weight,
+            "momentum_weight": momentum_weight,
+        }, best_so_far=best_summary or best_fallback_summary)
+        LOGGER.info(
+            "WalkForward: combo %d/%d done | score=%.4f | return=%.2f%% | pf=%.3f | dd=%.2f%% | %s",
+            combo_idx + 1, n_combos, composite_score,
+            avg_return, avg_profit_factor, avg_drawdown,
+            "qualified" if passes_guardrails else "filtered",
+        )
+
     if best_summary is None:
         if best_fallback_summary is None:
             raise RuntimeError("Walk-forward could not produce any valid folds")
@@ -406,6 +472,7 @@ def run_walkforward(settings: Settings) -> None:
     Path(settings.app.walkforward_report_path).write_text(json.dumps(best_summary, indent=2), encoding="utf-8")
     if not walkforward_trades.empty:
         walkforward_trades.to_csv(settings.app.walkforward_trades_path, index=False)
+    _write_progress(n_combos, status="done", best_so_far=best_summary)
     LOGGER.info("Walk-forward best summary: %s", best_summary)
     print(json.dumps(best_summary, indent=2))
 
@@ -507,22 +574,71 @@ def run_live_loop(settings: Settings) -> None:
         _dca_state_path.parent.mkdir(parents=True, exist_ok=True)
         _dca_state_path.write_text(json.dumps(state), encoding="utf-8")
 
+    # ── Live closed trades log ────────────────────────────────────────────────
+    _live_trades_path = Path(settings.app.live_closed_trades_path)
+    _live_trades_path.parent.mkdir(parents=True, exist_ok=True)    # Reset closed trades + signals CSV at each session start — dashboard chỉ hiển thị session hiện tại
+    _live_trades_header = "time,ticket,side,volume,open_price,close_price,profit,swap,commission,pnl,is_win\n"
+    _live_trades_path.write_text(_live_trades_header, encoding="utf-8")
+    _signals_path = Path(settings.app.paper_trade_log_path)
+    _signals_path.parent.mkdir(parents=True, exist_ok=True)
+    _signals_path.write_text("", encoding="utf-8")  # clear stale signals from previous sessions
+    def _append_live_trade(pos: dict, pnl: float, is_win: bool) -> None:
+        """Ghi lệnh đóng vào CSV để dashboard P&L đọc được."""
+        import datetime as _dt
+        row = pd.DataFrame([{
+            "time":        _dt.datetime.now(_dt.timezone.utc).isoformat(),
+            "ticket":      pos.get("ticket", 0),
+            "side":        pos.get("side", ""),
+            "volume":      pos.get("volume", 0),
+            "open_price":  pos.get("open_price", 0),
+            "close_price": pos.get("close_price", 0),
+            "profit":      pos.get("profit", 0),
+            "swap":        pos.get("swap", 0),
+            "commission":  pos.get("commission", 0),
+            "pnl":         pnl,
+            "is_win":      is_win,
+        }])
+        if _live_trades_path.exists():
+            row.to_csv(_live_trades_path, mode="a", header=False, index=False)
+        else:
+            row.to_csv(_live_trades_path, index=False)
+
     last_seen_bar_time: pd.Timestamp | None = None
-    accumulated_new_bars = 0
+    last_learning_time: float = time.time()
     # â”€â”€ Loss learning state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    _last_closed_check_epoch: float = time.time()
+    _last_closed_check_epoch: float = time.time() - 300  # look back 5 min on startup
     _known_loss_tickets: set[int] = set()
     _accumulated_losses: int = 0
 
     try:
+        # ── Đọc public dashboard URL từ tunnel (nếu có) ─────────────────
+        _tunnel_url_file = Path("outputs/tunnel_url.txt")
+        _dashboard_line = ""
+        if _tunnel_url_file.exists():
+            try:
+                _tunnel_url = _tunnel_url_file.read_text(encoding="utf-8").strip()
+                if _tunnel_url:
+                    _dashboard_line = f"\n└ Dashboard: {_tunnel_url}"
+            except Exception:
+                pass
+        notifier.send_message(
+            f"🟢 <b>Bot khởi động</b> — {settings.market.symbol}\n"
+            f"├ Risk: {settings.risk.risk_per_trade*100:.1f}%/lệnh | RR: {settings.risk.take_profit_rr}\n"
+            f"├ Live learning: {'BẬT' if settings.training.live_learning_enabled else 'TẮT'}"
+            f"{_dashboard_line}"
+        )
         while True:
             try:
-                # â”€â”€ Reload model náº¿u background learner vá»«a train xong â”€â”€â”€â”€â”€â”€â”€â”€
+                # ── Reload model nếu background learner vừa train xong ────────
                 if _model_reload_event.is_set():
                     with _model_lock:
                         trainer.load_artifacts()
                     _model_reload_event.clear()
                     LOGGER.info("Model reloaded from background LearnerThread")
+                    notifier.send_message(
+                        f"🧠 <b>Model cập nhật</b> từ live learning\n"
+                        f"Lần retrain #{self_learner._retrain_count}"
+                    )
 
                 frames = data_service.fetch_multi_timeframe_data(source=settings.market.live_data_source)
                 execution_frame = frames[settings.market.execution_timeframe]
@@ -530,7 +646,6 @@ def run_live_loop(settings: Settings) -> None:
                 if last_seen_bar_time is None:
                     last_seen_bar_time = latest_bar_time
                 elif latest_bar_time > last_seen_bar_time:
-                    accumulated_new_bars += int((execution_frame["time"] > last_seen_bar_time).sum())
                     last_seen_bar_time = latest_bar_time
 
                 # â”€â”€ Láº¥y thÃ´ng tin tÃ i khoáº£n â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -540,16 +655,17 @@ def run_live_loop(settings: Settings) -> None:
                     magic_number=settings.execution.magic_number
                 )
 
-                # â”€â”€ Self-learning (song song) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-                # KhÃ´ng block main loop â€” gá»­i frames cho background thread xá»­ lÃ½
+                # ── Self-learning (theo thời gian, mỗi X phút) ──────────────
                 if (
                     settings.training.live_learning_enabled
                     and learner_thread is not None
-                    and accumulated_new_bars >= settings.training.live_learning_min_new_bars
                 ):
-                    learner_thread.submit_frames(frames)
-                    accumulated_new_bars = 0
-                    LOGGER.debug("Self-learning: submitted frames to background LearnerThread")
+                    interval_sec = int(getattr(settings.training, "live_learning_interval_minutes", 30)) * 60
+                    now = time.time()
+                    if now - last_learning_time >= interval_sec:
+                        learner_thread.submit_frames(frames)
+                        last_learning_time = now
+                        LOGGER.debug(f"Self-learning: submitted frames to background LearnerThread (interval {interval_sec//60} min)")
 
                 # â”€â”€ Build live feature frame (cáº§n ATR cho Trailing SL + DCA) â”€â”€
                 live_frame = build_live_feature_frame(settings, frames, strategy)
@@ -575,20 +691,46 @@ def run_live_loop(settings: Settings) -> None:
                             if pnl < 0:
                                 _accumulated_losses += 1
                                 self_learner._accumulated_losses = _accumulated_losses
-                                analysis = self_learner.log_loss_analysis(pos, latest_row)
-                                reason_str = " | ".join(analysis.get("reasons", []))
                                 LOGGER.warning(
-                                    "LOSS detected ticket=%d side=%s pnl=%.2f | %s",
-                                    ticket, pos.get("side"), pnl, reason_str,
+                                    "LOSS detected ticket=%d side=%s pnl=%.2f",
+                                    ticket, pos.get("side"), pnl,
                                 )
+                                # Run analysis separately — never let it block the notification
+                                _feat: dict = {}
+                                _reasons: list[str] = []
+                                try:
+                                    analysis = self_learner.log_loss_analysis(pos, latest_row)
+                                    _feat = analysis.get("features", {})
+                                    _reasons = analysis.get("reasons", [])
+                                    LOGGER.warning("LOSS reasons: %s", " | ".join(_reasons))
+                                except Exception as _ae:
+                                    LOGGER.error("Loss analysis failed (notification still sent): %s", _ae)
+                                _regime_label = {0: "sideway", 1: "normal", 2: "volatile"}.get(
+                                    int(_feat.get("volatility_regime", 1)), "?"
+                                )
+                                _reasons_text = "\n".join(
+                                    f"  \u2022 {html.escape(str(r))}" for r in _reasons
+                                ) if _reasons else "  • Khong xac dinh ro nguyen nhan"
                                 notifier.send_message(
-                                    f"âš ï¸ Lá»‡nh THUA #{ticket} ({pos.get('side','?').upper()}) "
-                                    f"P&L={pnl:.2f}$\n"
-                                    f"NguyÃªn nhÃ¢n:\n" +
-                                    "\n".join(f"â€¢ {r}" for r in analysis.get("reasons", []))
+                                    f"\u26a0\ufe0f <b>Lenh THUA #{ticket}</b> ({pos.get('side','?').upper()}) \u2014 Loss #{_accumulated_losses}\n"
+                                    f"\u251c P&amp;L: <b>{pnl:.2f}$</b>\n"
+                                    f"\u251c Entry: {pos.get('open_price', 0):.5f} \u2192 Close: {pos.get('close_price', 0):.5f}\n"
+                                    f"\u251c Volume: {pos.get('volume', 0):.2f} lot\n"
+                                    f"\u251c ATR: {_feat.get('atr', 0):.2f} | RSI: {_feat.get('rsi', 0):.1f} | Score: {_feat.get('strategy_score', 0):.3f}\n"
+                                    f"\u251c Regime: {_regime_label} | Trend: {'OK' if int(_feat.get('trend_alignment', 0)) == 1 else 'MISS'}\n"
+                                    f"\u2514 Nguyen nhan:\n{_reasons_text}"
                                 )
+                                _append_live_trade(pos, pnl, is_win=False)
                             else:
                                 LOGGER.info("Position closed in profit: ticket=%d pnl=%.2f", ticket, pnl)
+                                notifier.send_message(
+                                    f"✅ <b>Lenh THANG #{ticket}</b> ({pos.get('side','?').upper()})\n"
+                                    f"├ P&amp;L: <b>+{pnl:.2f}$</b>\n"
+                                    f"├ Entry: {pos.get('open_price', 0):.5f} → Close: {pos.get('close_price', 0):.5f}\n"
+                                    f"├ Volume: {pos.get('volume', 0):.2f} lot\n"
+                                    f"└ Profit: {pos.get('profit', 0):.2f}$ | Swap: {pos.get('swap', 0):.2f}$ | Comm: {pos.get('commission', 0):.2f}$"
+                                )
+                                _append_live_trade(pos, pnl, is_win=True)
 
                         # Trigger loss-retrain (song song) sau LOSS_RETRAIN_THRESHOLD lá»‡nh thua
                         if (
@@ -600,8 +742,8 @@ def run_live_loop(settings: Settings) -> None:
                             )
                             learner_thread.submit_loss(_accumulated_losses, frames)
                             notifier.send_message(
-                                f"ðŸ”„ Äang há»c láº¡i sau {_accumulated_losses} lá»‡nh thua "
-                                f"(background â€” khÃ´ng dá»«ng giao dá»‹ch)"
+                                f"🔄 <b>Đang học lại</b> sau {_accumulated_losses} lệnh thua\n"
+                                f"(background – không dừng giao dịch)"
                             )
                             _accumulated_losses = 0
                             self_learner._accumulated_losses = 0
@@ -699,7 +841,7 @@ def run_live_loop(settings: Settings) -> None:
                             LOGGER.info("NEWS BLOCK: %s", news_reason)
                             decision = decision.__class__(
                                 should_trade=False,
-                                side="flat",
+                                side=decision.side,  # giữ hướng gốc để simulate
                                 confidence=decision.confidence,
                                 reason=f"NEWS BLOCK: {news_reason}",
                                 entry_price=decision.entry_price,
@@ -716,14 +858,14 @@ def run_live_loop(settings: Settings) -> None:
                 )
                 max_allowed = risk_manager.get_dynamic_max_positions(account_balance, volatility_regime)
 
-                if decision.should_trade and not position_allowed:
+                if decision.should_trade and not position_allowed and not settings.strategy.force_trade:
                     LOGGER.warning(
                         "Position gate BLOCKED: %s | balance=%.2f open=%d max=%d",
                         position_reason, account_balance, open_positions, max_allowed,
                     )
                     decision = decision.__class__(
                         should_trade=False,
-                        side="flat",
+                        side=decision.side,  # giữ hướng gốc để simulate
                         confidence=decision.confidence,
                         reason=position_reason,
                         entry_price=decision.entry_price,
@@ -759,15 +901,63 @@ def run_live_loop(settings: Settings) -> None:
                     "open_positions": open_positions,
                     "max_positions": max_allowed,
                 }])
-                if log_path.exists():
-                    signal_row.to_csv(log_path, mode="a", header=False, index=False)
-                else:
-                    signal_row.to_csv(log_path, index=False)
+                # Write with header if file is empty/new, append without header otherwise
+                _write_header = not log_path.exists() or log_path.stat().st_size == 0
+                signal_row.to_csv(log_path, mode="a", header=_write_header, index=False)
 
-                # â”€â”€ Äáº·t lá»‡nh tháº­t â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                # ── Ghi live_status.json để dashboard đọc account state realtime ──
+                import datetime as _dtnow
+                _is_acc2 = "acc2" in log_path.stem
+                _status_path = log_path.parent / ("live_status_acc2.json" if _is_acc2 else "live_status_acc1.json")
+                try:
+                    _status_path.write_text(json.dumps({
+                        "ts": _dtnow.datetime.now(_dtnow.timezone.utc).isoformat(),
+                        "bar_time": str(latest_bar_time),
+                        "account_balance": account_balance,
+                        "open_positions": open_positions,
+                        "max_positions": max_allowed,
+                        "volatility_regime": volatility_regime,
+                        "confidence": round(decision.confidence, 4),
+                        "should_trade": decision.should_trade,
+                        "side": decision.side,
+                        "reason": decision.reason,
+                    }, ensure_ascii=False), encoding="utf-8")
+                except Exception:
+                    pass
+
+                # ── Đặt lệnh thật ──────────────────────────────────────────────────────────
                 if decision.should_trade:
                     notifier.send_signal(decision, order_plan)
                     if settings.execution.auto_trade:
+                        # ── Chốt lệnh ngược chiều đang lời trước khi vào lệnh mới ──
+                        if settings.execution.close_opposite_on_signal:
+                            try:
+                                _opposite = "sell" if decision.side == "buy" else "buy"
+                                _current_positions = executor.get_open_positions(
+                                    magic_number=settings.execution.magic_number
+                                )
+                                for _opos in _current_positions:
+                                    if _opos["side"] != _opposite:
+                                        continue
+                                    _opos_pnl = _opos["profit"] + _opos.get("swap", 0)
+                                    if _opos_pnl > 0:
+                                        try:
+                                            executor.close_position(_opos["ticket"], _opos["volume"])
+                                            LOGGER.info(
+                                                "CloseOpposite: closed ticket=%d %s profit=%.2f | new signal=%s",
+                                                _opos["ticket"], _opos["side"], _opos_pnl, decision.side,
+                                            )
+                                            notifier.send_message(
+                                                f"🔄 <b>Chốt lệnh ngược chiều #{_opos['ticket']}</b> ({_opos['side'].upper()})\n"
+                                                f"├ P&L: +{_opos_pnl:.2f}$\n"
+                                                f"├ Entry: {_opos['open_price']:.3f} | Lot: {_opos['volume']:.2f}\n"
+                                                f"└ Tín hiệu mới: {decision.side.upper()} — chốt lời lệnh ngược chiều"
+                                            )
+                                        except Exception as _ce:
+                                            LOGGER.error("CloseOpposite failed ticket=%d: %s", _opos["ticket"], _ce)
+                            except Exception as _oe:
+                                LOGGER.error("CloseOpposite scan error: %s", _oe)
+
                         try:
                             result = executor.place_order(order_plan)
                             LOGGER.info(
@@ -790,11 +980,14 @@ def run_live_loop(settings: Settings) -> None:
             time.sleep(settings.app.poll_seconds)
 
     finally:
-        # Dá»«ng background learner thread khi main loop káº¿t thÃºc (vÃ­ dá»¥ Ctrl+C)
         if learner_thread is not None:
             learner_thread.stop()
             learner_thread.join(timeout=10)
             LOGGER.info("LearnerThread stopped")
+        try:
+            notifier.send_message("🔴 <b>Bot đã dừng</b> (shutdown / Ctrl+C)")
+        except Exception:
+            pass
 
 
 def run_mt5_check(settings: Settings) -> None:

@@ -1,6 +1,6 @@
 # ─────────────────────────────────────────────────────────────────
 # ICT + Wyckoff Enhanced Training Config
-# Train: 2022-01-01 → 2025-12-31  |  Test: 2026-01-01 → 2026-03-09
+# Train: Dec 2021 → Dec 2024 (3 năm)  |  Test: Jan 2025 → Mar 2026 (15 tháng)
 # ─────────────────────────────────────────────────────────────────
 app:
   model_path: outputs/model_ict_wyckoff.pkl
@@ -8,10 +8,10 @@ app:
   model_meta_path: outputs/model_meta_ict_wyckoff.json
   training_report_path: outputs/training_report_ict_wyckoff.json
   training_plot_path: outputs/training_metrics_ict_wyckoff.png
-  backtest_report_path: outputs/backtest_report_ict_wyckoff.json
-  backtest_trades_path: outputs/backtest_trades_ict_wyckoff.csv
-  backtest_equity_plot_path: outputs/backtest_equity_ict_wyckoff.png
-  backtest_trades_plot_path: outputs/backtest_trades_plot_ict_wyckoff.png
+  backtest_report_path: outputs/backtest_report_acc1.json
+  backtest_trades_path: outputs/backtest_trades_acc1.csv
+  backtest_equity_plot_path: outputs/backtest_equity_acc1.png
+  backtest_trades_plot_path: outputs/backtest_trades_plot_acc1.png
   walkforward_report_path: outputs/walkforward_report_ict_wyckoff.json
   walkforward_trades_path: outputs/walkforward_trades_ict_wyckoff.csv
   paper_trade_log_path: outputs/paper_trade_signals.csv
@@ -46,35 +46,42 @@ strategy:
   liquidity_lookback: 15
   swing_lookback: 20            # BOS/CHoCH lookback
   volatility_window: 20
-  signal_threshold: 0.50
+  signal_threshold: 0.65             # Hạ xuống 0.65 — tăng số lượng tín hiệu/fold
   sideways_volatility_threshold: 0.003
   strong_volatility_threshold: 0.010
   news_block_minutes: 0
   rsi_long_threshold: 52
   rsi_short_threshold: 48
-  ict_weight: 0.40              # ICT tăng weight vì thêm nhiều ICT features
-  wyckoff_weight: 0.35          # Wyckoff weight cao
+  ict_weight: 0.40
+  wyckoff_weight: 0.35
   momentum_weight: 0.25
-  min_strategy_score: 0.10
+  min_strategy_score: 0.05           # Giảm xuống 0.05 — để model confidence là cổng chính
   sideway_min_strategy_score: 0.05
   strong_volatility_min_strategy_score: 0.10
-  require_trend_alignment: false
+  require_trend_alignment: false     # Tắt — để model tự quyết định hướng; strategy_score đã bao gồm trend
   blocked_hours_utc: []
   blocked_weekdays_utc: []
   blocked_weekday_hours_utc: {}
 
 risk:
   mode: fixed_fractional
-  risk_per_trade: 0.0065
-  max_open_positions: 1
-  stop_loss_atr_multiple: 1.8
-  take_profit_rr: 2.2
-  min_confidence: 0.45
+  risk_per_trade: 0.06              # 6% risk/lệnh — compound mạnh hơn
+  max_open_positions: 3
+  # ── Normal regime (default) ──
+  stop_loss_atr_multiple: 1.5
+  take_profit_rr: 3.0               # RR 1:3 normal
+  min_confidence: 0.70
   fixed_lot: 0.01
-  max_risk_fraction: 0.011
-  sideway_risk_multiplier: 0.3
-  normal_risk_multiplier: 0.9
-  strong_volatility_risk_multiplier: 0.55
+  max_risk_fraction: 0.08
+  # ── Sideways regime: SL chặt hơn, TP gần hơn ──
+  sideway_sl_atr_multiple: 1.0      # SL hẹp trong sideways
+  sideway_take_profit_rr: 2.0       # TP gần — ít room hơn
+  # ── Volatile regime: SL rộng hơn, TP xa hơn ──
+  volatile_sl_atr_multiple: 2.5     # SL rộng — tránh bị quét
+  volatile_take_profit_rr: 4.0      # TP xa — bắt trend mạnh
+  sideway_risk_multiplier: 0.5
+  normal_risk_multiplier: 1.0
+  strong_volatility_risk_multiplier: 0.8
 
 execution:
   auto_trade: false
@@ -83,16 +90,15 @@ execution:
   comment: xauusd-ai-ict-wyckoff
 
 training:
-  # ── DATE-BASED SPLIT ──────────────────────────────────────────
-  train_start_date: "2022-01-01"
-  train_end_date:   "2025-12-31"
-  test_start_date:  "2026-01-01"
-  test_end_date:    "2026-03-13"
-  # ─────────────────────────────────────────────────────────────
-  train_split: 0.80
-  label_horizon: 6
-  min_return_threshold: 0.0006
-  retrain_on_startup: false
+  # ── DATE-BASED SPLIT: train đến hết 2024, test toàn bộ 2025 + YTD 2026 ──────
+  train_start_date: "2023-01-01"   # train 2 năm gần nhất (2023-2024) — khớp walk-forward
+  train_end_date:   "2024-12-31"   # train đến hết 2024
+  test_start_date:  "2025-01-01"   # test toàn bộ 2025 + YTD 2026
+  test_end_date:    null           # đến cuối data (Mar 2026)
+  # ─────────────────────────────────────────────────────────────────────
+  train_split: 0.70                  # bị bỏ qua khi dùng date split
+  label_horizon: 16                  # 16 × M15 = 4 giờ
+  min_return_threshold: 0.0012       # Nhãn win ≥0.12%
   live_learning_enabled: true
   live_learning_min_new_bars: 12
   live_learning_min_rows: 500
@@ -100,10 +106,12 @@ training:
   dataset_path: outputs/training_dataset_ict_wyckoff.csv
   optimize_threshold: true
   validation_split: 0.15
-  threshold_min: 0.45
+  threshold_min: 0.40                # Hạ xuống 0.40 — tăng recall → nhiều lệnh hơn
   threshold_max: 0.80
   threshold_step: 0.01
-  min_precision_floor: 0.52
+  min_precision_floor: 0.50          # Hạ xuống 0.50 — cho phép thêm threshold thấp hơn → nhiều lệnh
+  backtest_initial_balance: 200.0    # vốn khởi đầu 200 USD
+  backtest_max_balance_multiplier: 200.0  # cap 200× = $40k — tránh compounding vô lý
 
 notifications:
   telegram_enabled: false

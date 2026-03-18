@@ -66,6 +66,8 @@ class SelfLearner:
         # Trạng thái loss learning
         self._accumulated_losses: int = 0
         self._loss_patterns: list[dict] = []  # features của các lệnh thua gần đây
+        # Pre-load historical CSV để live-learning có đủ dataset ngay từ đầu
+        self._preload_csv_cache()
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -80,7 +82,14 @@ class SelfLearner:
         try:
             # Gộp frames mới vào cache
             frames = self._merge_with_cache(frames)
-            dataset = prepare_training_dataset(self.settings, frames, self.strategy)
+            # Dùng ratio-based split (80/20) thay vì date-based khi live-learning
+            # để tránh lỗi khi test_end_date đã qua
+            live_settings = self.settings.model_copy(deep=True)
+            live_settings.training.train_start_date = None
+            live_settings.training.train_end_date = None
+            live_settings.training.test_start_date = None
+            live_settings.training.test_end_date = None
+            dataset = prepare_training_dataset(live_settings, frames, self.strategy)
             if len(dataset) < self.settings.training.live_learning_min_rows:
                 LOGGER.info(
                     "SelfLearner: dataset quá nhỏ (%d rows), bỏ qua", len(dataset)
@@ -208,6 +217,45 @@ class SelfLearner:
             self._last_fetch_ts = now
 
         return merged
+
+    def _preload_csv_cache(self) -> None:
+        """Pre-load historical CSV data vào cache để live-learning luôn có đủ dataset."""
+        csv_path = Path(self.settings.market.csv_folder_path)
+        if not csv_path.exists():
+            LOGGER.warning("SelfLearner: csv_folder_path không tồn tại, bỏ qua preload")
+            return
+        tf_file_map = {
+            "M1": "XAUUSDm_M1.csv",
+            "M5": "XAUUSDm_M5.csv",
+            "M15": "XAUUSDm_M15.csv",
+            "M30": "XAUUSDm_M30.csv",
+            "H1": "XAUUSDm_H1.csv",
+            "H4": "XAUUSDm_H4.csv",
+            "D1": "XAUUSDm_D1.csv",
+        }
+        for tf, fname in tf_file_map.items():
+            fpath = csv_path / fname
+            if not fpath.exists():
+                continue
+            try:
+                df = pd.read_csv(fpath)
+                df["time"] = pd.to_datetime(df["time"], utc=True)
+                # Chỉ lấy 3000 hàng gần nhất để tránh retrain quá lâu
+                df = df.sort_values("time").tail(3000).reset_index(drop=True)
+                if "tick_volume_delta" not in df.columns:
+                    tv = df["tick_volume"] if "tick_volume" in df.columns else pd.Series(0, index=df.index)
+                    df["tick_volume_delta"] = tv.diff().fillna(0)
+                if "volume_imbalance" not in df.columns:
+                    rng = (df["high"] - df["low"]).replace(0, float("nan"))
+                    df["volume_imbalance"] = (df["close"] - df["open"]).abs() / rng
+                    df["volume_imbalance"] = df["volume_imbalance"].fillna(0)
+                if "spread_points" not in df.columns:
+                    df["spread_points"] = df["spread"] if "spread" in df.columns else 0
+                self._cached_frames[tf] = df
+                LOGGER.info("SelfLearner preload: %s -> %d rows", fname, len(df))
+            except Exception as exc:
+                LOGGER.warning("SelfLearner preload failed %s: %s", fname, exc)
+        self._last_fetch_ts = time.time()  # skip immediate yfinance fetch
 
     def _log_event(self, event: dict) -> None:
         with self._log_path.open("a", encoding="utf-8") as fh:
