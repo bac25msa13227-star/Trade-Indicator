@@ -232,6 +232,17 @@ class MT5Executor:
         if tick is None:
             raise RuntimeError(f"No tick data for {plan.symbol}")
 
+        # P1b: Spread gate — reject order if spread too wide
+        _spread_pts = tick.ask - tick.bid
+        _max_spread = float(getattr(self.settings.risk, 'max_spread_points', 0))
+        if _max_spread > 0 and _spread_pts > _max_spread:
+            import logging as _log
+            _log.getLogger(__name__).warning(
+                "Spread %.1f > max %.1f — order rejected for %s",
+                _spread_pts, _max_spread, plan.symbol,
+            )
+            return None
+
         # Round SL/TP to symbol's decimal precision so broker stores them correctly
         _sinfo = mt5.symbol_info(plan.symbol)
         _digits = _sinfo.digits if _sinfo is not None else 5

@@ -61,7 +61,23 @@ class NewsFilter:
         self.settings = settings
 
     def upcoming_events(self) -> list[NewsEvent]:
-        return []
+        try:
+            from xauusd_ai.data.news_features import build_news_calendar
+            now = pd.Timestamp.now(tz="UTC")
+            cal = build_news_calendar(now, now + pd.Timedelta(hours=24))
+            if cal.empty:
+                return []
+            hi = cal[cal["impact"] == "High"]
+            return [
+                NewsEvent(
+                    title=str(row["event"]),
+                    timestamp=row["datetime_utc"].to_pydatetime(),
+                    impact=str(row["impact"]),
+                )
+                for _, row in hi.iterrows()
+            ]
+        except Exception:
+            return []
 
 
 class MarketDataService:
@@ -105,14 +121,15 @@ class MarketDataService:
         }
         timeframe = mt5_timeframe_map[timeframe_name]
         mt5.symbol_select(self.settings.market.symbol, True)
-        # Retry — MT5 cần thời gian download history sau khi khởi động lần đầu
+        # Retry with exponential backoff — MT5 needs time to download history on first start
+        import time as _time
         rates = None
-        for _attempt in range(30):  # 30 × 3s = tối đa 90 giây
+        for _attempt in range(10):
             rates = mt5.copy_rates_from_pos(self.settings.market.symbol, timeframe, 0, bars)
             if rates is not None and len(rates) > 0:
                 break
-            import time as _time
-            _time.sleep(3)
+            _sleep = min(3 * (1.5 ** _attempt), 15)  # 3s, 4.5s, 6.75s, ... max 15s
+            _time.sleep(_sleep)
         if rates is None or len(rates) == 0:
             raise RuntimeError(f"No rates returned for {self.settings.market.symbol} {timeframe_name}")
 

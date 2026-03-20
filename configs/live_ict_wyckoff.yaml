@@ -103,6 +103,17 @@ execution:
     lot_multiplier: 1.5
     max_total_risk_pct: 0.03
 
+  exit_model:
+    enabled: false                  # Bật sau khi train: python scripts/train_exit_model.py --config configs/live_ict_wyckoff.yaml
+    exit_model_path: "outputs/exit_model.pkl"
+    exit_scaler_path: "outputs/exit_scaler.pkl"
+    exit_model_meta_path: "outputs/exit_model_meta.json"
+    exit_threshold: 0.60            # Xác suất tối thiểu để chốt lời sớm
+    min_unrealized_rr: 0.30         # Chỉ xem xét exit khi đang lời >= 0.3R
+    exit_min_hold_bars: 2           # Không exit trước khi giữ lệnh ít nhất 2 nến
+    also_cut_losses: false          # Tắt: không cắt lỗ sớm
+    min_loss_rr: -0.50              # (Dùng khi also_cut_losses: true)
+
 training:
   train_start_date: null
   train_end_date:   null

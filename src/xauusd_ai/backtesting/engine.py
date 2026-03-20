@@ -39,6 +39,14 @@ def simulate_prediction_backtest(
     trades: list[dict[str, object]] = []
     skipped_by_filters = 0
 
+    # Friction components (fraction of 1R deducted per trade)
+    _spread_rr = float(getattr(settings.risk, "spread_cost_rr", 0.10))
+    _slippage_rr = float(getattr(settings.risk, "slippage_rr", 0.05))
+    _commission_rr = float(getattr(settings.risk, "commission_rr", 0.02))
+    friction_rr = _spread_rr + _slippage_rr + _commission_rr
+    compound_cap = float(getattr(settings.risk, "compound_cap", 50.0))
+    max_balance = start_bal * compound_cap if compound_cap > 0 else float("inf")
+
     for row in test_rows.itertuples(index=False):
         if row.prediction == 0:
             continue
@@ -48,10 +56,14 @@ def simulate_prediction_backtest(
             continue
         # Fixed fractional: use exact risk_per_trade (no regime/score scaling in backtest).
         risk_fraction = settings.risk.risk_per_trade
-        # compound=False: always use starting balance for PnL — prevents astronomical numbers
-        # in long-window backtests with high WR strategies.
         effective_bal = balance if compound else start_bal
-        pnl = effective_bal * risk_fraction * row.realized_rr
+        if compound and compound_cap > 0 and effective_bal > max_balance:
+            effective_bal = max_balance
+        # P1a: Session-aware friction
+        _sess_mult = float(getattr(row, 'session_spread_mult', 1.0))
+        _row_friction = _spread_rr * _sess_mult + _slippage_rr + _commission_rr
+        net_rr = row.realized_rr - _row_friction
+        pnl = effective_bal * risk_fraction * net_rr
         balance_before = balance
         balance += pnl
         peak_balance = max(peak_balance, balance)
@@ -95,7 +107,7 @@ def simulate_prediction_backtest(
         gross_profit = float(trades_df.loc[trades_df["pnl"] > 0, "pnl"].sum())
         gross_loss = float(-trades_df.loc[trades_df["pnl"] < 0, "pnl"].sum())
         profit_factor = gross_profit / gross_loss if gross_loss > 0 else 0.0
-        avg_holding_bars = float(predictions.get("holding_bars", pd.Series([settings.training.label_horizon])).mean())
+        avg_holding_bars = float(predictions.get("bars_held", pd.Series([settings.training.label_horizon])).mean())
         pnl_std = float(trades_df["pnl"].std()) if len(trades_df) > 1 else 0.0
         sharpe = float((trades_df["pnl"].mean() / pnl_std) * (len(trades_df) ** 0.5)) if pnl_std > 0 else 0.0
         avg_win = float(trades_df.loc[trades_df["pnl"] > 0, "pnl"].mean()) if wins > 0 else 0.0
@@ -124,6 +136,8 @@ def simulate_prediction_backtest(
         "worst_trade": round(float(trades_df["pnl"].min()) if not trades_df.empty else 0.0, 2),
         "sharpe_like": round(sharpe, 4),
         "avg_holding_bars": round(avg_holding_bars, 2),
+        "friction_rr": round(friction_rr, 4),
+        "compound_cap": compound_cap,
     }
     return SimulationResult(report=report, trades=trades_df)
 
@@ -136,22 +150,17 @@ def simulate_dynamic_concurrent_backtest(
     compound: bool = True,
 ) -> SimulationResult:
     """
-    Concurrent position simulation with dynamic slot scaling.
+    Concurrent position simulation with dynamic slot scaling and realistic friction.
+
+    Realism layers (configurable via RiskSettings):
+      - spread_cost_rr:  spread deducted per trade as fraction of 1R
+      - slippage_rr:     slippage deducted per trade as fraction of 1R
+      - commission_rr:   commission deducted per trade as fraction of 1R
+      - compound_cap:    max balance = start_bal × compound_cap (prevents explosion)
 
     compound=True  → balance compounds per trade (default — use for short windows / walkforward).
     compound=False → PnL always uses start_bal (linear / non-compounding — use for long-window
                      backtest display to avoid astronomical numbers from high-WR strategies).
-
-    Position tiers (from RiskManager.get_dynamic_max_positions):
-        < $500   → 3 slots
-        < $2,000 → 5 slots
-        < $10,000→ 8 slots
-        < $50,000→ 10 slots
-        ≥ $50,000→ 15 slots
-
-    Each position holds for `label_horizon` bars (default 6 × 15-min = 90 min).
-    P&L is locked in at open time (start_bal × risk_fraction × realized_rr) and
-    realised when the bar counter reaches the close bar.
     """
     test_rows = (
         predictions[predictions["split"] == label]
@@ -164,6 +173,14 @@ def simulate_dynamic_concurrent_backtest(
     balance = start_bal
     peak_balance = balance
     label_horizon = settings.training.label_horizon  # bars to hold each position
+
+    # Friction components (fraction of 1R deducted per trade)
+    _spread_rr = float(getattr(settings.risk, "spread_cost_rr", 0.10))
+    _slippage_rr = float(getattr(settings.risk, "slippage_rr", 0.05))
+    _commission_rr = float(getattr(settings.risk, "commission_rr", 0.02))
+    friction_rr = _spread_rr + _slippage_rr + _commission_rr
+    compound_cap = float(getattr(settings.risk, "compound_cap", 50.0))
+    max_balance = start_bal * compound_cap if compound_cap > 0 else float("inf")
 
     # pending: list of {"close_bar_idx": int, "absolute_pnl": float, "meta": dict}
     pending: list[dict] = []
@@ -236,7 +253,15 @@ def simulate_dynamic_concurrent_backtest(
             rf = rf_base
         # compound=False: always use starting balance -> linear expectancy (no explosion).
         effective_bal = balance if compound else start_bal
-        absolute_pnl = effective_bal * rf * float(row.realized_rr)
+        # Apply compound cap: prevent unrealistic exponential growth
+        if compound and compound_cap > 0 and effective_bal > max_balance:
+            effective_bal = max_balance
+        # P1a: Session-aware friction
+        _sess_mult = float(getattr(row, 'session_spread_mult', 1.0))
+        _row_friction = _spread_rr * _sess_mult + _slippage_rr + _commission_rr
+        raw_rr = float(row.realized_rr)
+        net_rr = raw_rr - _row_friction
+        absolute_pnl = effective_bal * rf * net_rr
         open_count = len(pending)
         max_concurrent_seen = max(max_concurrent_seen, open_count + 1)
 
@@ -245,6 +270,8 @@ def simulate_dynamic_concurrent_backtest(
             "side": row.trade_side,
             "entry_price": float(row.close),
             "realized_rr": float(row.realized_rr),
+            "net_rr": float(net_rr),
+            "friction_rr": float(friction_rr),
             "probability": float(row.probability),
             "risk_fraction": float(rf),
             "pnl": round(absolute_pnl, 4),
@@ -258,8 +285,10 @@ def simulate_dynamic_concurrent_backtest(
             "open_positions_at_open": open_count,
             "volatility_regime": regime,
         }
+        # P0: Use per-trade bars_held from SL/TP race (fallback to label_horizon)
+        _hold = int(getattr(row, 'bars_held', label_horizon))
         pending.append(
-            {"close_bar_idx": i + label_horizon, "absolute_pnl": absolute_pnl, "meta": meta}
+            {"close_bar_idx": i + _hold, "absolute_pnl": absolute_pnl, "meta": meta}
         )
         balance_history.append(balance)
 
@@ -325,6 +354,8 @@ def simulate_dynamic_concurrent_backtest(
 
     report = {
         "simulation_mode": "dynamic_concurrent",
+        "friction_rr": round(friction_rr, 4),
+        "compound_cap": compound_cap,
         "starting_balance": start_bal,
         "ending_balance": round(balance, 2),
         "net_profit": round(balance - start_bal, 2),

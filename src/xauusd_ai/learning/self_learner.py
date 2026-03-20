@@ -55,6 +55,15 @@ class SelfLearner:
         self.trainer = trainer
         self.strategy = strategy
         self._best_roc_auc: float = 0.0
+        # Reload best_roc_auc from saved model meta (survives restarts)
+        _meta_path = Path(settings.app.model_meta_path)
+        if _meta_path.exists():
+            try:
+                _meta = json.loads(_meta_path.read_text(encoding="utf-8"))
+                self._best_roc_auc = float(_meta.get("roc_auc", 0.0))
+                LOGGER.info("SelfLearner: loaded best_roc_auc=%.4f from meta", self._best_roc_auc)
+            except Exception:
+                pass
         self._retrain_count: int = 0
         self._log_path = Path(settings.app.live_learning_log_path)
         self._log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -96,8 +105,8 @@ class SelfLearner:
                 )
                 return None
 
-            # Train và đánh giá
-            metrics = self.trainer.train(dataset)
+            # Train (do NOT save inside trainer — we decide here based on improvement)
+            metrics = self.trainer.train(dataset, save_artifacts=False)
             self._retrain_count += 1
 
             roc_auc = float(metrics.get("roc_auc", 0.0))
@@ -105,7 +114,8 @@ class SelfLearner:
 
             if improved:
                 self._best_roc_auc = roc_auc
-                # model đã được lưu bên trong trainer.train() → trainer._save_artifacts()
+                self.trainer._last_roc_auc = roc_auc
+                self.trainer._save_artifacts()  # Only save when truly better
                 status = "improved"
             else:
                 status = "no_improvement"
@@ -178,10 +188,14 @@ class SelfLearner:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+    # Maximum bars to keep per timeframe to prevent unbounded memory growth
+    _MAX_CACHE_BARS = {"M15": 10_000, "H1": 5_000, "H4": 3_000, "D1": 2_000}
+
     def _merge_with_cache(self, frames: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
         """
         Gộp frames hiện tại với cache.
         Nếu đã quá 1 giờ kể từ lần fetch cuối → cào thêm từ yfinance.
+        Tự động trim cache để tránh memory leak.
         """
         now = time.time()
         merged: dict[str, pd.DataFrame] = {}
@@ -196,6 +210,10 @@ class SelfLearner:
                     .sort_values("time")
                     .reset_index(drop=True)
                 )
+                # Trim to prevent unbounded growth
+                max_bars = self._MAX_CACHE_BARS.get(tf, 5_000)
+                if len(combined) > max_bars:
+                    combined = combined.tail(max_bars).reset_index(drop=True)
                 merged[tf] = combined
             else:
                 merged[tf] = frame
@@ -212,6 +230,9 @@ class SelfLearner:
                     .sort_values("time")
                     .reset_index(drop=True)
                 )
+                max_bars = self._MAX_CACHE_BARS.get(exec_tf, 10_000)
+                if len(combined) > max_bars:
+                    combined = combined.tail(max_bars).reset_index(drop=True)
                 merged[exec_tf] = combined
                 self._cached_frames[exec_tf] = combined
             self._last_fetch_ts = now
@@ -240,8 +261,8 @@ class SelfLearner:
             try:
                 df = pd.read_csv(fpath)
                 df["time"] = pd.to_datetime(df["time"], utc=True)
-                # Chỉ lấy 3000 hàng gần nhất để tránh retrain quá lâu
-                df = df.sort_values("time").tail(3000).reset_index(drop=True)
+                # Chỉ lấy 8000 hàng gần nhất để cân bằng data đủ/retrain vừa phải
+                df = df.sort_values("time").tail(8000).reset_index(drop=True)
                 if "tick_volume_delta" not in df.columns:
                     tv = df["tick_volume"] if "tick_volume" in df.columns else pd.Series(0, index=df.index)
                     df["tick_volume_delta"] = tv.diff().fillna(0)
@@ -438,12 +459,16 @@ class SelfLearner:
             if len(dataset) < self.settings.training.live_learning_min_rows:
                 return None
 
-            metrics = self.trainer.train_with_loss_weights(dataset, self._loss_patterns)
+            metrics = self.trainer.train_with_loss_weights(
+                dataset, self._loss_patterns, save_artifacts=False
+            )
             self._retrain_count += 1
 
             roc_auc = float(metrics.get("roc_auc", 0.0))
             if roc_auc >= self._best_roc_auc:
                 self._best_roc_auc = roc_auc
+                self.trainer._last_roc_auc = roc_auc
+                self.trainer._save_artifacts()  # Only save when truly better
                 status = "loss_retrain_improved"
             else:
                 status = "loss_retrain_no_improvement"

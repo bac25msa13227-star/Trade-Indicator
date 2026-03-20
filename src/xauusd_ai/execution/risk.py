@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 
 import pandas as pd
 
@@ -30,9 +32,38 @@ class OrderPlan:
 
 
 class RiskManager:
+    _PEAK_FILE = Path("outputs/risk_peak_balance.json")
+
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self._peak_balance: float = 0.0  # track peak for dynamic risk tier
+        self._peak_balance: float = self._load_peak_balance()
+
+    # ------------------------------------------------------------------
+    # Peak balance persistence
+    # ------------------------------------------------------------------
+    def _load_peak_balance(self) -> float:
+        try:
+            if self._PEAK_FILE.exists():
+                data = json.loads(self._PEAK_FILE.read_text(encoding="utf-8"))
+                val = float(data.get("peak_balance", 0.0))
+                if val > 0:
+                    LOGGER.info("RiskManager: loaded peak_balance=%.2f", val)
+                return val
+        except Exception:
+            pass
+        return 0.0
+
+    def _save_peak_balance(self) -> None:
+        try:
+            self._PEAK_FILE.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self._PEAK_FILE.with_suffix(".tmp")
+            tmp.write_text(
+                json.dumps({"peak_balance": round(self._peak_balance, 2)}),
+                encoding="utf-8",
+            )
+            tmp.replace(self._PEAK_FILE)
+        except Exception as exc:
+            LOGGER.warning("RiskManager: failed to save peak_balance: %s", exc)
 
     # ------------------------------------------------------------------
     # Dynamic position limit — phụ thuộc balance + market regime
@@ -173,6 +204,7 @@ class RiskManager:
             # Update peak balance
             if current_balance > self._peak_balance:
                 self._peak_balance = current_balance
+                self._save_peak_balance()
             if self._peak_balance > 0:
                 dd = (self._peak_balance - current_balance) / self._peak_balance
                 if dd >= 0.10:
@@ -289,21 +321,21 @@ class RiskManager:
                 new_sl = current_price - trail_distance
                 # Chỉ dịch lên, không bao giờ dịch xuống
                 if new_sl > current_sl:
-                    return round(new_sl, 2)
+                    return round(new_sl, 5)
             else:
                 new_sl = current_price + trail_distance
                 # Chỉ dịch xuống, không bao giờ dịch lên
                 if new_sl < current_sl or current_sl == 0:
-                    return round(new_sl, 2)
+                    return round(new_sl, 5)
             return None
 
         # Step 3: Chỉ breakeven (chưa đủ để trail)
         if side == "buy":
             if open_price > current_sl:
-                return round(open_price, 2)  # Move to breakeven
+                return round(open_price, 5)  # Move to breakeven
         else:
             if current_sl == 0 or open_price < current_sl:
-                return round(open_price, 2)  # Move to breakeven
+                return round(open_price, 5)  # Move to breakeven
 
         return None
 
@@ -385,11 +417,11 @@ class RiskManager:
         tp_dist = sl_dist * self.settings.risk.take_profit_rr
 
         if side == "buy":
-            stop_loss = round(current_price - sl_dist, 2)
-            take_profit = round(current_price + tp_dist, 2)
+            stop_loss = round(current_price - sl_dist, 5)
+            take_profit = round(current_price + tp_dist, 5)
         else:
-            stop_loss = round(current_price + sl_dist, 2)
-            take_profit = round(current_price - tp_dist, 2)
+            stop_loss = round(current_price + sl_dist, 5)
+            take_profit = round(current_price - tp_dist, 5)
 
         LOGGER.info(
             "DCA#%d plan: side=%s lot=%.2f entry=%.2f sl=%.2f tp=%.2f",

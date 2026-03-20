@@ -103,6 +103,22 @@ execution:
     lot_multiplier: 1.5
     max_total_risk_pct: 0.03
 
+  exit_model:
+    enabled: true                   # v2: dương ở mọi threshold trên backtest thực tế
+    exit_model_path: "outputs/exit_model_acc2.pkl"
+    exit_scaler_path: "outputs/exit_scaler_acc2.pkl"
+    exit_model_meta_path: "outputs/exit_model_meta_acc2.json"
+    exit_threshold: 0.65            # v2: tối ưu backtest (+$1,407 / +14.7% vs baseline)
+    min_unrealized_rr: 0.80         # chỉ kiểm tra khi >= 0.8R profit (TP target = 3.5R)
+    exit_min_hold_bars: 4           # không fire trong 4 bar đầu
+    exit_label_horizon: 8           # nhìn 8 bars (2+ giờ) để đánh nhãn
+    exit_label_threshold_rr: 0.50   # ngưỡng deterioration (phù hợp 3.5R TP)
+    max_entry_samples: 8000
+    also_cut_losses: false
+    min_loss_rr: -0.50
+
+
+
 training:
   # ── RATIO SPLIT 70/30 — toàn bộ dữ liệu từ D1 đến M1 ────────────────────────
   train_start_date: null
@@ -112,6 +128,9 @@ training:
   train_split: 0.70                  # 70% train, 30% test — ~30k M15 bars test
   label_horizon: 12                  # 12 × M15 = 3 giờ — TP 2:1 dễ đạt hơn
   min_return_threshold: 0.0015       # Nhãn win ≥0.15% — thêm nhiều trade cơ hội
+  use_sltp_label: true
+  sltp_label_max_horizon: 64          # v2: 16h scan (tăng từ 32 → 64) — đủ thời gian cho TP
+  label_tp_rr: 2.0                    # v2: label dùng RR 2.0 (dễ dự đoán hơn 3.5)
   retrain_on_startup: false
   live_learning_enabled: true
   live_learning_interval_minutes: 30
@@ -121,10 +140,10 @@ training:
   dataset_path: outputs/training_dataset_acc2.csv
   optimize_threshold: true
   validation_split: 0.15
-  threshold_min: 0.30                # Model2: cho phép tìm từ 0.30 — nhiều lệnh hơn
-  threshold_max: 0.75
+  threshold_min: 0.45                # v2: không cho xuống quá thấp (tránh precision rác)
+  threshold_max: 0.80
   threshold_step: 0.01
-  min_precision_floor: 0.45          # WR >= 45% (EV dương với RR 3.5)
+  min_precision_floor: 0.55          # v2: WR >= 55% (EV dương mạnh với RR 3.5)
   backtest_initial_balance: 200.0    # vốn khởi đầu
 
 notifications:

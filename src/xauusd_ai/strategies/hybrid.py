@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -7,6 +8,8 @@ import numpy as np
 import pandas as pd
 
 from xauusd_ai.config import Settings
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -156,9 +159,12 @@ class HybridStrategy:
             hyp_sl = entry + stop_distance if stop_distance > 0 else 0.0
             hyp_tp = entry - stop_distance * rr if stop_distance > 0 else 0.0
 
-        # force_trade: bỏ qua TẤT CẢ bộ lọc, vào lệnh mọi tín hiệu
+        # force_trade: bỏ qua bộ lọc strategy, nhưng vẫn giữ news blackout
         if self.settings.strategy.force_trade:
-            return TradeDecision(True, hyp_side, confidence, "FORCE TRADE (no filter)", entry, hyp_sl, hyp_tp)
+            LOGGER.warning("FORCE TRADE active — bypassing strategy filters (news blackout still enforced)")
+            if not no_news_block:
+                return TradeDecision(False, hyp_side, confidence, "FORCE: blocked by news blackout", entry, hyp_sl, hyp_tp)
+            return TradeDecision(True, hyp_side, confidence, "FORCE TRADE (news-safe)", entry, hyp_sl, hyp_tp)
 
         if not signal_on:
             return TradeDecision(False, hyp_side, confidence, "Model confidence below threshold", entry, hyp_sl, hyp_tp)

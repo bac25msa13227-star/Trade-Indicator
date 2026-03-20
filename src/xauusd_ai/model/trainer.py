@@ -6,7 +6,12 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.ensemble import (
+    HistGradientBoostingClassifier,
+    RandomForestClassifier,
+    ExtraTreesClassifier,
+    VotingClassifier,
+)
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
 from sklearn.preprocessing import StandardScaler
 
@@ -17,19 +22,33 @@ from xauusd_ai.features.dataset import FEATURE_COLUMNS
 class ModelTrainer:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        # class_weight='balanced': standard balanced approach for imbalanced datasets
-        # Threshold optimizer will enforce precision floor (WR target) post-training.
-        self.model = HistGradientBoostingClassifier(
-            max_iter=600,
-            learning_rate=0.03,
-            max_depth=5,
-            min_samples_leaf=20,
-            class_weight="balanced",
-            early_stopping=False,
-            random_state=42,
+        # Ensemble: HGB (primary) + RF + ET — diverse learners improve AUC
+        _hgb = HistGradientBoostingClassifier(
+            max_iter=2000, learning_rate=0.01, max_depth=7,
+            min_samples_leaf=20, l2_regularization=1.0,
+            max_bins=128, class_weight=None,
+            early_stopping=True, validation_fraction=0.1,
+            n_iter_no_change=80, random_state=42,
         )
+        _rf = RandomForestClassifier(
+            n_estimators=400, max_depth=12, min_samples_leaf=15,
+            max_features="sqrt", class_weight="balanced",
+            n_jobs=-1, random_state=42,
+        )
+        _et = ExtraTreesClassifier(
+            n_estimators=400, max_depth=14, min_samples_leaf=10,
+            max_features="sqrt", class_weight="balanced",
+            n_jobs=-1, random_state=42,
+        )
+        self.model = VotingClassifier(
+            estimators=[("hgb", _hgb), ("rf", _rf), ("et", _et)],
+            voting="soft",
+            weights=[3, 2, 1],
+        )
+        self._feature_mask = None  # set during train()
         self.scaler = StandardScaler()
         self.decision_threshold = settings.strategy.signal_threshold
+        self.feature_columns: list[str] = list(FEATURE_COLUMNS)  # updated by load_artifacts for backward compat
 
     def train(self, dataset: pd.DataFrame, save_artifacts: bool = True) -> dict[str, float]:
         train_df = dataset[dataset["split"] == "train"]
@@ -40,13 +59,44 @@ class ModelTrainer:
             threshold = self._optimize_threshold(train_df)
         self.decision_threshold = threshold
 
-        x_train = self.scaler.fit_transform(train_df[FEATURE_COLUMNS])
+        x_train = self.scaler.fit_transform(train_df[self.feature_columns])
         y_train = train_df["target"]
-        x_test = self.scaler.transform(test_df[FEATURE_COLUMNS])
+        x_test = self.scaler.transform(test_df[self.feature_columns])
         y_test = test_df["target"]
 
-        self.model.fit(x_train, y_train)
-        probabilities = self.model.predict_proba(x_test)[:, 1]
+        # Dynamic sample weights: 2× positive boost + time-decay
+        pos_count = int(y_train.sum())
+        neg_count = int(len(y_train) - pos_count)
+        if pos_count > 10 and neg_count > 10:
+            pos_w = 2.0 * neg_count / pos_count
+            class_w = np.where(y_train.values == 1, pos_w, 1.0).astype(float)
+            # Time-decay: recent bars weighted higher (half-life at 40%)
+            _n = len(y_train)
+            _decay_half = _n * 0.4
+            time_w = np.exp(np.log(2) * np.arange(_n) / _decay_half)
+            time_w /= time_w.mean()
+            sw = (class_w * time_w).astype(float)
+            sw /= sw.mean()
+        else:
+            sw = None
+
+        # Feature selection: drop bottom 30% by importance (scout model)
+        _scout = HistGradientBoostingClassifier(
+            max_iter=300, learning_rate=0.03, max_depth=5,
+            min_samples_leaf=25, max_bins=128,
+            early_stopping=False, random_state=42,
+        )
+        _scout.fit(x_train, y_train, sample_weight=sw)
+        _imp = _scout.feature_importances_
+        _imp_thr = np.percentile(_imp, 30)
+        self._feature_mask = _imp >= _imp_thr
+        if self._feature_mask.sum() < 10:
+            self._feature_mask = np.ones(len(_imp), dtype=bool)
+        x_train_sel = x_train[:, self._feature_mask]
+        x_test_sel = x_test[:, self._feature_mask]
+
+        self.model.fit(x_train_sel, y_train, sample_weight=sw)
+        probabilities = self.model.predict_proba(x_test_sel)[:, 1]
         predictions = (probabilities >= self.decision_threshold).astype(int)
 
         metrics = {
@@ -61,71 +111,85 @@ class ModelTrainer:
             "f1": float(f1_score(y_test, predictions, zero_division=0)),
             "roc_auc": float(roc_auc_score(y_test, probabilities)) if y_test.nunique() > 1 else 0.5,
         }
+        self._last_metrics = metrics
         if save_artifacts:
+            self._last_roc_auc = metrics.get("roc_auc", 0.0)
             self._save_artifacts()
         return metrics
 
     def _optimize_threshold(self, train_df: pd.DataFrame) -> float:
-        split_index = int(len(train_df) * (1 - self.settings.training.validation_split))
-        subtrain_df = train_df.iloc[:split_index]
-        validation_df = train_df.iloc[split_index:]
-        if validation_df.empty or subtrain_df.empty:
+        n = len(train_df)
+        if n < 100:
             return self.settings.strategy.signal_threshold
-
-        local_scaler = StandardScaler()
-        local_model = HistGradientBoostingClassifier(
-            max_iter=300, learning_rate=0.05, max_depth=5,
-            min_samples_leaf=20, class_weight="balanced",
-            early_stopping=False, random_state=42,
-        )
-        x_subtrain = local_scaler.fit_transform(subtrain_df[FEATURE_COLUMNS])
-        y_subtrain = subtrain_df["target"]
-        x_validation = local_scaler.transform(validation_df[FEATURE_COLUMNS])
-        y_validation = validation_df["target"]
-        local_model.fit(x_subtrain, y_subtrain)
-        probabilities = local_model.predict_proba(x_validation)[:, 1]
 
         candidates = np.arange(
             self.settings.training.threshold_min,
             self.settings.training.threshold_max + self.settings.training.threshold_step,
             self.settings.training.threshold_step,
         )
-        # Dùng threshold_max làm fallback — nếu không có threshold nào đạt precision floor
-        # thì chọn threshold có precision cao nhất (không dùng threshold_min = precision thấp nhất)
-        best_threshold = float(self.settings.training.threshold_max)
-        best_score = -float("inf")
-        # Fallback: track highest-precision threshold in case precision floor is never met
-        best_fallback_threshold = float(self.settings.training.threshold_max)
-        best_fallback_precision = 0.0
-        for candidate in candidates:
-            predictions = (probabilities >= candidate).astype(int)
-            n_pred = int(predictions.sum())
-            if n_pred < 3:
-                continue
-            precision = precision_score(y_validation, predictions, zero_division=0)
-            # Track best-precision threshold as fallback (even below floor)
-            if precision > best_fallback_precision:
-                best_fallback_precision = precision
-                best_fallback_threshold = float(candidate)
-            if precision < self.settings.training.min_precision_floor:
-                continue
-            recall = recall_score(y_validation, predictions, zero_division=0)
-            if recall < 0.01:
-                continue  # bỏ qua threshold cho quá ít lệnh (< 1% recall)
-            # F-beta score với beta=1.5: recall quan trọng hơn precision 1.5 lần
-            # → balance giữa WR cao và số lệnh đủ nhiều
-            # score cao hơn ở threshold ~0.60-0.75 thay vì 0.85-0.90
-            beta = 1.5
-            score = (1 + beta ** 2) * precision * recall / (beta ** 2 * precision + recall)
-            if score > best_score:
-                best_score = score
-                best_threshold = float(candidate)
+        prec_floor = self.settings.training.min_precision_floor
 
-        # If no threshold met the precision floor, use the highest-precision threshold found
-        if best_score == -float("inf"):
-            best_threshold = best_fallback_threshold
+        # 3-fold temporal CV: each fold trains on earlier data, validates on later chunk
+        splits = [
+            (0, int(n * 0.50), int(n * 0.50), int(n * 0.70)),
+            (0, int(n * 0.60), int(n * 0.60), int(n * 0.80)),
+            (0, int(n * 0.70), int(n * 0.70), n),
+        ]
+        fold_thresholds = []
+        for t_start, t_end, v_start, v_end in splits:
+            sub_df = train_df.iloc[t_start:t_end]
+            val_df = train_df.iloc[v_start:v_end]
+            if val_df.empty or sub_df.empty:
+                continue
+            local_scaler = StandardScaler()
+            local_model = HistGradientBoostingClassifier(
+                max_iter=300, learning_rate=0.05, max_depth=5,
+                min_samples_leaf=20, class_weight=None,
+                early_stopping=False, random_state=42,
+            )
+            x_sub = local_scaler.fit_transform(sub_df[self.feature_columns])
+            y_sub = sub_df["target"]
+            x_val = local_scaler.transform(val_df[self.feature_columns])
+            y_val = val_df["target"]
+            _pos_c = int(y_sub.sum())
+            _neg_c = int(len(y_sub) - _pos_c)
+            if _pos_c > 5 and _neg_c > 5:
+                _pw = 2.0 * _neg_c / _pos_c
+                _sw = np.where(y_sub.values == 1, _pw, 1.0).astype(float)
+                _sw /= _sw.mean()
+            else:
+                _sw = None
+            local_model.fit(x_sub, y_sub, sample_weight=_sw)
+            probabilities = local_model.predict_proba(x_val)[:, 1]
 
-        return best_threshold
+            best_thr = float(self.settings.training.threshold_min)
+            best_score = -float("inf")
+            safe_thr = float(self.settings.training.threshold_max)
+            safe_prec = -1.0
+            for candidate in candidates:
+                preds = (probabilities >= candidate).astype(int)
+                if int(preds.sum()) < 5:
+                    continue
+                precision = precision_score(y_val, preds, zero_division=0)
+                recall = recall_score(y_val, preds, zero_division=0)
+                if recall < 0.05:
+                    continue
+                if precision > safe_prec:
+                    safe_prec = precision
+                    safe_thr = float(candidate)
+                if precision < prec_floor:
+                    continue
+                score = precision * np.sqrt(recall)
+                if score > best_score:
+                    best_score = score
+                    best_thr = float(candidate)
+            if best_score == -float("inf"):
+                best_thr = safe_thr
+            fold_thresholds.append(best_thr)
+
+        if not fold_thresholds:
+            return self.settings.strategy.signal_threshold
+        return float(np.max(fold_thresholds))
 
     def _save_artifacts(self) -> None:
         model_path = Path(self.settings.app.model_path)
@@ -138,7 +202,21 @@ class ModelTrainer:
             pickle.dump(self.model, file_handle)
         with scaler_path.open("wb") as file_handle:
             pickle.dump(self.scaler, file_handle)
-        meta_path.write_text(json.dumps({"decision_threshold": self.decision_threshold}, indent=2), encoding="utf-8")
+        meta_dict: dict = {
+            "decision_threshold": self.decision_threshold,
+            "feature_columns": self.feature_columns,
+        }
+        if self._feature_mask is not None:
+            meta_dict["feature_mask"] = self._feature_mask.tolist()
+        if hasattr(self, "_last_roc_auc"):
+            meta_dict["roc_auc"] = round(float(self._last_roc_auc), 6)
+        if hasattr(self, "_last_metrics") and self._last_metrics:
+            for k in ("precision", "recall", "f1", "accuracy",
+                      "train_rows", "test_rows",
+                      "positive_rate_train", "positive_rate_test"):
+                if k in self._last_metrics:
+                    meta_dict[k] = self._last_metrics[k]
+        meta_path.write_text(json.dumps(meta_dict, indent=2), encoding="utf-8")
 
     def load_artifacts(self) -> bool:
         model_path = Path(self.settings.app.model_path)
@@ -153,18 +231,36 @@ class ModelTrainer:
         if meta_path.exists():
             metadata = json.loads(meta_path.read_text(encoding="utf-8"))
             self.decision_threshold = float(metadata.get("decision_threshold", self.settings.strategy.signal_threshold))
+            if "feature_mask" in metadata:
+                self._feature_mask = np.array(metadata["feature_mask"], dtype=bool)
+            else:
+                self._feature_mask = None
+            if "feature_columns" in metadata:
+                self.feature_columns = list(metadata["feature_columns"])
+            elif hasattr(self.scaler, "n_features_in_") and self.scaler.n_features_in_ != len(self.feature_columns):
+                # Old model trained with fewer features — slice FEATURE_COLUMNS to match scaler
+                self.feature_columns = list(FEATURE_COLUMNS[:self.scaler.n_features_in_])
         return True
+
+    def _apply_feature_mask(self, x: np.ndarray) -> np.ndarray:
+        if self._feature_mask is not None and x.shape[1] == len(self._feature_mask):
+            return x[:, self._feature_mask]
+        return x
 
     def predict_dataset(self, dataset: pd.DataFrame) -> pd.DataFrame:
         frame = dataset.copy()
-        probabilities = self.model.predict_proba(self.scaler.transform(frame[FEATURE_COLUMNS]))[:, 1]
+        x_scaled = self.scaler.transform(frame[self.feature_columns])
+        x_sel = self._apply_feature_mask(x_scaled)
+        probabilities = self.model.predict_proba(x_sel)[:, 1]
         frame["probability"] = probabilities
         frame["prediction"] = (probabilities >= self.decision_threshold).astype(int)
         return frame
 
     def score_live_row(self, live_frame: pd.DataFrame) -> dict[str, float]:
-        latest = live_frame.iloc[[-1]][FEATURE_COLUMNS]
-        probability = float(self.model.predict_proba(self.scaler.transform(latest))[:, 1][0])
+        latest = live_frame.iloc[[-1]][self.feature_columns]
+        x_scaled = self.scaler.transform(latest)
+        x_sel = self._apply_feature_mask(x_scaled)
+        probability = float(self.model.predict_proba(x_sel)[:, 1][0])
         prediction = int(probability >= self.decision_threshold)
         return {"probability": probability, "prediction": prediction}
 
@@ -173,6 +269,7 @@ class ModelTrainer:
         dataset: pd.DataFrame,
         loss_patterns: list[dict],
         weight_factor: float = 2.5,
+        save_artifacts: bool = True,
     ) -> dict[str, float]:
         """
         Retrain với sample_weight tăng cho các hàng tương tự pattern lệnh thua.
@@ -212,15 +309,30 @@ class ModelTrainer:
             threshold = self._optimize_threshold(train_df)
         self.decision_threshold = threshold
 
-        x_train = self.scaler.fit_transform(train_df[FEATURE_COLUMNS])
+        x_train = self.scaler.fit_transform(train_df[self.feature_columns])
         y_train = train_df["target"]
-        x_test = self.scaler.transform(test_df[FEATURE_COLUMNS])
+        x_test = self.scaler.transform(test_df[self.feature_columns])
         y_test = test_df["target"]
 
-        # Fit với sample_weight
-        self.model.fit(x_train, y_train, sample_weight=weights)
+        # Feature selection (scout model)
+        _scout = HistGradientBoostingClassifier(
+            max_iter=300, learning_rate=0.03, max_depth=5,
+            min_samples_leaf=25, max_bins=128,
+            early_stopping=False, random_state=42,
+        )
+        _scout.fit(x_train, y_train, sample_weight=weights)
+        _imp = _scout.feature_importances_
+        _imp_thr = np.percentile(_imp, 30)
+        self._feature_mask = _imp >= _imp_thr
+        if self._feature_mask.sum() < 10:
+            self._feature_mask = np.ones(len(_imp), dtype=bool)
+        x_train_sel = x_train[:, self._feature_mask]
+        x_test_sel = x_test[:, self._feature_mask]
 
-        probabilities = self.model.predict_proba(x_test)[:, 1]
+        # Fit with sample_weight
+        self.model.fit(x_train_sel, y_train, sample_weight=weights)
+
+        probabilities = self.model.predict_proba(x_test_sel)[:, 1]
         predictions = (probabilities >= self.decision_threshold).astype(int)
 
         from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
@@ -239,5 +351,7 @@ class ModelTrainer:
             "loss_patterns_count": len(loss_patterns),
             "upweighted_samples": int(weights[weights > 1.0].sum()),
         }
-        self._save_artifacts()
+        if save_artifacts:
+            self._last_roc_auc = metrics.get("roc_auc", 0.0)
+            self._save_artifacts()
         return metrics

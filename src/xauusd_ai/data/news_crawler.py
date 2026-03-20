@@ -32,17 +32,22 @@ _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; XAUBot/1.0)"}
 
 
 def _fetch_forexfactory() -> list[dict]:
-    """Fetch lịch tin từ ForexFactory JSON API."""
-    for url in [_FF_WEEK_URL, _FF_MONTH_URL]:
-        try:
-            r = requests.get(url, headers=_HEADERS, timeout=_REQUEST_TIMEOUT)
-            r.raise_for_status()
-            data = r.json()
-            if isinstance(data, list) and len(data) > 0:
-                LOGGER.info("NewsCrawler: fetched %d events from %s", len(data), url)
-                return data
-        except Exception as exc:
-            LOGGER.warning("NewsCrawler: fetch from %s failed: %s", url, exc)
+    """Fetch lịch tin từ ForexFactory JSON API (với retry)."""
+    import time as _time
+
+    for attempt in range(3):
+        for url in [_FF_WEEK_URL, _FF_MONTH_URL]:
+            try:
+                r = requests.get(url, headers=_HEADERS, timeout=_REQUEST_TIMEOUT)
+                r.raise_for_status()
+                data = r.json()
+                if isinstance(data, list) and len(data) > 0:
+                    LOGGER.info("NewsCrawler: fetched %d events from %s", len(data), url)
+                    return data
+            except Exception as exc:
+                LOGGER.warning("NewsCrawler: fetch from %s failed (attempt %d): %s", url, attempt + 1, exc)
+        if attempt < 2:
+            _time.sleep(2 ** attempt)  # 1s, 2s backoff
     return []
 
 

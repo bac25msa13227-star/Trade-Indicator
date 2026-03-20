@@ -26,7 +26,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.ensemble import (
+    HistGradientBoostingClassifier,
+    RandomForestClassifier,
+    ExtraTreesClassifier,
+    VotingClassifier,
+)
 from sklearn.metrics import (
     accuracy_score, f1_score, precision_score, recall_score, roc_auc_score,
 )
@@ -72,12 +77,29 @@ print("=" * 70)
 print()
 
 # ── config ──────────────────────────────────────────────────────────────────
-CONFIG    = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("configs/train_ict_wyckoff_2022_2026.yaml")
-MAX_FOLDS = int(sys.argv[2]) if len(sys.argv) > 2 else None    # None = no limit
+import argparse as _ap
+_parser = _ap.ArgumentParser(add_help=False)
+_parser.add_argument("--config", default=None)
+_parser.add_argument("--max-folds", type=int, default=None)
+_known, _rest = _parser.parse_known_args()
+
+if _known.config:
+    CONFIG = Path(_known.config)
+elif _rest:
+    CONFIG = Path(_rest[0])
+else:
+    CONFIG = Path("configs/train_ict_wyckoff_2022_2026.yaml")
+
+if _known.max_folds is not None:
+    MAX_FOLDS = _known.max_folds
+elif len(_rest) > 1:
+    MAX_FOLDS = int(_rest[1])
+else:
+    MAX_FOLDS = None   # None = no limit
 settings = load_settings(CONFIG)
 
 # Walk-forward window parameters  (M15: 96 bars/day  ~252 trading days/year)
-TRAIN_BARS = 20_000   # ~208 trading days = ~7 months
+TRAIN_BARS = 30_000   # ~312 trading days = ~13 months (v2: more data for stronger model)
 TEST_BARS  =  4_000   # ~42  trading days = ~1.5 months
 STEP_BARS  =  4_000   # slide ~1.5 months at a time
 
@@ -92,7 +114,7 @@ RISK_PCT         = settings.risk.risk_per_trade    # rủi ro/lệnh (0.0065 = 0
 RR_SWEEP         = [1.8, 2.0, 2.2, 2.5, 3.0, 3.5] # TP:SL ratios cần đánh giá
 
 print(f"  Config  : {CONFIG}")
-print(f"  Features: {len(FEATURE_COLUMNS)}  (D1:1 H4:9 H1:3 M15:15 News:5)")
+print(f"  Features: {len(FEATURE_COLUMNS)}  (D1:1 H4:9 H1:3 M15:15 News:5 StructMomentum:11 Adv:9)")
 print(f"  Train   : {TRAIN_BARS:,} bars (~1 yr M15)")
 print(f"  Test    : {TEST_BARS:,} bars (~3 mo M15)")
 print(f"  Step    : {STEP_BARS:,} bars (~3 mo slide)")
@@ -165,49 +187,108 @@ while fold_start + TRAIN_BARS + TEST_BARS <= n_total:
     y_tr = fold_train["target"].values
     y_te = fold_test["target"].values
 
-    # Threshold search on last 20% of fold_train
-    val_cut = int(len(fold_train) * 0.80)
-    local_model = HistGradientBoostingClassifier(
-        max_iter=150, learning_rate=0.1, max_depth=4,
-        min_samples_leaf=30, class_weight="balanced",
-        early_stopping=False, random_state=42,
-    )
-    local_model.fit(X_tr[:val_cut], y_tr[:val_cut])
-    val_proba = local_model.predict_proba(X_tr[val_cut:])[:, 1]
-    y_val = y_tr[val_cut:]
+    # ── Sample weights: 2× positive boost + time decay ────────────────
+    _pos_c = int(y_tr.sum())
+    _neg_c = int(len(y_tr) - _pos_c)
+    if _pos_c > 10 and _neg_c > 10:
+        _pw = 2.0 * _neg_c / _pos_c
+        _class_w = np.where(y_tr == 1, _pw, 1.0).astype(float)
+        # Time-decay: recent bars get up to 2× weight (exponential decay)
+        _n = len(y_tr)
+        _decay_half = _n * 0.4  # half-life at 40% of window
+        _time_w = np.exp(np.log(2) * np.arange(_n) / _decay_half)
+        _time_w /= _time_w.mean()  # normalize so mean=1
+        _sw_tr = (_class_w * _time_w).astype(float)
+        _sw_tr /= _sw_tr.mean()
+    else:
+        _sw_tr = None
 
-    # Objective: maximize precision^2 × recall — heavily penalise low precision,
-    # lightly reward recall so we keep enough signals but never sacrifice win rate.
-    # prec ≥ PREC_FLOOR (0.78) is a hard gate; at least 3 signals required.
-    best_thr, best_score = THRESHOLD_MIN, -float("inf")
-    for thr in np.arange(THRESHOLD_MIN, THRESHOLD_MAX + THRESHOLD_STEP, THRESHOLD_STEP):
-        preds  = (val_proba >= thr).astype(int)
-        n_pred = int(preds.sum())
-        if n_pred < 3:
-            continue   # too few signals → skip
-        prec = precision_score(y_val, preds, zero_division=0)
-        rec  = recall_score(y_val, preds, zero_division=0)
-        if prec < PREC_FLOOR:
-            continue
-        if rec < 0.01:
-            continue  # bỏ qua threshold cho quá ít lệnh
-        # F-beta với beta=1.5: balance WR và số lệnh/fold
-        beta = 1.5
-        score = (1 + beta ** 2) * prec * rec / (beta ** 2 * prec + rec)
-        if score > best_score:
-            best_score, best_thr = score, float(thr)
+    # ── Threshold search: 3-fold temporal CV for robustness ────────
+    _thr_candidates = []
+    _n_tr = len(y_tr)
+    _thr_splits = [
+        (0, int(_n_tr * 0.50), int(_n_tr * 0.50), int(_n_tr * 0.70)),
+        (0, int(_n_tr * 0.60), int(_n_tr * 0.60), int(_n_tr * 0.80)),
+        (0, int(_n_tr * 0.70), int(_n_tr * 0.70), _n_tr),
+    ]
+    for _ts_start, _ts_end, _vs_start, _vs_end in _thr_splits:
+        _thr_hgb = HistGradientBoostingClassifier(
+            max_iter=400, learning_rate=0.02, max_depth=6,
+            min_samples_leaf=25, l2_regularization=1.0,
+            max_bins=128, class_weight=None,
+            early_stopping=True, validation_fraction=0.15,
+            n_iter_no_change=30, random_state=42,
+        )
+        _sw_sub = _sw_tr[_ts_start:_ts_end] if _sw_tr is not None else None
+        _thr_hgb.fit(X_tr[_ts_start:_ts_end], y_tr[_ts_start:_ts_end], sample_weight=_sw_sub)
+        _v_proba = _thr_hgb.predict_proba(X_tr[_vs_start:_vs_end])[:, 1]
+        _y_v = y_tr[_vs_start:_vs_end]
+        _fold_best_thr, _fold_best_score = THRESHOLD_MIN, -float("inf")
+        _fold_safe_thr, _fold_safe_prec = THRESHOLD_MAX, -1.0
+        for thr in np.arange(THRESHOLD_MIN, THRESHOLD_MAX + THRESHOLD_STEP, THRESHOLD_STEP):
+            preds  = (_v_proba >= thr).astype(int)
+            n_pred = int(preds.sum())
+            if n_pred < 3:
+                continue
+            prec = precision_score(_y_v, preds, zero_division=0)
+            rec  = recall_score(_y_v, preds, zero_division=0)
+            if rec < 0.05:
+                continue
+            if prec > _fold_safe_prec:
+                _fold_safe_prec = prec
+                _fold_safe_thr = float(thr)
+            if prec < PREC_FLOOR:
+                continue
+            score = prec * np.sqrt(rec)
+            if score > _fold_best_score:
+                _fold_best_score, _fold_best_thr = score, float(thr)
+        if _fold_best_score == -float("inf"):
+            _fold_best_thr = _fold_safe_thr
+        _thr_candidates.append(_fold_best_thr)
+    # Max of 3 temporal folds → most conservative (highest precision)
+    best_thr = float(np.max(_thr_candidates))
 
-    # Train final model on 100% of fold_train
-    # class_weight neutral → avoids over-predicting positives at expense of precision
-    model = HistGradientBoostingClassifier(
-        max_iter=300, learning_rate=0.05, max_depth=5,
-        min_samples_leaf=30, class_weight={0: 1, 1: 1},
-        early_stopping=False, random_state=42,
+    # ── Feature selection: drop bottom 30% by importance ─────────────
+    _scout = RandomForestClassifier(
+        n_estimators=200, max_depth=8, min_samples_leaf=20,
+        class_weight="balanced", n_jobs=-1, random_state=42,
     )
-    model.fit(X_tr, y_tr)
+    _scout.fit(X_tr, y_tr, sample_weight=_sw_tr)
+    _imp = _scout.feature_importances_
+    _imp_thr = np.percentile(_imp, 30)  # drop bottom 30%
+    _feat_mask = _imp >= _imp_thr
+    if _feat_mask.sum() < 10:  # safety: keep at least 10 features
+        _feat_mask = np.ones(len(_imp), dtype=bool)
+    X_tr_sel = X_tr[:, _feat_mask]
+    X_te_sel = X_te[:, _feat_mask]
+
+    # ── Train ENSEMBLE on 100% of fold_train ─────────────────────────
+    _hgb = HistGradientBoostingClassifier(
+        max_iter=2000, learning_rate=0.01, max_depth=7,
+        min_samples_leaf=20, l2_regularization=1.0,
+        max_bins=128, class_weight=None,
+        early_stopping=True, validation_fraction=0.1,
+        n_iter_no_change=80, random_state=42,
+    )
+    _rf = RandomForestClassifier(
+        n_estimators=400, max_depth=12, min_samples_leaf=15,
+        max_features="sqrt", class_weight="balanced",
+        n_jobs=-1, random_state=42,
+    )
+    _et = ExtraTreesClassifier(
+        n_estimators=400, max_depth=14, min_samples_leaf=10,
+        max_features="sqrt", class_weight="balanced",
+        n_jobs=-1, random_state=42,
+    )
+    model = VotingClassifier(
+        estimators=[("hgb", _hgb), ("rf", _rf), ("et", _et)],
+        voting="soft",
+        weights=[3, 2, 1],  # HGB gets most weight (best single model)
+    )
+    model.fit(X_tr_sel, y_tr, sample_weight=_sw_tr)
 
     # Evaluate on fold_test
-    test_proba = model.predict_proba(X_te)[:, 1]
+    test_proba = model.predict_proba(X_te_sel)[:, 1]
     test_preds = (test_proba >= best_thr).astype(int)
 
     auc   = roc_auc_score(y_te, test_proba) if len(np.unique(y_te)) > 1 else 0.5
@@ -233,21 +314,32 @@ while fold_start + TRAIN_BARS + TEST_BARS <= n_total:
     ]])
 
     # ── RR sweep P&L simulation (continuous equity, per fold) ────────────────
+    _spread_rr_base = float(getattr(settings_full.risk, "spread_cost_rr", 0.10))
+    _slippage_rr = float(getattr(settings_full.risk, "slippage_rr", 0.05))
+    _commission_rr = float(getattr(settings_full.risk, "commission_rr", 0.02))
+    _friction_rr = _spread_rr_base + _slippage_rr + _commission_rr
+    _compound_cap = float(getattr(settings_full.risk, "compound_cap", 50.0))
+    _max_rr_equity = STARTING_BALANCE * _compound_cap if _compound_cap > 0 else float("inf")
+    # P1a: per-bar session spread multiplier
+    _sess_mults = fold_test_copy["session_spread_mult"].values if "session_spread_mult" in fold_test_copy.columns else None
     fold_rr_stats: dict = {}
     for _rr in RR_SWEEP:
         _equity = rr_equity_curves[_rr][-1]   # continue from previous fold's end balance
         _wins   = 0
-        for _p, _t in zip(test_preds, y_te):
+        for _idx, (_p, _t) in enumerate(zip(test_preds, y_te)):
             if _p == 1:
-                _risk = _equity * RISK_PCT
+                _eff = min(_equity, _max_rr_equity)  # cap compound growth
+                _risk = _eff * RISK_PCT
+                _sm = float(_sess_mults[_idx]) if _sess_mults is not None else 1.0
+                _fr = _spread_rr_base * _sm + _slippage_rr + _commission_rr
                 if _t == 1:
-                    _equity += _risk * _rr
+                    _equity += _risk * (_rr - _fr)
                     _wins   += 1
                 else:
-                    _equity -= _risk
+                    _equity -= _risk * (1.0 + _fr)
         _tot  = int(test_preds.sum())
         _wr   = _wins / _tot if _tot > 0 else prec   # fallback to model precision
-        _ev   = _wr * _rr - (1.0 - _wr)
+        _ev   = _wr * (_rr - _friction_rr) - (1.0 - _wr) * (1.0 + _friction_rr)
         rr_equity_curves[_rr].append(round(_equity, 2))
         fold_rr_stats[_rr] = {
             "final_balance": round(_equity, 2),
@@ -474,7 +566,7 @@ wf_report = {
         "step_bars": STEP_BARS,
         "n_folds": len(fold_results),
         "features": FEATURE_COLUMNS,
-        "model": f"HistGradientBoostingClassifier(max_iter=300, lr=0.05, depth=6, balanced) | {len(FEATURE_COLUMNS)} features: D1:1 H4:9 H1:3 M15:15 News:5",
+        "model": f"Ensemble(HGB+RF+ET, weights=3:2:1, feature_sel=top70%) | {len(FEATURE_COLUMNS)} features",
     },
     "aggregate": {
         "avg_roc_auc":    round(avg_auc, 4),
@@ -506,8 +598,8 @@ wf_report = {
     "rr_analysis": {str(k): v for k, v in rr_summary.items()},
 }
 
-out_report = Path("outputs/walkforward_report_ict_wyckoff.json")
-out_signals = Path("outputs/walkforward_signals_ict_wyckoff.csv")
+out_report = Path(settings.app.walkforward_report_path)
+out_signals = Path(settings.app.walkforward_trades_path)
 
 out_report.write_text(json.dumps(wf_report, indent=2, ensure_ascii=False), encoding="utf-8")
 print(f"  Report saved  → {out_report}")

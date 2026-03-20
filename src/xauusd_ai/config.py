@@ -106,6 +106,20 @@ class RiskSettings(BaseModel):
     # risk_tier_floor = 3% → dùng khi drawdown >= 10% từ peak balance
     # risk_per_trade   = 5% → dùng khi balance ở peak (không có drawdown)
     risk_tier_floor: float = 0.0  # 0 = disabled (flat risk). Set to e.g. 0.03 for 3% floor
+    # ── Backtest realism friction ──────────────────────────────────────
+    # spread_cost_rr:  spread as fraction of 1R (e.g. 0.10 = spread eats 10% of one R)
+    #   XAUUSD typical spread ~30pts, SL ~300pts → 30/300 = 0.10
+    spread_cost_rr: float = 0.10
+    # slippage_rr:  slippage as fraction of 1R (entry+exit combined)
+    slippage_rr: float = 0.05
+    # commission_rr:  broker commission as fraction of 1R per trade
+    commission_rr: float = 0.02
+    # compound_cap:  max balance multiplier per fold for sim (0=unlimited)
+    #   e.g. 50.0 → balance capped at 50× starting balance per fold
+    compound_cap: float = 50.0
+    # max_spread_points:  max allowed spread in price points for live order (0=disabled)
+    #   XAUUSD ~30 pts normal; reject if > 80 pts (news/off-hours)
+    max_spread_points: float = 0.0
 
 
 class TrailingSlSettings(BaseModel):
@@ -129,6 +143,39 @@ class DcaSettings(BaseModel):
     max_total_risk_pct: float = 0.03   # Tổng risk tối đa 3% balance (an toàn)
 
 
+class ExitModelSettings(BaseModel):
+    """Exit model — model riêng học khi nào nên chốt lời sớm / cắt lỗ sớm.
+    Hoạt động độc lập với entry model, chạy bar-by-bar trên lệnh đang mở.
+
+    Label training:
+      Tại mỗi bar j đang giữ lệnh, nhìn ahead exit_label_horizon bars.
+      should_exit=1 nếu unrealized_rr[j] - min(rr[j+1..j+H]) > exit_label_threshold_rr
+      Tức là: nếu ở lại sẽ bị rút lại > threshold R, nên chốt ngay.
+
+    Features: 38 market features (FEATURE_COLUMNS) + 6 position-state features.
+    """
+    # ── Master switch ──────────────────────────────────────────────────────
+    enabled: bool = False             # Bật sau khi đã train exit model
+
+    # ── Model paths ─────────────────────────────────────────────────────────
+    exit_model_path: str = "outputs/exit_model.pkl"
+    exit_scaler_path: str = "outputs/exit_scaler.pkl"
+    exit_model_meta_path: str = "outputs/exit_model_meta.json"
+
+    # ── Live execution params ─────────────────────────────────────────────
+    exit_threshold: float = 0.60       # Xác suất min để trigger early exit
+    min_unrealized_rr: float = 0.30    # Chỉ xét chốt khi đã có >= 0.3R lợi nhuận
+    exit_min_hold_bars: int = 2        # Không chốt trước N bars (cho trade thở)
+    also_cut_losses: bool = False      # Nếu True: cũng cắt lỗ sớm (không chỉ chốt lời)
+    min_loss_rr: float = -0.50         # Chỉ cắt lỗ khi loss > -0.5R (nếu also_cut_losses=True)
+
+    # ── Training label params ──────────────────────────────────────────────
+    exit_label_horizon: int = 4        # Nhìn N bars ahead để tính label
+    exit_label_threshold_rr: float = 0.35  # Bị rút > 0.35R → should_exit=1
+    max_entry_samples: int = 6000      # Số entry bars dùng để tạo exit dataset
+    include_loss_entries: bool = True  # Thêm target=0 entries để model học cắt lỗ
+
+
 class ExecutionSettings(BaseModel):
     auto_trade: bool = False
     deviation: int = 20
@@ -137,8 +184,10 @@ class ExecutionSettings(BaseModel):
     paper_trade_max_loops: int = 1
     paper_data_source: str = "csv_folder"
     close_opposite_on_signal: bool = False  # Chốt lệnh ngược chiều đang lời khi có tín hiệu mới
+    close_opposite_min_profit: float = 1.0  # Minimum profit ($) to close opposite position
     trailing_sl: TrailingSlSettings = Field(default_factory=TrailingSlSettings)
     dca: DcaSettings = Field(default_factory=DcaSettings)
+    exit_model: ExitModelSettings = Field(default_factory=ExitModelSettings)
 
 
 class TrainingSettings(BaseModel):
@@ -149,6 +198,9 @@ class TrainingSettings(BaseModel):
     test_end_date: str | datetime | None = None
     label_horizon: int = 8
     min_return_threshold: float = 0.0008
+    use_sltp_label: bool = True           # SL/TP race label: cleaner targets vs n-bar return
+    sltp_label_max_horizon: int = 32      # Max bars forward to scan for TP/SL hit
+    label_tp_rr: float = 0.0              # TP RR for labeling (0 = use risk.take_profit_rr)
     retrain_on_startup: bool = True
     live_learning_enabled: bool = True
     live_learning_min_new_bars: int = 12
@@ -157,10 +209,10 @@ class TrainingSettings(BaseModel):
     dataset_path: str = "outputs/training_dataset.csv"
     optimize_threshold: bool = True
     validation_split: float = 0.15
-    threshold_min: float = 0.40
-    threshold_max: float = 0.80
-    threshold_step: float = 0.02
-    min_precision_floor: float = 0.40
+    threshold_min: float = 0.35
+    threshold_max: float = 0.60
+    threshold_step: float = 0.01
+    min_precision_floor: float = 0.30
     walkforward_train_size: int = 1200
     walkforward_test_size: int = 300
     walkforward_step_size: int = 300
@@ -229,6 +281,7 @@ class IntegrationSettings(BaseModel):
 
 
 class Settings(BaseModel):
+    model_config = {"arbitrary_types_allowed": True}
     app: AppSettings = Field(default_factory=AppSettings)
     market: MarketSettings = Field(default_factory=MarketSettings)
     strategy: StrategySettings = Field(default_factory=StrategySettings)
@@ -237,10 +290,13 @@ class Settings(BaseModel):
     training: TrainingSettings = Field(default_factory=TrainingSettings)
     notifications: NotificationSettings = Field(default_factory=NotificationSettings)
     integrations: IntegrationSettings = Field(default_factory=IntegrationSettings)
+    _config_path: str | None = None
 
 
 def load_settings(path: Path) -> Settings:
     raw: dict[str, Any] = {}
     if path.exists():
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    return Settings.model_validate(raw)
+    s = Settings.model_validate(raw)
+    s._config_path = str(path)
+    return s

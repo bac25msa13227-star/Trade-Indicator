@@ -31,6 +31,8 @@ from xauusd_ai.backtesting.engine import simulate_dynamic_concurrent_backtest
 p = argparse.ArgumentParser()
 p.add_argument("--config", default="configs/train_ict_wyckoff_2022_2026.yaml")
 p.add_argument("--account", default="ACC1")  # kept for CLI compat
+p.add_argument("--eval-only", action="store_true",
+               help="Skip training. Load saved model and just regenerate backtest stats.")
 args = p.parse_args()
 
 CFG = Path(args.config)
@@ -61,74 +63,91 @@ train_df  = dataset[dataset["split"] == "train"]
 test_df   = dataset[dataset["split"] == "test"]
 print(f"      TRAIN: {len(train_df):,}  TEST: {len(test_df):,}  ({time.time()-t0:.1f}s)")
 
-# ── 3. Train model (identical to train_ict_wyckoff.py pipeline) ──────────
-print("\n[3/4] Training model (HistGBC 500, balanced, threshold-optimised)...")
-from sklearn.ensemble import HistGradientBoostingClassifier
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import precision_score, recall_score
+# ── 3. Train or load model ───────────────────────────────────────────────
+if args.eval_only:
+    print("\n[3/4] --eval-only: loading saved model (no retrain)...")
+    if not trainer.load_artifacts():
+        print("ERROR: saved model not found at", settings.app.model_path)
+        sys.exit(1)
+    best_thr = trainer.decision_threshold
+    # Use the saved model's feature columns (may differ from current FEATURE_COLUMNS)
+    _feat_cols = trainer.feature_columns
+    print(f"      Loaded: {settings.app.model_path}  (threshold={best_thr:.2f})")
+    # attach predictions using saved model/scaler
+    dataset = dataset.copy()
+    _avail = [c for c in _feat_cols if c in dataset.columns]
+    dataset["probability"] = trainer.model.predict_proba(
+        trainer.scaler.transform(dataset[_avail])
+    )[:, 1]
+    dataset["prediction"] = (dataset["probability"] >= best_thr).astype(int)
+else:
+    print("\n[3/4] Training model (HistGBC 500, balanced, threshold-optimised)...")
+    from sklearn.ensemble import HistGradientBoostingClassifier
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.metrics import precision_score, recall_score
 
-scaler  = StandardScaler()
-X_train = scaler.fit_transform(train_df[FEATURE_COLUMNS])
-X_test  = scaler.transform(test_df[FEATURE_COLUMNS])
-y_train = train_df["target"].values
+    scaler  = StandardScaler()
+    X_train = scaler.fit_transform(train_df[FEATURE_COLUMNS])
+    X_test  = scaler.transform(test_df[FEATURE_COLUMNS])
+    y_train = train_df["target"].values
 
-# threshold search on 80% of train
-val_cut   = int(len(train_df) * 0.80)
-opt_model = HistGradientBoostingClassifier(
-    max_iter=300, learning_rate=0.05, max_depth=6,
-    min_samples_leaf=20, class_weight="balanced",
-    early_stopping=False, random_state=42,
-)
-t0 = time.time()
-opt_model.fit(scaler.transform(train_df.iloc[:val_cut][FEATURE_COLUMNS]),
-              train_df.iloc[:val_cut]["target"].values)
-val_proba = opt_model.predict_proba(scaler.transform(train_df.iloc[val_cut:][FEATURE_COLUMNS]))[:, 1]
-y_val     = train_df.iloc[val_cut:]["target"].values
+    # threshold search on 80% of train
+    val_cut   = int(len(train_df) * 0.80)
+    opt_model = HistGradientBoostingClassifier(
+        max_iter=300, learning_rate=0.05, max_depth=6,
+        min_samples_leaf=20, class_weight="balanced",
+        early_stopping=False, random_state=42,
+    )
+    t0 = time.time()
+    opt_model.fit(scaler.transform(train_df.iloc[:val_cut][FEATURE_COLUMNS]),
+                  train_df.iloc[:val_cut]["target"].values)
+    val_proba = opt_model.predict_proba(scaler.transform(train_df.iloc[val_cut:][FEATURE_COLUMNS]))[:, 1]
+    y_val     = train_df.iloc[val_cut:]["target"].values
 
-best_thr, best_score = settings.training.threshold_min, -float("inf")
-for thr in np.arange(settings.training.threshold_min,
-                     settings.training.threshold_max + settings.training.threshold_step,
-                     settings.training.threshold_step):
-    preds = (val_proba >= thr).astype(int)
-    n_pred = int(preds.sum())
-    if n_pred < 3:
-        continue
-    prec  = precision_score(y_val, preds, zero_division=0)
-    rec   = recall_score(y_val, preds, zero_division=0)
-    if prec < settings.training.min_precision_floor:
-        continue
-    if rec < 0.01:
-        continue  # bỏ qua threshold cho quá ít lệnh
-    # F-beta với beta=1.5: balance giữa WR và số lệnh
-    beta = 1.5
-    score = (1 + beta ** 2) * prec * rec / (beta ** 2 * prec + rec)
-    if score > best_score:
-        best_score, best_thr = score, float(thr)
+    best_thr, best_score = settings.training.threshold_min, -float("inf")
+    for thr in np.arange(settings.training.threshold_min,
+                         settings.training.threshold_max + settings.training.threshold_step,
+                         settings.training.threshold_step):
+        preds = (val_proba >= thr).astype(int)
+        n_pred = int(preds.sum())
+        if n_pred < 3:
+            continue
+        prec  = precision_score(y_val, preds, zero_division=0)
+        rec   = recall_score(y_val, preds, zero_division=0)
+        if prec < settings.training.min_precision_floor:
+            continue
+        if rec < 0.01:
+            continue  # bỏ qua threshold cho quá ít lệnh
+        # F-beta với beta=1.5: balance giữa WR và số lệnh
+        beta = 1.5
+        score = (1 + beta ** 2) * prec * rec / (beta ** 2 * prec + rec)
+        if score > best_score:
+            best_score, best_thr = score, float(thr)
 
-# final model on 100% train
-final_model = HistGradientBoostingClassifier(
-    max_iter=500, learning_rate=0.05, max_depth=6,
-    min_samples_leaf=20, class_weight="balanced",
-    early_stopping=False, random_state=42,
-)
-final_model.fit(X_train, y_train)
-print(f"      Training done ({time.time()-t0:.1f}s)  |  threshold={best_thr:.2f}")
+    # final model on 100% train
+    final_model = HistGradientBoostingClassifier(
+        max_iter=500, learning_rate=0.05, max_depth=6,
+        min_samples_leaf=20, class_weight="balanced",
+        early_stopping=False, random_state=42,
+    )
+    final_model.fit(X_train, y_train)
+    print(f"      Training done ({time.time()-t0:.1f}s)  |  threshold={best_thr:.2f}")
 
-# attach predictions to dataset
-_full_X = scaler.transform(dataset[FEATURE_COLUMNS])
-dataset = dataset.copy()
-dataset["probability"]  = final_model.predict_proba(_full_X)[:, 1]
-dataset["prediction"]   = (dataset["probability"] >= best_thr).astype(int)
+    # attach predictions to dataset
+    _full_X = scaler.transform(dataset[FEATURE_COLUMNS])
+    dataset = dataset.copy()
+    dataset["probability"]  = final_model.predict_proba(_full_X)[:, 1]
+    dataset["prediction"]   = (dataset["probability"] >= best_thr).astype(int)
+
+    # save model artifacts for live trading (ACC1)
+    trainer.model          = final_model
+    trainer.scaler         = scaler
+    trainer.decision_threshold = best_thr
+    trainer._save_artifacts()
+    print(f"      Model saved: {settings.app.model_path}  (threshold={best_thr:.2f})")
 
 # ── 4. Simulate trades on TEST 2026 ───────────────────────────────────────
 print("\n[4/4] Simulating trades on test set (2026)...")
-
-# save model artifacts for live trading (ACC1)
-trainer.model          = final_model
-trainer.scaler         = scaler
-trainer.decision_threshold = best_thr
-trainer._save_artifacts()
-print(f"      Model saved: {settings.app.model_path}  (threshold={best_thr:.2f})")
 
 result = simulate_dynamic_concurrent_backtest(dataset, settings, risk_mgr, compound=False)
 trades = result.trades
@@ -162,8 +181,9 @@ print(f"  Trade Statistics")
 print(f"    Total trades     : {r['trades']}")
 print(f"    Filtered (skipped): {r['signals_filtered_out']}")
 print(f"    No slot (skipped): {r.get('signals_no_slot', 0)}")
-print(f"    Wins / Losses    : {r['wins']} W  /  {r['losses']} L")
-print(f"    Win rate         : {win_r:.1%}   {emoji_wr}")
+_draws = r.get('draws', 0)
+print(f"    Wins / Draws / Losses: {r['wins']} W  /  {_draws} HOA  /  {r['losses']} L")
+print(f"    Win rate         : {win_r:.1%}  (W/W+L, excludes draws)   {emoji_wr}")
 print(f"    Profit factor    : {r['profit_factor']:.3f}   {'[+]' if r['profit_factor'] >= 1.0 else '[-]'}")
 print(f"    Avg win          : ${r['avg_win']:>8,.2f}")
 print(f"    Avg loss         : ${r['avg_loss']:>8,.2f}")

@@ -1,4 +1,4 @@
-﻿"""News Features cho XAUUSD AI Trading Model
+"""News Features cho XAUUSD AI Trading Model
 ============================================
 Tạo 5 features từ lịch tin tức kinh tế, với 3 lớp nguồn dữ liệu:
 
@@ -73,6 +73,8 @@ _FOMC_DATES = [
     "2025-07-30", "2025-09-17", "2025-11-05", "2025-12-17",
     "2026-01-28", "2026-03-18", "2026-04-29", "2026-06-17",
     "2026-07-29", "2026-09-16", "2026-11-04", "2026-12-16",
+    "2027-01-27", "2027-03-17", "2027-04-28", "2027-06-16",
+    "2027-07-28", "2027-09-22", "2027-11-03", "2027-12-15",
 ]
 
 _EVENT_GOLD_DIRECTION: dict[str, int] = {
@@ -143,13 +145,21 @@ def _weekday_skip(dt: datetime) -> datetime:
 
 #  Layer 1: Finnhub 
 
-# Process-level flag: set True after first 401/403 so we stop retrying all session
+# Process-level flag: set True after first 401/403, with cooldown to retry later
 _finnhub_disabled: bool = False
+_finnhub_disabled_at: float = 0.0
+_FINNHUB_COOLDOWN_SEC = 3600  # retry after 1 hour
 
 
 def _get_finnhub_key() -> str | None:
+    global _finnhub_disabled
     if _finnhub_disabled:
-        return None
+        import time as _t
+        if (_t.time() - _finnhub_disabled_at) > _FINNHUB_COOLDOWN_SEC:
+            _finnhub_disabled = False
+            LOGGER.info("Finnhub: cooldown expired, re-enabling")
+        else:
+            return None
     key = os.environ.get("FINNHUB_API_KEY", "").strip()
     return key if key else None
 
@@ -211,8 +221,11 @@ def _fetch_finnhub_year(key: str, year: int) -> list[dict]:
         except Exception as exc:
             status = getattr(getattr(exc, "response", None), "status_code", None)
             if status in (401, 403):
-                LOGGER.warning("Finnhub key invalid/quota exceeded (%s) — disabling for this session", status)
+                LOGGER.warning("Finnhub key invalid/quota exceeded (%s) — disabling for %ds", status, _FINNHUB_COOLDOWN_SEC)
                 _finnhub_disabled = True
+                import time as _t
+                global _finnhub_disabled_at
+                _finnhub_disabled_at = _t.time()
                 return all_events  # stop retrying remaining quarters
             LOGGER.warning("Finnhub fetch failed %s%s: %s", from_d, to_d, exc)
     return all_events
@@ -287,7 +300,27 @@ def fetch_finnhub_calendar(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFra
 
 #  Layer 2: ForexFactory 
 
+_FF_CACHE_FILE = _CACHE_DIR / "forexfactory_live.json"
+_FF_CACHE_TTL_SEC = 3600  # re-fetch every 1 hour
+
+
 def _fetch_forexfactory_live() -> pd.DataFrame:
+    # Check disk cache first
+    try:
+        if _FF_CACHE_FILE.exists():
+            cache_data = json.loads(_FF_CACHE_FILE.read_text(encoding="utf-8"))
+            cached_at = cache_data.get("cached_at", "")
+            if cached_at:
+                age = (datetime.now(timezone.utc) - datetime.fromisoformat(cached_at)).total_seconds()
+                if age < _FF_CACHE_TTL_SEC:
+                    df = pd.DataFrame(cache_data.get("rows", []))
+                    if not df.empty:
+                        df["datetime_utc"] = pd.to_datetime(df["datetime_utc"], utc=True)
+                        LOGGER.debug("ForexFactory: cache hit (%d events, age=%.0fs)", len(df), age)
+                        return df
+    except Exception:
+        pass
+
     rows: list[dict] = []
     for url in [_FF_WEEK_URL, _FF_MONTH_URL]:
         try:
@@ -327,9 +360,22 @@ def _fetch_forexfactory_live() -> pd.DataFrame:
         return pd.DataFrame()
     df = pd.DataFrame(rows)
     df["datetime_utc"] = pd.to_datetime(df["datetime_utc"], utc=True)
-    return df.sort_values("datetime_utc").drop_duplicates(
+    df = df.sort_values("datetime_utc").drop_duplicates(
         subset=["datetime_utc", "event"]
     ).reset_index(drop=True)
+    # Save to disk cache
+    try:
+        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        cache_rows = df.copy()
+        cache_rows["datetime_utc"] = cache_rows["datetime_utc"].astype(str)
+        _FF_CACHE_FILE.write_text(
+            json.dumps({"cached_at": datetime.now(timezone.utc).isoformat(),
+                        "rows": cache_rows.to_dict(orient="records")}, default=str),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        LOGGER.debug("ForexFactory cache save failed: %s", exc)
+    return df
 
 
 #  Layer 3: Rule-based 

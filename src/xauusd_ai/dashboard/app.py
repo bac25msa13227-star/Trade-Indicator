@@ -18,6 +18,8 @@ from __future__ import annotations
 import datetime as dt
 import json
 import pickle
+import re
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -28,6 +30,13 @@ try:
     _HAS_AUTOREFRESH = True
 except ImportError:
     _HAS_AUTOREFRESH = False
+
+try:
+    from watchdog.observers import Observer
+    from watchdog.events import FileSystemEventHandler
+    _HAS_WATCHDOG = True
+except ImportError:
+    _HAS_WATCHDOG = False
 
 ROOT = Path(__file__).resolve().parents[3]
 OUTPUTS = ROOT / "outputs"
@@ -141,11 +150,15 @@ def _round(val, dec: int = 4):
 
 def _card(title: str, value: str, subtitle: str = "", colour: str = BLUE) -> str:
     return (
-        f'<div style="background:{colour}22;border-left:4px solid {colour};'
-        f'padding:12px 16px;border-radius:8px;margin-bottom:4px">'
-        f'<div style="font-size:0.72rem;color:{colour};text-transform:uppercase;letter-spacing:.06em">{title}</div>'
-        f'<div style="font-size:1.8rem;font-weight:700;color:#fff">{value}</div>'
-        f'<div style="font-size:0.75rem;color:#aaa">{subtitle}</div>'
+        f'<div style="background:linear-gradient(135deg,{colour}0a,{colour}14);'
+        f'border:1px solid {colour}30;border-left:3px solid {colour};'
+        f'padding:14px 18px;border-radius:12px;margin-bottom:6px;'
+        f'box-shadow:0 2px 8px {colour}10;transition:all 0.2s ease">'
+        f'<div style="font-size:0.68rem;color:{colour};text-transform:uppercase;'
+        f'letter-spacing:.08em;font-weight:600;margin-bottom:6px">{title}</div>'
+        f'<div style="font-size:1.7rem;font-weight:800;color:#f1f5f9;'
+        f'line-height:1.1">{value}</div>'
+        f'<div style="font-size:0.72rem;color:#94a3b8;margin-top:4px">{subtitle}</div>'
         f'</div>'
     )
 
@@ -154,15 +167,20 @@ def _threshold_bar(label: str, value: float, threshold: float, reverse: bool = F
     pct    = min(abs(value) / max(abs(threshold) * 2, 1e-9), 1.0)
     passed = (value >= threshold) if not reverse else (value <= threshold)
     colour = GREEN if passed else RED
-    icon   = "OK" if passed else "FAIL"
+    icon   = "✓" if passed else "✗"
+    bg     = f"{colour}10"
     st.markdown(
-        f'<div style="margin-bottom:8px">'
-        f'<div style="display:flex;justify-content:space-between;font-size:0.85rem">'
-        f'<span>[{icon}] <b>{label}</b></span>'
-        f'<span style="color:{colour}"><b>{value:.4f}</b> / {threshold:.4f}</span>'
+        f'<div style="margin-bottom:10px;background:{bg};padding:10px 14px;'
+        f'border-radius:10px;border:1px solid {colour}20">'
+        f'<div style="display:flex;justify-content:space-between;font-size:0.82rem;'
+        f'margin-bottom:6px;align-items:center">'
+        f'<span style="font-weight:600;color:#e2e8f0">{icon} {label}</span>'
+        f'<span style="color:{colour};font-weight:700;font-family:monospace">{value:.4f}'
+        f'<span style="color:#64748b;font-weight:400"> / {threshold:.4f}</span></span>'
         f'</div>'
-        f'<div style="background:#1e1e2e;border-radius:4px;height:8px">'
-        f'<div style="width:{pct*100:.1f}%;background:{colour};height:8px;border-radius:4px"></div>'
+        f'<div style="background:#0f172a;border-radius:6px;height:6px;overflow:hidden">'
+        f'<div style="width:{pct*100:.1f}%;background:linear-gradient(90deg,{colour},{colour}cc);'
+        f'height:6px;border-radius:6px;transition:width 0.5s ease"></div>'
         f'</div></div>',
         unsafe_allow_html=True,
     )
@@ -170,16 +188,23 @@ def _threshold_bar(label: str, value: float, threshold: float, reverse: bool = F
 
 def _step_ok(step: int, label: str, passed: bool | None, detail: str = "") -> None:
     colour = GREEN if passed is True else (RED if passed is False else GREY)
-    icon   = "PASS" if passed is True else ("FAIL" if passed is False else "INFO")
+    icon   = "✅" if passed is True else ("❌" if passed is False else "ℹ️")
+    badge_bg = f"{colour}22"
+    badge_border = f"{colour}44"
     st.markdown(
-        f'<div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:10px;'
-        f'padding:10px 14px;background:{colour}11;border-left:3px solid {colour};border-radius:6px">'
-        f'<div style="font-size:1.2rem">[{icon}]</div>'
-        f'<div>'
-        f'<div style="font-size:0.78rem;color:{colour};font-weight:700">Step {step}</div>'
-        f'<div style="font-size:1rem;color:#fff;font-weight:600">{label}</div>'
-        f'<div style="font-size:0.82rem;color:#bbb;margin-top:2px">{detail}</div>'
-        f'</div></div>',
+        f'<div style="display:flex;align-items:center;gap:14px;margin-bottom:8px;'
+        f'padding:12px 16px;background:linear-gradient(135deg,{colour}08,{colour}04);'
+        f'border:1px solid {colour}18;border-left:3px solid {colour};border-radius:10px;'
+        f'transition:all 0.2s ease">'
+        f'<div style="min-width:36px;height:36px;border-radius:10px;background:{badge_bg};'
+        f'border:1px solid {badge_border};display:flex;align-items:center;justify-content:center;'
+        f'font-size:0.85rem;font-weight:800;color:{colour}">{step}</div>'
+        f'<div style="flex:1">'
+        f'<div style="font-size:0.92rem;color:#f1f5f9;font-weight:600">{label}</div>'
+        f'<div style="font-size:0.78rem;color:#94a3b8;margin-top:2px">{detail}</div>'
+        f'</div>'
+        f'<div style="font-size:1.1rem">{icon}</div>'
+        f'</div>',
         unsafe_allow_html=True,
     )
 
@@ -205,6 +230,12 @@ def compute_drawdown(equity: pd.Series) -> pd.Series:
     peak = equity.cummax()
     dd   = (equity - peak) / peak.replace(0, pd.NA) * 100
     return dd.fillna(0)
+
+
+def _ds(series: pd.Series, max_pts: int = 1000) -> pd.Series:
+    """Downsample a series to at most max_pts points and round to avoid MemoryError."""
+    step = max(1, len(series) // max_pts)
+    return series.iloc[::step].round(4)
 
 
 def load_learning_events(filename: str = "live_learning_log.jsonl") -> list[dict]:
@@ -235,7 +266,7 @@ def load_wf_signals() -> pd.DataFrame:
 
 
 def load_live_closed_trades(filename: str = "live_closed_trades.csv") -> pd.DataFrame:
-    """Load live closed trades logged by the live trading loop."""
+    """Load live closed trades logged by the live trading loop (all sessions)."""
     path = OUTPUTS / filename
     if not path.exists():
         return pd.DataFrame()
@@ -245,6 +276,16 @@ def load_live_closed_trades(filename: str = "live_closed_trades.csv") -> pd.Data
             df["time"] = pd.to_datetime(df["time"], utc=True, errors="coerce")
         if "is_win" not in df.columns and "pnl" in df.columns:
             df["is_win"] = df["pnl"] > 0
+        if "close_type" not in df.columns:
+            df["close_type"] = "UNKNOWN"
+        # Retroactively fix: SL trades can never be a win (even if PnL >= 0)
+        sl_mask = df["close_type"].astype(str).str.upper() == "SL"
+        df.loc[sl_mask, "is_win"] = False
+        if "session_id" not in df.columns:
+            df["session_id"] = "legacy"
+        # drop header-only rows that may appear mid-file from old resets
+        df = df.dropna(subset=["ticket"])
+        df = df[df["ticket"].astype(str).str.match(r"^\d")]
         return df.sort_values("time").reset_index(drop=True)
     except Exception:
         return pd.DataFrame()
@@ -346,6 +387,94 @@ def load_win_loss_events() -> tuple[list[dict], list[dict]]:
     return wins, losses
 
 
+def load_wf_txt_log(log_path: Path) -> dict:
+    """Parse a walkforward text log (wf_v5_acc2.txt style) in real-time.
+
+    Returns a dict with keys:
+      - folds: list of fold result dicts
+      - total_folds: int
+      - n_features: int
+      - config: str
+      - is_complete: bool
+      - avg_auc, avg_prec, avg_recall, avg_f1: float (across completed folds)
+    """
+    if not log_path.exists():
+        return {}
+    try:
+        content = log_path.read_text(encoding="utf-8", errors="replace")
+        lines = content.splitlines()
+    except Exception:
+        return {}
+
+    folds: list[dict] = []
+    total_folds = 0
+    n_features = 0
+    config_str = ""
+    is_complete = False
+
+    # Patterns
+    _fold_pat = re.compile(
+        r"Fold\s+(\d+)/(\d+)\s+Test:\s+(\S+)\s+->\s+(\S+)\s+\|"
+        r"\s+AUC=([\d.]+)\s+Prec=([\d.]+)\s+Recall=([\d.]+)\s+F1=([\d.]+)"
+        r"\s+Thr=([\d.]+)\s+Sigs=(\d+)/(\d+)\s+\(([\d.]+)s\)",
+    )
+    _total_pat = re.compile(r"Estimated folds:\s*(\d+)")
+    _feat_pat = re.compile(r"Features:\s*(\d+)")
+    _cfg_pat = re.compile(r"Config\s*:\s*(.+)")
+
+    for line in lines:
+        if m := _cfg_pat.search(line):
+            config_str = m.group(1).strip()
+        if m := _total_pat.search(line):
+            total_folds = int(m.group(1))
+        if m := _feat_pat.search(line):
+            n_features = int(m.group(1))
+        if m := _fold_pat.search(line):
+            folds.append({
+                "fold":       int(m.group(1)),
+                "total":      int(m.group(2)),
+                "test_start": m.group(3),
+                "test_end":   m.group(4),
+                "roc_auc":    float(m.group(5)),
+                "precision":  float(m.group(6)),
+                "recall":     float(m.group(7)),
+                "f1":         float(m.group(8)),
+                "threshold":  float(m.group(9)),
+                "n_signals":  int(m.group(10)),
+                "elapsed_s":  float(m.group(12)),
+            })
+        if "Report saved" in line or "Hoàn thành" in line or "[4/4]" in line:
+            is_complete = True
+
+    if not folds:
+        return {}
+
+    # Remove duplicate fold numbers (keep last occurrence)
+    seen: dict[int, dict] = {}
+    for f in folds:
+        seen[f["fold"]] = f
+    folds = list(seen.values())
+
+    n = len(folds)
+    avg_auc   = sum(f["roc_auc"]   for f in folds) / n
+    avg_prec  = sum(f["precision"] for f in folds) / n
+    avg_recall = sum(f["recall"]   for f in folds) / n
+    avg_f1    = sum(f["f1"]        for f in folds) / n
+
+    return {
+        "folds":       folds,
+        "total_folds": total_folds or (folds[-1]["total"] if folds else 0),
+        "n_features":  n_features,
+        "config":      config_str,
+        "is_complete": is_complete,
+        "avg_auc":     avg_auc,
+        "avg_prec":    avg_prec,
+        "avg_recall":  avg_recall,
+        "avg_f1":      avg_f1,
+        "completed":   n,
+    }
+
+
 def load_feature_importance() -> pd.DataFrame | None:
     # Try ICT+Wyckoff model first, fall back to legacy model
     mp = OUTPUTS / "model_ict_wyckoff.pkl"
@@ -357,6 +486,15 @@ def load_feature_importance() -> pd.DataFrame | None:
         with open(mp, "rb") as f:
             model = pickle.load(f)
         feature_names = list(model.feature_names_in_) if hasattr(model, "feature_names_in_") else None
+        # HistGradientBoosting / tree-based models
+        if hasattr(model, "feature_importances_"):
+            imp = model.feature_importances_
+            if feature_names is None:
+                feature_names = [f"feat_{i}" for i in range(len(imp))]
+            df = pd.DataFrame({"feature": feature_names, "importance": imp})
+            df["abs_importance"] = df["importance"].abs()
+            return df.sort_values("abs_importance", ascending=False).head(25)
+        # Linear models with coef_
         if hasattr(model, "coef_"):
             coef = model.coef_[0] if model.coef_.ndim > 1 else model.coef_
             if feature_names is None:
@@ -420,49 +558,257 @@ def summarize_daily(trades: pd.DataFrame):
 # PAGE CONFIG
 # =============================================================================
 st.set_page_config(
-    page_title="XAUUSD AI Bot — Bảng điều khiển ICT+Wyckoff",
-    page_icon="📈",
+    page_title="XAUUSD AI — Trading Dashboard",
+    page_icon="⚡",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
+
+# ── Modern CSS theme ────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-.block-container{padding-top:1rem}
-div[data-testid="metric-container"]{
-    background:#1e1e2e;border-radius:8px;padding:10px 14px;border-left:3px solid #42a5f5}
-</style>""", unsafe_allow_html=True)
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
 
-st.title("📈 XAUUSD AI Bot — Bảng điều khiển ICT+Wyckoff v3.0")
+:root {
+    --bg-primary: #0a0e17;
+    --bg-card: #111827;
+    --bg-card-hover: #1a2332;
+    --bg-surface: #151d2b;
+    --border-subtle: rgba(255,255,255,0.06);
+    --border-accent: rgba(99,102,241,0.3);
+    --text-primary: #f1f5f9;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+    --green: #10b981;
+    --green-bg: rgba(16,185,129,0.08);
+    --red: #ef4444;
+    --red-bg: rgba(239,68,68,0.08);
+    --blue: #6366f1;
+    --blue-bg: rgba(99,102,241,0.08);
+    --amber: #f59e0b;
+    --amber-bg: rgba(245,158,11,0.08);
+    --purple: #a855f7;
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --shadow-card: 0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
+    --shadow-glow: 0 0 20px rgba(99,102,241,0.1);
+    --transition: all 0.2s ease;
+}
+
+.block-container {
+    padding-top: 1.2rem !important;
+    max-width: 1400px;
+}
+
+/* ── Metric containers ── */
+div[data-testid="metric-container"] {
+    background: var(--bg-card);
+    border-radius: var(--radius-md);
+    padding: 14px 18px;
+    border: 1px solid var(--border-subtle);
+    border-left: 3px solid var(--blue);
+    box-shadow: var(--shadow-card);
+    transition: var(--transition);
+}
+div[data-testid="metric-container"]:hover {
+    border-color: var(--border-accent);
+    box-shadow: var(--shadow-glow);
+    transform: translateY(-1px);
+}
+div[data-testid="metric-container"] label {
+    color: var(--text-secondary) !important;
+    font-weight: 500 !important;
+    font-size: 0.78rem !important;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+div[data-testid="metric-container"] [data-testid="stMetricValue"] {
+    font-weight: 700 !important;
+}
+
+/* ── Tabs ── */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 2px;
+    background: var(--bg-card);
+    border-radius: var(--radius-md);
+    padding: 4px;
+    border: 1px solid var(--border-subtle);
+}
+.stTabs [data-baseweb="tab"] {
+    border-radius: var(--radius-sm);
+    padding: 10px 16px;
+    font-weight: 600;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    transition: var(--transition);
+}
+.stTabs [aria-selected="true"] {
+    background: var(--blue) !important;
+    color: #fff !important;
+    box-shadow: 0 2px 8px rgba(99,102,241,0.3);
+}
+.stTabs [data-baseweb="tab"]:hover {
+    color: var(--text-primary);
+    background: var(--bg-card-hover);
+}
+
+/* ── DataFrames ── */
+.stDataFrame {
+    border-radius: var(--radius-md) !important;
+    border: 1px solid var(--border-subtle) !important;
+}
+
+/* ── Expanders ── */
+.streamlit-expanderHeader {
+    background: var(--bg-card) !important;
+    border-radius: var(--radius-sm) !important;
+    border: 1px solid var(--border-subtle) !important;
+    font-weight: 600 !important;
+}
+
+/* ── Progress bars ── */
+.stProgress > div > div > div > div {
+    background: linear-gradient(90deg, var(--blue), var(--purple)) !important;
+    border-radius: 6px;
+}
+
+/* ── Dividers ── */
+hr {
+    border-color: var(--border-subtle) !important;
+    opacity: 0.5;
+}
+
+/* ── Glass card base ── */
+.glass-card {
+    background: linear-gradient(135deg, rgba(17,24,39,0.9), rgba(15,23,42,0.95));
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    padding: 20px 24px;
+    box-shadow: var(--shadow-card);
+    transition: var(--transition);
+}
+.glass-card:hover {
+    border-color: var(--border-accent);
+    box-shadow: var(--shadow-glow);
+}
+
+/* ── Pulse animation for live dot ── */
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+.live-pulse {
+    animation: pulse 2s ease-in-out infinite;
+}
+
+/* ── Glow animation ── */
+@keyframes glow {
+    0%, 100% { box-shadow: 0 0 5px rgba(99,102,241,0.2); }
+    50% { box-shadow: 0 0 15px rgba(99,102,241,0.4); }
+}
+
+/* ── Buttons ── */
+.stButton > button {
+    border-radius: var(--radius-sm) !important;
+    font-weight: 600 !important;
+    border: 1px solid var(--border-accent) !important;
+    transition: var(--transition) !important;
+}
+.stButton > button:hover {
+    box-shadow: var(--shadow-glow) !important;
+    transform: translateY(-1px) !important;
+}
+
+/* ── Selectbox / Radio ── */
+.stSelectbox > div, .stRadio > div {
+    font-size: 0.85rem;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ── Header with branding ────────────────────────────────────────────────────
+st.markdown(
+    '<div style="display:flex;align-items:center;gap:16px;margin-bottom:8px">'
+    '<div style="font-size:2.2rem;font-weight:900;background:linear-gradient(135deg,#6366f1,#a855f7);'
+    '-webkit-background-clip:text;-webkit-text-fill-color:transparent">'
+    '⚡ XAUUSD AI</div>'
+    '<div style="background:#6366f122;border:1px solid #6366f144;border-radius:6px;'
+    'padding:3px 10px;font-size:0.72rem;font-weight:700;color:#a5b4fc;letter-spacing:0.06em">'
+    'ICT + WYCKOFF v5.0</div>'
+    '<div style="margin-left:auto;display:flex;align-items:center;gap:8px">'
+    '<div class="live-pulse" style="width:8px;height:8px;border-radius:50%;background:#10b981"></div>'
+    '<span style="color:#94a3b8;font-size:0.78rem;font-weight:500">LIVE</span>'
+    '</div></div>',
+    unsafe_allow_html=True,
+)
 
 _tunnel = OUTPUTS / "tunnel_url.txt"
 if _tunnel.exists():
     _pub = _tunnel.read_text(encoding="utf-8").strip()
     if _pub:
         st.markdown(
-            f'<div style="background:#0d2137;border:1px solid #42a5f5;border-radius:8px;'
-            f'padding:10px 18px;margin-bottom:8px;display:flex;align-items:center;gap:16px">'
-            f'<span style="font-size:1.3rem">🌐</span>'
-            f'<div><span style="color:#90caf9;font-size:0.8rem">Public URL</span><br>'
-            f'<a href="{_pub}" target="_blank" style="color:#42a5f5;font-size:1.05rem;font-weight:700">{_pub}</a></div>'
-            f'<span style="margin-left:auto;background:#1565c0;color:#fff;padding:4px 10px;border-radius:4px;font-size:0.78rem">LIVE</span>'
+            f'<div class="glass-card" style="display:flex;align-items:center;gap:16px;'
+            f'margin-bottom:12px;border-color:#6366f130;padding:12px 20px">'
+            f'<div style="width:38px;height:38px;border-radius:10px;background:#6366f118;'
+            f'display:flex;align-items:center;justify-content:center;font-size:1.2rem">🌐</div>'
+            f'<div style="flex:1">'
+            f'<div style="color:#94a3b8;font-size:0.72rem;font-weight:600;'
+            f'text-transform:uppercase;letter-spacing:0.06em">Public Access URL</div>'
+            f'<a href="{_pub}" target="_blank" style="color:#818cf8;font-size:0.95rem;'
+            f'font-weight:700;text-decoration:none">{_pub}</a></div>'
+            f'<div style="background:linear-gradient(135deg,#6366f1,#a855f7);color:#fff;'
+            f'padding:5px 14px;border-radius:8px;font-size:0.72rem;font-weight:700;'
+            f'letter-spacing:0.06em">LIVE</div>'
             f'</div>',
             unsafe_allow_html=True,
         )
 
-# Auto-refresh every 30 seconds when on Live Monitor tab
-if _HAS_AUTOREFRESH:
-    _st_autorefresh(interval=30_000, key="live_autorefresh")
+# ── Watchdog: push-notify dashboard when live files change ──────────────────
+_WATCHED_FILES = {
+    "live_status_acc1.json",
+    "live_status_acc2.json",
+    "paper_trade_signals.csv",
+    "paper_trade_signals_acc2.csv",
+    "live_closed_trades.csv",
+    "live_closed_trades_acc2.csv",
+}
+
+if _HAS_WATCHDOG:
+    class _LiveFileHandler(FileSystemEventHandler):
+        """Set a session-state flag whenever a watched live file is modified."""
+        def on_modified(self, event):
+            if not event.is_directory and Path(event.src_path).name in _WATCHED_FILES:
+                try:
+                    st.session_state["_live_changed"] = True
+                except Exception:
+                    pass
+
+    def _start_watchdog(outputs_dir: Path) -> None:
+        """Start watchdog observer in daemon thread (once per process)."""
+        observer = Observer()
+        observer.schedule(_LiveFileHandler(), str(outputs_dir), recursive=False)
+        observer.daemon = True
+        observer.start()
+
+    # Guard: only start one observer per Streamlit worker process
+    if "_watchdog_started" not in st.session_state:
+        _wt = threading.Thread(target=_start_watchdog, args=(OUTPUTS,), daemon=True)
+        _wt.start()
+        st.session_state["_watchdog_started"] = True
+        st.session_state["_live_changed"] = False
 
 (tab_live, tab_analysis, tab_pnl, tab_learning,
  tab_backtest, tab_walkforward, tab_risk, tab_data) = st.tabs([
-    "🟢 Theo dõi Live",
-    "🔍 Phân tích Chi tiết",
-    "📈 P&L & Vốn",
-    "🧠 Học Liên Tục",
-    "📊 Kiểm nghiệm",
+    "� Live",
+    "🔬 Phân tích",
+    "💰 P&L",
+    "🧠 Tự học",
+    "📊 Backtest",
     "🔄 Walk-Forward",
-    "⚙️ Rủi ro & Cài đặt",
-    "🗄️ Dữ liệu MT5",
+    "⚙️ Rủi ro",
+    "🗄️ Dữ liệu",
 ])
 
 # --- Shared data -------------------------------------------------------
@@ -517,39 +863,84 @@ threshold_val_acc2 = float(
 )
 
 # =============================================================================
-# TAB 1 — LIVE MONITOR
+# TAB 1 — LIVE MONITOR  (watchdog push + @st.fragment 30s fallback)
 # =============================================================================
-with tab_live:
-    st.header("🟢 Giám sát Bot Live")
+@st.fragment(run_every=30)
+def _render_live_tab() -> None:
+    """Renders live-monitor content.
+
+    Watchdog sets st.session_state['_live_changed'] = True whenever a live
+    file is modified.  This fragment checks that flag first — if set it clears
+    the flag and calls st.rerun() to propagate a full-page push.  The
+    run_every=30 is a fallback in case watchdog isn't running.
+    """
+    # ── Push: rerun immediately when watchdog detected a file change ──────
+    if st.session_state.get("_live_changed", False):
+        st.session_state["_live_changed"] = False
+        st.rerun()
+
+    # ── Fresh data reads on every auto-refresh cycle ─────────────────────
+    _live_sigs      = load_signals()
+    _live_sigs_acc2 = load_signals("paper_trade_signals_acc2.csv")
+    _ltrades        = load_live_closed_trades()
+    _ltrades_acc2   = load_live_closed_trades("live_closed_trades_acc2.csv")
+    _thr     = float(model_meta.get("decision_threshold") or model_meta.get("selected_threshold") or 0.5)
+    _thr_acc2 = float(model_meta_acc2.get("decision_threshold") or model_meta_acc2.get("selected_threshold") or 0.55)
+
+    st.markdown(
+        '<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px">'
+        '<div style="font-size:1.6rem;font-weight:800;color:#f1f5f9">📡 Live Monitor</div>'
+        '<div class="live-pulse" style="width:8px;height:8px;border-radius:50%;background:#10b981"></div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
     hdr_l, hdr_r = st.columns([3, 1])
     with hdr_l:
         if model_path.exists():
             mtime = dt.datetime.fromtimestamp(model_path.stat().st_mtime)
-            st.success(f"✅ Model ICT+Wyckoff đang hoạt động — đã train: **{mtime.strftime('%Y-%m-%d %H:%M:%S')}** | HistGBC 28 features")
+            st.markdown(
+                f'<div style="display:flex;align-items:center;gap:8px;padding:8px 14px;'
+                f'background:#10b98110;border:1px solid #10b98130;border-radius:10px;font-size:0.82rem">'
+                f'<span style="color:#10b981;font-weight:700">●</span>'
+                f'<span style="color:#d1fae5">Model hoạt động</span>'
+                f'<span style="color:#6ee7b7;font-weight:600">HistGBC 28 features</span>'
+                f'<span style="color:#64748b">|</span>'
+                f'<span style="color:#94a3b8">Trained: {mtime.strftime("%Y-%m-%d %H:%M")}</span>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
         else:
-            st.error("❌ Model chưa được train — chạy `python -m xauusd_ai.main train --config configs/train_ict_wyckoff_2022_2026.yaml`")
+            st.error("❌ Model chưa được train")
     with hdr_r:
-        if st.button("🔄 Làm mới"):
+        _now_str = dt.datetime.now().strftime("%H:%M:%S")
+        st.markdown(
+            f'<div style="text-align:right;color:#64748b;font-size:0.75rem">'
+            f'Auto-refresh 30s<br>⏱ {_now_str}</div>',
+            unsafe_allow_html=True,
+        )
+        if st.button("🔄 Refresh", key="btn_manual_refresh", type="secondary"):
             st.rerun()
 
     # ── 2-account quick overview ─────────────────────────────────────────
-    def _acc_summary_card(label: str, signals: pd.DataFrame, acc_id: str) -> None:
-        if signals.empty:
+    def _acc_summary_card(label: str, signals: pd.DataFrame, acc_id: str, status_file: str = "") -> None:
+        # Prefer live_status json for open_positions (updated every scan ~10s)
+        _st_json = load_json(OUTPUTS / status_file) if status_file else {}
+        if signals.empty and not _st_json:
             st.markdown(
                 f'<div style="background:#1e1e2e;border-left:4px solid #555;padding:12px 16px;border-radius:8px">'
                 f'<div style="color:#aaa;font-size:0.8rem">{label} ({acc_id})</div>'
                 f'<div style="color:#555;font-size:1.1rem">Chưa có dữ liệu</div>'
                 f'</div>', unsafe_allow_html=True)
             return
-        latest = signals.iloc[0]
-        bal = float(latest.get("account_balance", 0) or 0)
-        opn = int(float(latest.get("open_positions", 0) or 0))
-        mx  = int(float(latest.get("max_positions", 1) or 1))
-        conf = float(latest.get("confidence", 0) or 0)
-        side = str(latest.get("side", "flat"))
-        traded = bool(latest.get("should_trade", False))
-        last_time = str(latest.get("time", ""))[:16]
+        latest: dict = signals.iloc[0].to_dict() if not signals.empty else {}
+        bal   = float(_st_json.get("account_balance") or latest.get("account_balance", 0) or 0)
+        opn   = int(float(_st_json.get("open_positions", latest.get("open_positions", 0)) or 0))
+        mx    = int(float(_st_json.get("max_positions",  latest.get("max_positions", 1))  or 1))
+        conf  = float(_st_json.get("confidence", latest.get("confidence", 0)) or 0)
+        side  = str(_st_json.get("side", latest.get("side", "flat")))
+        traded = bool(_st_json.get("should_trade", latest.get("should_trade", False)))
+        _ts   = str(_st_json.get("ts") or latest.get("time", ""))[:16]
         bal_c = GREEN if bal >= 200 else (AMBER if bal >= 100 else RED)
         side_emoji = {"buy": "📈", "sell": "📉"}.get(side, "➖")
         dec_c = GREEN if traded else "#888"
@@ -560,90 +951,120 @@ with tab_live:
             f'<span style="font-size:1.3rem;font-weight:700;color:{bal_c}">${bal:,.2f}</span>'
             f'<span style="color:#aaa">{opn}/{mx} lệnh</span>'
             f'<span style="color:{dec_c}">{side_emoji} {side.upper()} {conf:.0%}</span>'
-            f'<span style="color:#666;font-size:0.75rem">{last_time}</span>'
+            f'<span style="color:#666;font-size:0.75rem">{_ts}</span>'
             f'</div>'
             f'</div>', unsafe_allow_html=True)
 
-    both_have_data = not live_signals.empty or not live_signals_acc2.empty
+    both_have_data = not _live_sigs.empty or not _live_sigs_acc2.empty
     if both_have_data:
-        st.subheader("🏦 Tổng quan 2 Tài khoản")
+        st.markdown(
+            '<div style="font-size:1.1rem;font-weight:700;color:#e2e8f0;margin:12px 0 8px">'
+            '🏦 Tổng quan Tài khoản</div>',
+            unsafe_allow_html=True,
+        )
         ov1, ov2 = st.columns(2)
         with ov1:
-            _acc_summary_card("Acc 1 — Exness-MT5Trial17", live_signals, "270832477")
+            _acc_summary_card("Acc 1 — Exness-MT5Trial17", _live_sigs, "270832477", "live_status_acc1.json")
         with ov2:
-            _acc_summary_card("Acc 2 — Exness-MT5Trial7", live_signals_acc2, "433326057")
+            _acc_summary_card("Acc 2 — Exness-MT5Trial7", _live_sigs_acc2, "433326057", "live_status_acc2.json")
         st.divider()
 
     # ── Account selector ─────────────────────────────────────────────────
     _acc_options = ["Acc 1 — 270832477 (Exness-MT5Trial17)", "Acc 2 — 433326057 (Exness-MT5Trial7)"]
     _sel_acc = st.radio("Xem chi tiết tài khoản:", _acc_options, horizontal=True, key="acc_selector")
-    _selected_signals = live_signals if "Acc 1" in _sel_acc else live_signals_acc2
-    threshold_val = threshold_val_acc2 if "Acc 2" in _sel_acc else float(
-        model_meta.get("decision_threshold") or model_meta.get("selected_threshold") or 0.5
-)
+    _selected_signals = _live_sigs if "Acc 1" in _sel_acc else _live_sigs_acc2
+    _sel_thr = _thr_acc2 if "Acc 2" in _sel_acc else _thr
+
+    # Convert ONCE to plain dict — avoids all Series-truth-value errors
+    _sel_row: dict = _selected_signals.iloc[0].to_dict() if not _selected_signals.empty else {}
+
+    def _f(key, default=0.0):
+        """NaN-safe float from _sel_row."""
+        v = _sel_row.get(key, default)
+        try:
+            r = float(v)
+            return default if r != r else r  # guard NaN
+        except (TypeError, ValueError):
+            return float(default)
 
     if not _selected_signals.empty:
-        latest  = _selected_signals.iloc[0]
-        conf    = float(latest.get("confidence", 0) or 0)
-        side    = str(latest.get("side", "flat"))
-        score   = float(latest.get("strategy_score", 0) or 0)
-        regime  = int(float(latest.get("volatility_regime", 1) or 1))
-        traded  = bool(latest.get("should_trade", False))
-        reason  = str(latest.get("reason", ""))
+        conf    = _f("confidence")
+        side    = str(_sel_row.get("side", "flat"))
+        score   = _f("strategy_score")
+        regime  = int(_f("volatility_regime", 1))
+        traded  = bool(_sel_row.get("should_trade", False))
+        reason  = str(_sel_row.get("reason", ""))
         r_label = {0: "Sideways", 1: "Normal", 2: "Strong Vol"}.get(regime, "?")
         side_c  = {"buy": GREEN, "sell": RED}.get(side, GREY)
-        conf_c  = GREEN if conf >= threshold_val else (AMBER if conf >= threshold_val * 0.7 else RED)
+        conf_c  = GREEN if conf >= _sel_thr else (AMBER if conf >= _sel_thr * 0.7 else RED)
         score_c = GREEN if abs(score) >= 0.3 else (AMBER if abs(score) >= 0.1 else RED)
         reg_c   = {0: AMBER, 1: BLUE, 2: GREEN}.get(regime, GREY)
         dec_c   = GREEN if traded else RED
 
-        st.subheader("📡 Tín hiệu Mới nhất")
+        st.markdown(
+            '<div style="font-size:1.1rem;font-weight:700;color:#e2e8f0;margin:4px 0 8px">'
+            '📡 Tín hiệu Mới nhất</div>',
+            unsafe_allow_html=True,
+        )
         c1, c2, c3, c4, c5 = st.columns(5)
         c1.markdown(_card("Tín hiệu", {"buy": "BUY", "sell": "SELL"}.get(side, "FLAT"),
-                          str(latest.get("time", ""))[:16], side_c), unsafe_allow_html=True)
-        c2.markdown(_card("ML Confidence", f"{conf:.1%}", f"ngưỡng {threshold_val:.0%}", conf_c), unsafe_allow_html=True)
+                          str(_sel_row.get("time", ""))[:16], side_c), unsafe_allow_html=True)
+        c2.markdown(_card("ML Confidence", f"{conf:.1%}", f"ngưỡng {_sel_thr:.0%}", conf_c), unsafe_allow_html=True)
         c3.markdown(_card("Strategy Score", f"{score:+.4f}", ">= 0.30 để vào lệnh", score_c), unsafe_allow_html=True)
         c4.markdown(_card("Chế độ", r_label, "thị trường", reg_c), unsafe_allow_html=True)
         c5.markdown(_card("Quyết định", "VÀO LỆNH" if traded else "KHÔNG VÀO",
                           "" if traded else reason[:40], dec_c), unsafe_allow_html=True)
 
     if not _selected_signals.empty and "account_balance" in _selected_signals.columns:
-        latest_s = _selected_signals.iloc[0]
-        # ── Đọc live_status.json để lấy open_positions realtime (không bị kẹt bởi bar timestamp) ──
+        # ── Đọc live_status.json để lấy open_positions realtime ──────────
         _status_file = "live_status_acc2.json" if "Acc 2" in _sel_acc else "live_status_acc1.json"
         _live_status = load_json(OUTPUTS / _status_file)
-        bal = float(_live_status.get("account_balance") or latest_s.get("account_balance", 0) or 0)
-        opn = int(float(_live_status.get("open_positions", latest_s.get("open_positions", 0)) or 0))
-        mx  = int(float(_live_status.get("max_positions", latest_s.get("max_positions", 1)) or 1))
-        vol = float(latest_s.get("volume", 0) or 0) if "volume" in _selected_signals.columns else 0.0
+        try:
+            bal = float(_live_status.get("account_balance") or _f("account_balance") or 0)
+            opn = int(_live_status.get("open_positions", _f("open_positions")))
+            mx  = int(_live_status.get("max_positions",  _f("max_positions", 1)) or 1)
+            vol = _f("volume") if "volume" in _selected_signals.columns else 0.0
+        except (TypeError, ValueError):
+            bal, opn, mx, vol = 0.0, 0, 1, 0.0
 
-        st.subheader("💰 Trạng thái Tài khoản")
+        st.markdown(
+            '<div style="font-size:1.1rem;font-weight:700;color:#e2e8f0;margin:4px 0 8px">'
+            '💰 Trạng thái Tài khoản</div>',
+            unsafe_allow_html=True,
+        )
         a1, a2, a3, a4 = st.columns(4)
         bal_c = GREEN if bal >= 200 else (AMBER if bal >= 100 else RED)
-        a1.markdown(_card("Số dư", f"${bal:,.2f}", "số dư MT5 live", bal_c), unsafe_allow_html=True)
+        a1.markdown(_card("Số dư", f"${bal:,.2f}", "MT5 live balance", bal_c), unsafe_allow_html=True)
         pos_c = RED if opn >= mx else GREEN
-        a2.markdown(_card("Lệnh Đang Mở", f"{opn} / {mx}", "đang mở / tối đa", pos_c), unsafe_allow_html=True)
-        a3.markdown(_card("Lot Size", f"{vol:.3f}", "kích thước lệnh hiện tại", BLUE), unsafe_allow_html=True)
+        a2.markdown(_card("Lệnh Đang Mở", f"{opn} / {mx}", "open / max", pos_c), unsafe_allow_html=True)
+        a3.markdown(_card("Lot Size", f"{vol:.3f}", "current order size", BLUE), unsafe_allow_html=True)
         bar_pct = int((opn / max(mx, 1)) * 100)
         bar_c = GREEN if bar_pct < 70 else (AMBER if bar_pct < 100 else RED)
         a4.markdown(
-            f'<div style="padding:12px 16px;background:#1e1e2e;border-radius:8px">'
-            f'<div style="font-size:0.72rem;color:#aaa">Position Utilization</div>'
-            f'<div style="margin-top:8px;background:#333;border-radius:6px;height:14px">'
-            f'<div style="width:{bar_pct}%;background:{bar_c};height:14px;border-radius:6px"></div>'
-            f'</div>'
-            f'<div style="font-size:0.9rem;margin-top:4px;color:{bar_c}">{bar_pct}% sử dụng</div>'
-            f'</div>',
+            f'<div style="background:linear-gradient(135deg,{bar_c}0a,{bar_c}14);'
+            f'border:1px solid {bar_c}30;border-left:3px solid {bar_c};'
+            f'padding:14px 18px;border-radius:12px;margin-bottom:6px">'
+            f'<div style="font-size:0.68rem;color:{bar_c};text-transform:uppercase;'
+            f'letter-spacing:.08em;font-weight:600;margin-bottom:8px">Position Utilization</div>'
+            f'<div style="font-size:1.7rem;font-weight:800;color:#f1f5f9;margin-bottom:8px">{bar_pct}%</div>'
+            f'<div style="background:#0f172a;border-radius:6px;height:6px;overflow:hidden">'
+            f'<div style="width:{bar_pct}%;background:linear-gradient(90deg,{bar_c},{bar_c}cc);'
+            f'height:6px;border-radius:6px;transition:width 0.5s ease"></div>'
+            f'</div></div>',
             unsafe_allow_html=True,
         )
         if opn >= mx:
-            st.warning(f"Đã đầy lệnh: {opn}/{mx} — Bot không mở thêm lệnh mới")
+            st.warning(f"⚠️ Đầy lệnh: {opn}/{mx} — Bot sẽ không mở thêm")
 
     if model_meta:
         st.divider()
-        st.subheader("🧠 Hiệu suất Model — ICT+Wyckoff HistGBC")
+        st.markdown(
+            '<div style="font-size:1.1rem;font-weight:700;color:#e2e8f0;margin:4px 0 8px">'
+            '🧠 Hiệu suất Model</div>',
+            unsafe_allow_html=True,
+        )
         mm1, mm2, mm3, mm4 = st.columns(4)
-        mm1.metric("Threshold", f"{threshold_val:.2f}")
+        mm1.metric("Threshold", f"{_sel_thr:.2f}")
         mm2.metric("Precision", _pct(model_meta.get("precision")))
         mm3.metric("Recall",    _pct(model_meta.get("recall")))
         mm4.metric("F1 Score",  _pct(model_meta.get("f1")))
@@ -660,11 +1081,10 @@ with tab_live:
                        delta=f"{_wf_agg.get('correct_signals', 0)}/{_wf_agg.get('total_signals', 0)} signals")
             wm4.metric("WF Avg F1",        _pct(_wf_agg.get("avg_f1")))
 
-    if not _selected_signals.empty and bool(_selected_signals.iloc[0].get("should_trade", False)):
-        latest = _selected_signals.iloc[0]
-        entry = float(latest.get("entry_price", 0) or 0)
-        sl    = float(latest.get("stop_loss", 0) or 0)
-        tp    = float(latest.get("take_profit", 0) or 0)
+    if not _selected_signals.empty and bool(_sel_row.get("should_trade", False)):
+        entry = _f("entry_price")
+        sl    = _f("stop_loss")
+        tp    = _f("take_profit")
         rr    = abs((tp - entry) / (entry - sl)) if (sl and tp and entry and sl != entry) else 0
         st.divider()
         st.subheader("📍 Kế hoạch vào lệnh")
@@ -675,7 +1095,11 @@ with tab_live:
         ep4.metric("Risk/Reward", f"{rr:.2f}R")
 
     st.divider()
-    st.subheader("📋 Tất cả tín hiệu — Entry / SL / TP / Kết quả (100 mục gần nhất)")
+    st.markdown(
+        '<div style="font-size:1.1rem;font-weight:700;color:#e2e8f0;margin:4px 0 8px">'
+        '📋 Tín hiệu gần nhất (100 mục)</div>',
+        unsafe_allow_html=True,
+    )
     if not _selected_signals.empty:
         _sig_disp = _selected_signals.copy().head(100)
 
@@ -757,67 +1181,128 @@ with tab_live:
             kq = row.get("KQ mô phỏng", "")
             entered = row.get("Vào lệnh?", "") == "✅ CÓ"
             if kq == "✅ WIN" and entered:
-                return ["background-color: #1b3a1b"] * len(row)   # xanh đậm = vào & win
+                return ["background-color: #10b98118"] * len(row)
             if kq == "✅ WIN" and not entered:
-                return ["background-color: #0a2a1a"] * len(row)   # xanh nhạt = bỏ lỡ win
+                return ["background-color: #10b98108"] * len(row)
             if kq == "❌ LOSS" and entered:
-                return ["background-color: #2a1a1a"] * len(row)   # đỏ đậm = vào & loss
+                return ["background-color: #ef444415"] * len(row)
             if kq == "❌ LOSS" and not entered:
-                return ["background-color: #1a0f0f"] * len(row)   # đỏ nhạt = lọc đúng (tránh loss)
+                return ["background-color: #ef444408"] * len(row)
             return [""] * len(row)
 
         st.dataframe(_sig_sim[_show_cols].style.apply(_highlight_signal, axis=1),
                      use_container_width=True)
-        st.caption(
-            "🟢 Xanh đậm = vào lệnh & WIN  |  🟢 Xanh nhạt = bị lọc nhưng SẼ WIN (bỏ lỡ)  |"
-            "  🔴 Đỏ đậm = vào lệnh & LOSS  |  🔴 Đỏ nhạt = bị lọc & tránh được LOSS  |"
-            "  ⏳ = chưa có kết quả (giá chưa chạm TP/SL)"
+        st.markdown(
+            '<div style="display:flex;flex-wrap:wrap;gap:12px;font-size:0.72rem;color:#94a3b8;'
+            'padding:8px 14px;background:#0f172a;border-radius:8px;border:1px solid #1e293b">'
+            '<span>🟩 Vào lệnh & WIN</span>'
+            '<span>🟩 Lọc bỏ nhưng sẽ WIN</span>'
+            '<span>🟥 Vào lệnh & LOSS</span>'
+            '<span>🟥 Lọc bỏ & tránh được LOSS</span>'
+            '<span>⏳ Chưa có kết quả</span>'
+            '</div>',
+            unsafe_allow_html=True,
         )
 
         # ── Closed trades với kết quả win/loss ──────────────────────────
-        _closed = live_trades if "Acc 1" in _sel_acc else live_trades_acc2
+        _closed = _ltrades if "Acc 1" in _sel_acc else _ltrades_acc2
         _acc_label_closed = "ACC1 (270832477)" if "Acc 1" in _sel_acc else "ACC2 (433326057)"
+        st.divider()
+
+        # ── Filter controls (always render so both ACC1 & ACC2 show the section) ──
+        _flt_col1, _flt_col2, _flt_col3 = st.columns([2, 2, 3])
+        _date_options = ["Tất cả", "Hôm nay", "7 ngày", "30 ngày", "Theo session"]
+        _date_filter = _flt_col1.selectbox("Khoảng thời gian", _date_options, key="closed_date_filter")
+        _now_utc = pd.Timestamp.utcnow()
         if not _closed.empty:
-            st.divider()
-            st.subheader(f"💰 Lệnh đã đóng thật — {_acc_label_closed} ({len(_closed)} lệnh)")
+            if _date_filter == "Hôm nay":
+                _closed = _closed[_closed["time"] >= _now_utc.normalize()]
+            elif _date_filter == "7 ngày":
+                _closed = _closed[_closed["time"] >= _now_utc - pd.Timedelta(days=7)]
+            elif _date_filter == "30 ngày":
+                _closed = _closed[_closed["time"] >= _now_utc - pd.Timedelta(days=30)]
+            elif _date_filter == "Theo session":
+                _sessions = sorted(_closed["session_id"].dropna().unique(), reverse=True)
+                _sel_sess = _flt_col2.selectbox("Session (khởi động)", _sessions, key="closed_sess_filter")
+                _closed = _closed[_closed["session_id"] == _sel_sess]
+
+        _side_filter = _flt_col3.radio("Side", ["Tất cả", "BUY", "SELL"], horizontal=True, key="closed_side_filter")
+        if not _closed.empty and _side_filter != "Tất cả":
+            _closed = _closed[_closed["side"].str.upper() == _side_filter]
+
+        st.subheader(f"💰 Lệnh đã đóng — {_acc_label_closed} ({len(_closed)} lệnh, toàn bộ lịch sử)")
+
+        if _closed.empty:
+            st.info("Chưa có lệnh đóng nào được ghi lại. Dữ liệu sẽ xuất hiện khi bot đóng lệnh đầu tiên.")
+        else:
             _closed_disp = _closed.copy()
-            _closed_disp["Kết quả"]   = _closed_disp["is_win"].map(lambda x: "✅ THẮNG" if x else "❌ THUA")
+            def _result_label(row: pd.Series) -> str:
+                ct = str(row.get("close_type", "")).strip().upper()
+                is_w = bool(row.get("is_win", False))
+                if is_w:
+                    ct_tag = f" [{ct}]" if ct in ("TP", "EA") else ""
+                    return f"✅ THẮNG{ct_tag}"
+                elif ct == "SL" and float(row.get("pnl", -1)) >= 0:
+                    return "⚡ SL Hoà"
+                else:
+                    return "❌ THUA"
+            _closed_disp["Kết quả"]   = _closed_disp.apply(_result_label, axis=1)
             _closed_disp["P&L ($)"]   = _closed_disp["pnl"].map(lambda x: f"+{x:.2f}" if x > 0 else f"{x:.2f}")
             _closed_disp["Entry"]     = _closed_disp["open_price"].map(lambda x: f"{x:.3f}" if pd.notna(x) else "")
             _closed_disp["Exit"]      = _closed_disp["close_price"].map(lambda x: f"{x:.3f}" if pd.notna(x) else "")
             _closed_disp["Lot"]       = _closed_disp["volume"].map(lambda x: f"{x:.2f}")
             _closed_disp["Thời gian"] = _closed_disp["time"].astype(str).str[:16]
             _closed_disp["Side"]      = _closed_disp["side"].str.upper() if "side" in _closed_disp.columns else ""
+            _closed_disp["Session"]   = _closed_disp.get("session_id", "—").fillna("—")
             _w = int(_closed_disp["is_win"].sum())
             _l = len(_closed_disp) - _w
             _total_pnl = _closed_disp["pnl"].sum()
             _wr = _w / len(_closed_disp) if len(_closed_disp) > 0 else 0
-            _c1, _c2, _c3, _c4 = st.columns(4)
+            _best = _closed_disp["pnl"].max()
+            _worst = _closed_disp["pnl"].min()
+            _c1, _c2, _c3, _c4, _c5, _c6 = st.columns(6)
             _c1.metric("Tổng lệnh", len(_closed_disp))
             _c2.metric("Win Rate", f"{_wr:.1%}", delta=f"{_w}W / {_l}L")
             _c3.metric("Tổng P&L", f"${_total_pnl:+.2f}")
             _c4.metric("Avg P&L/lệnh", f"${_total_pnl/len(_closed_disp):+.2f}" if len(_closed_disp) > 0 else "$0")
+            _c5.metric("Lệnh tốt nhất", f"${_best:+.2f}")
+            _c6.metric("Lệnh tệ nhất", f"${_worst:+.2f}")
+
+            # Cumulative equity curve
+            _eq_cum = _closed_disp["pnl"].cumsum()
+            if len(_eq_cum) > 1:
+                st.caption("📈 Equity curve tích lũy (tất cả sessions)")
+                st.line_chart(_eq_cum.pipe(_ds).rename("Cumulative P&L ($)"), height=180)
 
             def _highlight_trade(row):
                 if row.get("Kết quả", "") == "✅ THẮNG":
-                    return ["background-color: #1b3a1b"] * len(row)
-                return ["background-color: #2a1a1a"] * len(row)
+                    return ["background-color: #10b98115"] * len(row)
+                return ["background-color: #ef444412"] * len(row)
 
-            _cl_cols = [c for c in ["Thời gian", "Side", "Lot", "Entry", "Exit", "P&L ($)", "Kết quả"] if c in _closed_disp.columns]
+            _cl_cols = [c for c in ["Thời gian", "Session", "Side", "Lot", "Entry", "Exit", "P&L ($)", "Kết quả"] if c in _closed_disp.columns]
             st.dataframe(
-                _closed_disp[_cl_cols].sort_values("Thời gian", ascending=False).style.apply(_highlight_trade, axis=1),
+                _closed_disp[_cl_cols].sort_values("Thời gian", ascending=False).head(200).style.apply(_highlight_trade, axis=1),
                 use_container_width=True,
             )
     else:
         st.info("Chưa có tín hiệu. Bot đang chạy...")
 
 
+with tab_live:
+    _render_live_tab()
+
+
 # =============================================================================
 # TAB 2 — SIGNAL ANALYSIS
 # =============================================================================
 with tab_analysis:
-    st.header("🔍 Phân tích Chi tiết Tín hiệu")
-    st.caption("Mỗi bước bot cần PASS để vào lệnh — xem chi tiết từng điều kiện")
+    st.markdown(
+        '<div style="border-bottom:2px solid #1e293b;padding-bottom:12px;margin-bottom:18px">'
+        '<span style="font-size:1.35rem;font-weight:800;color:#f1f5f9">Phân tích Chi tiết Tín hiệu</span>'
+        '<span style="color:#64748b;font-size:0.82rem;margin-left:12px">'
+        'Mỗi bước bot cần PASS để vào lệnh</span></div>',
+        unsafe_allow_html=True,
+    )
 
     _ana_options = ["Acc 1 — 270832477", "Acc 2 — 433326057"]
     _ana_sel = st.radio("Tài khoản:", _ana_options, horizontal=True, key="ana_acc_selector")
@@ -848,7 +1333,12 @@ with tab_analysis:
         st.divider()
 
         # 6-step flow
-        st.subheader("Luồng quyết định — 6 bước (ICT→Wyckoff→Execution)")
+        st.markdown(
+            '<div style="font-size:1.05rem;font-weight:700;color:#f1f5f9;margin:16px 0 10px">'
+            'Luồng quyết định — 6 bước <span style="color:#64748b;font-weight:400">'
+            '(ICT → Wyckoff → Execution)</span></div>',
+            unsafe_allow_html=True,
+        )
         fl, fr = st.columns([1, 1])
         with fl:
             ml_pass = conf >= _ana_threshold
@@ -883,11 +1373,14 @@ with tab_analysis:
         with fr:
             dec_c = GREEN if traded else RED
             st.markdown(
-                f'<div style="background:{dec_c}22;border:2px solid {dec_c};border-radius:12px;'
-                f'padding:20px;text-align:center;margin-bottom:20px">'
-                f'<div style="font-size:2.2rem;font-weight:900;color:{dec_c}">{"VÀO LỆNH" if traded else "KHÔNG VÀO"}</div>'
-                f'<div style="font-size:0.9rem;color:#ccc;margin-top:8px">'
-                f'{"Tất cả điều kiện đã thỏa mãn" if traded else reason}'
+                f'<div style="background:linear-gradient(135deg,{dec_c}0a,{dec_c}18);'
+                f'border:1px solid {dec_c}40;border-radius:16px;'
+                f'padding:28px;text-align:center;margin-bottom:20px;'
+                f'box-shadow:0 0 30px {dec_c}08">'
+                f'<div style="font-size:2.4rem;font-weight:900;color:{dec_c};'
+                f'text-shadow:0 0 20px {dec_c}40">{"VÀO LỆNH" if traded else "KHÔNG VÀO"}</div>'
+                f'<div style="font-size:0.85rem;color:#94a3b8;margin-top:10px">'
+                f'{"Tất cả điều kiện thỏa mãn ✓" if traded else reason}'
                 f'</div></div>',
                 unsafe_allow_html=True,
             )
@@ -901,19 +1394,27 @@ with tab_analysis:
             _threshold_bar("Model F1",        f1v,  0.48)
 
         st.divider()
-        st.subheader("Thành phần Chiến lược")
+        st.markdown(
+            '<div style="font-size:1.05rem;font-weight:700;color:#f1f5f9;margin:16px 0 10px">'
+            'Thành phần Chiến lược</div>',
+            unsafe_allow_html=True,
+        )
         sc_l, sc_r = st.columns([1, 1])
         with sc_l:
             spct = min(abs(score) / 1.2, 1.0) * 100
             sc   = GREEN if abs(score) >= 0.3 else (AMBER if abs(score) >= 0.1 else RED)
             st.markdown(
-                f'<div style="text-align:center;padding:16px;background:#1e1e2e;border-radius:8px">'
-                f'<div style="font-size:3rem;font-weight:900;color:{sc}">{score:+.4f}</div>'
-                f'<div style="font-size:0.85rem;color:#888">Strategy Score</div>'
-                f'<div style="background:#111;border-radius:20px;height:16px;margin:10px 0;overflow:hidden">'
-                f'<div style="width:{spct:.0f}%;background:{sc};height:16px;border-radius:20px"></div>'
+                f'<div style="text-align:center;padding:22px;background:linear-gradient(135deg,#0f172a,#151d2b);'
+                f'border-radius:14px;border:1px solid #1e293b">'
+                f'<div style="font-size:3.2rem;font-weight:900;color:{sc};text-shadow:0 0 20px {sc}30">{score:+.4f}</div>'
+                f'<div style="font-size:0.78rem;color:#64748b;margin:4px 0 12px;letter-spacing:0.05em">STRATEGY SCORE</div>'
+                f'<div style="background:#0a0e17;border-radius:20px;height:14px;margin:0 20px;overflow:hidden;'
+                f'border:1px solid #1e293b">'
+                f'<div style="width:{spct:.0f}%;background:linear-gradient(90deg,{sc}40,{sc});height:14px;'
+                f'border-radius:20px;transition:width 0.6s ease"></div>'
                 f'</div>'
-                f'<div style="font-size:0.9rem;font-weight:700;color:{sc}">{"Đủ mạnh" if abs(score) >= reg_thr else "Quá yếu"}</div>'
+                f'<div style="font-size:0.82rem;font-weight:700;color:{sc};margin-top:10px">'
+                f'{"✓ Đủ mạnh" if abs(score) >= reg_thr else "✗ Quá yếu"}</div>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
@@ -948,7 +1449,11 @@ with tab_analysis:
                 st.markdown(f"**Điều kiện:** `{ccond}`")
 
         st.divider()
-        st.subheader("Chế độ biến động")
+        st.markdown(
+            '<div style="font-size:1.05rem;font-weight:700;color:#f1f5f9;margin:16px 0 10px">'
+            'Chế độ biến động</div>',
+            unsafe_allow_html=True,
+        )
         vr_l, vr_r = st.columns([1, 2])
         with vr_l:
             ri = {0: ("SIDEWAYS", AMBER, "Đi ngang — ngưỡng=0.05, hệ số=0.5"),
@@ -956,10 +1461,11 @@ with tab_analysis:
                   2: ("STRONG",   GREEN, "Biến động mạnh — ngưỡng=0.30, hệ số=1.2")}
             rl, rc, rdesc = ri.get(regime, ("?", GREY, ""))
             st.markdown(
-                f'<div style="background:{rc}22;border:2px solid {rc};border-radius:10px;'
-                f'padding:20px;text-align:center">'
-                f'<div style="font-size:2rem;font-weight:800;color:{rc}">{rl}</div>'
-                f'<div style="font-size:0.82rem;color:#aaa;margin-top:8px">{rdesc}</div>'
+                f'<div style="background:linear-gradient(135deg,{rc}0a,{rc}18);'
+                f'border:1px solid {rc}40;border-radius:14px;'
+                f'padding:24px;text-align:center;box-shadow:0 0 20px {rc}08">'
+                f'<div style="font-size:2.2rem;font-weight:900;color:{rc};text-shadow:0 0 15px {rc}30">{rl}</div>'
+                f'<div style="font-size:0.78rem;color:#94a3b8;margin-top:10px">{rdesc}</div>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
@@ -973,16 +1479,21 @@ with tab_analysis:
             st.markdown(f"=> Hệ số hiện tại: **{r_label}** | hệ số nhân = {reg_mult}x")
 
         st.divider()
-        st.subheader("Bộ lọc thời gian (UTC)")
+        st.markdown(
+            '<div style="font-size:1.05rem;font-weight:700;color:#f1f5f9;margin:16px 0 10px">'
+            'Bộ lọc thời gian (UTC)</div>',
+            unsafe_allow_html=True,
+        )
         tf_l, tf_r = st.columns([1, 2])
         with tf_l:
             tf_c = RED if is_blocked_now else GREEN
             st.markdown(
-                f'<div style="background:{tf_c}22;border:2px solid {tf_c};border-radius:10px;'
-                f'padding:20px;text-align:center">'
-                f'<div style="font-size:1.5rem;font-weight:800;color:{tf_c}">'
-                f'{"Giờ bị chặn" if is_blocked_now else "Giờ giao dịch"}</div>'
-                f'<div style="font-size:1rem;color:#fff;margin-top:8px">UTC {cur_hour:02d}:xx</div>'
+                f'<div style="background:linear-gradient(135deg,{tf_c}0a,{tf_c}18);'
+                f'border:1px solid {tf_c}40;border-radius:14px;'
+                f'padding:24px;text-align:center;box-shadow:0 0 20px {tf_c}08">'
+                f'<div style="font-size:1.6rem;font-weight:900;color:{tf_c}">'
+                f'{"⛔ Giờ bị chặn" if is_blocked_now else "✓ Giờ giao dịch"}</div>'
+                f'<div style="font-size:1rem;color:#f1f5f9;margin-top:8px;font-weight:600">UTC {cur_hour:02d}:xx</div>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
@@ -994,7 +1505,11 @@ with tab_analysis:
             st.dataframe(hours_df, use_container_width=True, height=240)
 
         st.divider()
-        st.subheader("Luồng quyết định đầy đủ")
+        st.markdown(
+            '<div style="font-size:1.05rem;font-weight:700;color:#f1f5f9;margin:16px 0 10px">'
+            'Luồng quyết định đầy đủ</div>',
+            unsafe_allow_html=True,
+        )
         st.code(
                 f"Dữ liệu: D1=100, H4=200, H1=500, M15=300 nhịp\n"
                 f"=> 28 Features: D1(1) + H4(9:ICT) + H1(3:Wyckoff) + M15(15:execution)\n"
@@ -1008,7 +1523,11 @@ with tab_analysis:
         )
 
         st.divider()
-        st.subheader("So sánh tín hiệu vào vs không vào lệnh")
+        st.markdown(
+            '<div style="font-size:1.05rem;font-weight:700;color:#f1f5f9;margin:16px 0 10px">'
+            'So sánh tín hiệu vào vs không vào lệnh</div>',
+            unsafe_allow_html=True,
+        )
         if len(_analysis_signals) >= 5:
             trd_s  = _analysis_signals[_analysis_signals["should_trade"] == True]
             ntrd_s = _analysis_signals[_analysis_signals["should_trade"] == False]
@@ -1034,7 +1553,11 @@ with tab_analysis:
 
         # Feature importance
         st.divider()
-        st.subheader("28 Features — ICT+Wyckoff Model Map")
+        st.markdown(
+            '<div style="font-size:1.05rem;font-weight:700;color:#f1f5f9;margin:16px 0 10px">'
+            '28 Features — <span style="color:#6366f1">ICT+Wyckoff</span> Model Map</div>',
+            unsafe_allow_html=True,
+        )
         feat_map_l, feat_map_r = st.columns([1, 1])
         with feat_map_l:
             st.markdown("""
@@ -1078,7 +1601,11 @@ with tab_analysis:
 """)
 
         st.divider()
-        st.subheader("Feature Importance (Top 25 — HistGBC)")
+        st.markdown(
+            '<div style="font-size:1.05rem;font-weight:700;color:#f1f5f9;margin:16px 0 10px">'
+            'Feature Importance <span style="color:#64748b">(Top 25 — HistGBC)</span></div>',
+            unsafe_allow_html=True,
+        )
         fi_df = load_feature_importance()
         if fi_df is not None and not fi_df.empty:
             st.bar_chart(fi_df.set_index("feature")["importance"].sort_values(), height=400)
@@ -1092,7 +1619,13 @@ with tab_analysis:
 # TAB 3 — P&L & VON
 # =============================================================================
 with tab_pnl:
-    st.header("📈 P&L & Vốn — Lợi nhuận và Thua lỗ")
+    st.markdown(
+        '<div style="border-bottom:2px solid #1e293b;padding-bottom:12px;margin-bottom:18px">'
+        '<span style="font-size:1.35rem;font-weight:800;color:#f1f5f9">P&L & Vốn</span>'
+        '<span style="color:#64748b;font-size:0.82rem;margin-left:12px">'
+        'Lợi nhuận và Thua lỗ</span></div>',
+        unsafe_allow_html=True,
+    )
 
     # ── Live Account P&L sub-tabs (ACC1 / ACC2 / So Sanh) ────────────────────
     _pnl_acc1, _pnl_acc2, _pnl_both = st.tabs([
@@ -1156,7 +1689,7 @@ with tab_pnl:
                     _lt_eq["cum_pnl"] = _lt_eq["profit"].cumsum()
                 else:
                     _lt_eq["cum_pnl"] = _lt_eq["pnl"].cumsum()
-                st.line_chart(_lt_eq.set_index("time")["cum_pnl"], height=220)
+                st.line_chart(_lt_eq.set_index("time")["cum_pnl"].pipe(_ds), height=220)
 
             # Detailed trade table
             st.markdown("**Danh sách tất cả lệnh live đã đóng:**")
@@ -1172,7 +1705,7 @@ with tab_pnl:
             st.subheader("Lịch sử Số dư Live")
             _bh = ls[["time", "account_balance"]].dropna().sort_values("time").set_index("time")
             if not _bh.empty:
-                st.area_chart(_bh["account_balance"], height=200)
+                st.area_chart(_bh["account_balance"].pipe(_ds), height=200)
 
     with _pnl_acc1:
         _render_live_pnl(live_trades, live_signals, "ACC1 (270832477)")
@@ -1210,6 +1743,7 @@ with tab_pnl:
             if _eq_combined:
                 st.markdown("**Đường vốn lũy kế 2 tài khoản:**")
                 _eq_df = pd.DataFrame(_eq_combined)
+                _eq_df = _eq_df.apply(lambda c: c.pipe(_ds))
                 st.line_chart(_eq_df, height=280)
         else:
             st.info("Chưa có lệnh live nào được đóng. Dữ liệu sẽ hiển thị khi bot đóng lệnh.")
@@ -1240,18 +1774,23 @@ with tab_pnl:
             if not eq_df.empty:
                 eq_s = eq_df["balance_after"]
                 dd_s = compute_drawdown(eq_s)
+                # Cap to 1000 points to avoid MemoryError in Altair serialization
+                _max_pts = 1000
+                eq_plot = eq_s.iloc[:: max(1, len(eq_s) // _max_pts)].round(2)
+                dd_plot = dd_s.iloc[:: max(1, len(dd_s) // _max_pts)].round(3)
                 eq_c, dd_c = st.columns([2, 1])
                 with eq_c:
                     st.markdown("**Đường vốn**")
-                    st.line_chart(eq_s, height=280)
+                    st.line_chart(eq_plot, height=280)
                 with dd_c:
                     st.markdown("**Drawdown (%)**")
-                    st.area_chart(dd_s, height=280)
+                    st.area_chart(dd_plot, height=280)
                 min_dd = float(dd_s.min())
                 st.markdown(
-                    f'<div style="background:#2e1a1a;border-left:4px solid {RED};'
-                    f'padding:10px 16px;border-radius:6px">'
-                    f'<span style="color:{RED};font-weight:700">Max Drawdown: {min_dd:.2f}%</span>'
+                    f'<div style="background:linear-gradient(135deg,{RED}08,{RED}14);'
+                    f'border-left:4px solid {RED};border:1px solid {RED}30;'
+                    f'padding:12px 18px;border-radius:10px">'
+                    f'<span style="color:{RED};font-weight:700;font-size:0.9rem">Max Drawdown: {min_dd:.2f}%</span>'
                     f'</div>',
                     unsafe_allow_html=True,
                 )
@@ -1324,8 +1863,13 @@ with tab_pnl:
 # TAB 4 — HOC LIEN TUC
 # =============================================================================
 with tab_learning:
-    st.header("🧠 Học Liên Tục — Giám sát Tự học")
-    st.caption("Bot tự retrain HistGBC khi có đủ dữ liệu mới, so sánh model mới vs cũ, chỉ giữ nếu tốt hơn — 28 features ICT+Wyckoff")
+    st.markdown(
+        '<div style="border-bottom:2px solid #1e293b;padding-bottom:12px;margin-bottom:18px">'
+        '<span style="font-size:1.35rem;font-weight:800;color:#f1f5f9">Học Liên Tục</span>'
+        '<span style="color:#64748b;font-size:0.82rem;margin-left:12px">'
+        'Giám sát Tự học — Retrain HistGBC 28 features</span></div>',
+        unsafe_allow_html=True,
+    )
 
     # Per-account learning sub-tabs
     _learn_acc1_tab, _learn_acc2_tab, _learn_both_tab = st.tabs([
@@ -1343,19 +1887,22 @@ with tab_learning:
         """Comprehensive real-time learning status panel for one account."""
         import time as _time
 
-        # ── Bot alive detection (log modified < 15 min ago) ──────────────────
-        log_path = OUTPUTS / log_file
+        # ── Bot alive detection (status file modified < 15 min ago) ─────────
+        status_filename = "live_status_acc2.json" if "ACC2" in acc_label else "live_status_acc1.json"
+        status_path = OUTPUTS / status_filename
         bot_alive = False
         log_age_sec: float | None = None
-        if log_path.exists():
-            log_age_sec = _time.time() - log_path.stat().st_mtime
+        if status_path.exists():
+            log_age_sec = _time.time() - status_path.stat().st_mtime
             bot_alive = log_age_sec < 900
 
-        # ── Detect if currently training (scan last 120 lines of bot log) ────
+        # ── Detect if currently training (scan last 120 lines of stderr log) ─
         currently_training = False
-        if bot_alive and log_path.exists():
+        actual_log_file = "live_acc2_stderr.txt" if "ACC2" in acc_label else "live_bot_err.txt"
+        actual_log_path = OUTPUTS / actual_log_file
+        if bot_alive and actual_log_path.exists():
             try:
-                tail = log_path.read_text(encoding="utf-8", errors="ignore").splitlines()[-120:]
+                tail = actual_log_path.read_text(encoding="utf-8", errors="ignore").splitlines()[-120:]
                 n_start = sum(1 for l in tail if "LearnerThread: regular retrain started" in l
                               or "LearnerThread: loss-retrain triggered" in l)
                 n_done  = sum(1 for l in tail if "retrain done" in l)
@@ -1425,21 +1972,25 @@ with tab_learning:
 
         # ── Status banner ────────────────────────────────────────────────────
         st.markdown(
-            f'<div style="background:{state_bg};border:2px solid {state_border};'
-            f'border-radius:12px;padding:18px 22px;margin-bottom:14px">'
+            f'<div style="background:linear-gradient(135deg,{state_bg},{state_bg}dd);'
+            f'border:1px solid {state_border}40;border-left:4px solid {state_border};'
+            f'border-radius:14px;padding:20px 24px;margin-bottom:14px;'
+            f'box-shadow:0 4px 20px rgba(0,0,0,0.2)">'
             f'<div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">'
-            f'<div style="font-size:2.2rem;line-height:1">{state_emoji}</div>'
+            f'<div style="font-size:2rem;line-height:1;background:{state_border}15;'
+            f'width:52px;height:52px;border-radius:14px;display:flex;align-items:center;'
+            f'justify-content:center">{state_emoji}</div>'
             f'<div style="flex:1;min-width:220px">'
-            f'<div style="font-size:1.08rem;font-weight:700;color:#fff;margin-bottom:4px">'
-            f'{state} — {state_detail}</div>'
-            f'<div style="color:#bbb;font-size:0.82rem">'
-            f'{bot_dot} Bot: <b>{bot_lbl}</b>&ensp;|&ensp;'
-            f'Log cập nhật: <b>{age_str}</b>&ensp;|&ensp;'
-            f'Đã retrain: <b>{retrain_count} lần</b>'
+            f'<div style="font-size:1.05rem;font-weight:700;color:#f1f5f9;margin-bottom:4px">'
+            f'{state} <span style="font-weight:400;color:#94a3b8;font-size:0.85rem">{state_detail}</span></div>'
+            f'<div style="color:#64748b;font-size:0.78rem">'
+            f'{bot_dot} Bot: <b style="color:#94a3b8">{bot_lbl}</b>&ensp;|&ensp;'
+            f'Status: <b style="color:#94a3b8">{age_str}</b>&ensp;|&ensp;'
+            f'Đã retrain: <b style="color:#94a3b8">{retrain_count} lần</b>'
             f'</div></div>'
             f'<div style="text-align:right;min-width:130px">'
-            f'<div style="color:#aaa;font-size:0.75rem;margin-bottom:2px">Học lần cuối</div>'
-            f'<div style="color:#fff;font-weight:700;font-size:1rem">{last_learn_str}</div>'
+            f'<div style="color:#64748b;font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em">Học lần cuối</div>'
+            f'<div style="color:#f1f5f9;font-weight:700;font-size:1rem">{last_learn_str}</div>'
             f'</div></div></div>',
             unsafe_allow_html=True,
         )
@@ -1472,13 +2023,14 @@ with tab_learning:
         # ── Checklist (khi chưa có event nào) ───────────────────────────────
         if not sl_e and bot_alive:
             st.markdown(
-                '<div style="background:#1a1a2e;border:1px solid #444;border-radius:8px;'
-                'padding:14px 18px;margin:10px 0">'
-                '<b style="color:#fff">📋 Checklist kích hoạt tự học:</b><br/>'
-                '<span style="color:#81c784">✅</span> <code>live_learning_enabled: true</code> trong config<br/>'
-                '<span style="color:#81c784">✅</span> CSV lịch sử đã preload (3000 rows/timeframe)<br/>'
-                '<span style="color:#ffa726">⏳</span> Chờ đủ 30 phút kể từ khi bot start<br/>'
-                '<span style="color:#ffa726">⏳</span> Dataset > 500 rows (đã OK với preload)'
+                '<div style="background:linear-gradient(135deg,#0f172a,#151d2b);'
+                'border:1px solid #1e293b;border-radius:12px;'
+                'padding:16px 20px;margin:10px 0">'
+                '<b style="color:#f1f5f9;font-size:0.88rem">📋 Checklist kích hoạt tự học:</b><br/>'
+                '<span style="color:#10b981">✓</span> <code>live_learning_enabled: true</code> trong config<br/>'
+                '<span style="color:#10b981">✓</span> CSV lịch sử đã preload (3000 rows/timeframe)<br/>'
+                '<span style="color:#f59e0b">⏳</span> Chờ đủ 30 phút kể từ khi bot start<br/>'
+                '<span style="color:#f59e0b">⏳</span> Dataset > 500 rows (đã OK với preload)'
                 '</div>',
                 unsafe_allow_html=True,
             )
@@ -1501,11 +2053,12 @@ with tab_learning:
             mc5.metric("Avg dataset rows",    f"{avg_rows:,}")
 
             # Dataset size indicator
-            row_ok_color = "#26a69a" if last_rows >= 500 else "#ef5350"
-            row_ok_label = "✅ Đủ" if last_rows >= 500 else "❌ Thiếu"
+            row_ok_color = "#10b981" if last_rows >= 500 else "#ef4444"
+            row_ok_label = "✓ Đủ" if last_rows >= 500 else "✗ Thiếu"
             st.markdown(
-                f'<div style="display:inline-block;background:#111;border:1px solid {row_ok_color};'
-                f'border-radius:6px;padding:4px 12px;font-size:0.82rem;color:{row_ok_color};margin-bottom:10px">'
+                f'<div style="display:inline-block;background:linear-gradient(135deg,{row_ok_color}08,{row_ok_color}12);'
+                f'border:1px solid {row_ok_color}40;'
+                f'border-radius:8px;padding:5px 14px;font-size:0.78rem;color:{row_ok_color};margin-bottom:10px">'
                 f'Dataset lần cuối: <b>{last_rows:,} rows</b> {row_ok_label} (min: 500)</div>',
                 unsafe_allow_html=True,
             )
@@ -1596,32 +2149,52 @@ with tab_learning:
 
         # Learning cycle diagram
         st.divider()
-        st.subheader("Vòng lặp học liên tục (Live Learning Cycle)")
         st.markdown(
-            '<div style="background:#0d1117;border:1px solid #30363d;border-radius:10px;padding:20px;font-family:monospace">'
-            '<div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">'
-            '<div style="background:#1565c022;border:1px solid #1565c0;border-radius:8px;padding:10px 14px;text-align:center;min-width:110px">'
-            '<div style="font-size:1.2rem">📥</div><div style="color:#90caf9;font-weight:700;font-size:0.78rem">BƯỚC 1</div>'
-            '<div style="color:#fff;font-size:0.82rem">Fetch Data</div><div style="color:#888;font-size:0.7rem">MT5/CSV preload</div></div>'
-            '<div style="color:#555;font-size:1.4rem;padding:0 4px">→</div>'
-            '<div style="background:#1b5e2022;border:1px solid #2e7d32;border-radius:8px;padding:10px 14px;text-align:center;min-width:110px">'
-            '<div style="font-size:1.2rem">🔧</div><div style="color:#81c784;font-weight:700;font-size:0.78rem">BƯỚC 2</div>'
-            '<div style="color:#fff;font-size:0.82rem">Feature Eng.</div><div style="color:#888;font-size:0.7rem">RSI/MACD/ATR/ICT</div></div>'
-            '<div style="color:#555;font-size:1.4rem;padding:0 4px">→</div>'
-            '<div style="background:#4a148c22;border:1px solid #7b1fa2;border-radius:8px;padding:10px 14px;text-align:center;min-width:110px">'
-            '<div style="font-size:1.2rem">🤖</div><div style="color:#ce93d8;font-weight:700;font-size:0.78rem">BƯỚC 3</div>'
-            '<div style="color:#fff;font-size:0.82rem">Retrain Model</div><div style="color:#888;font-size:0.7rem">HistGBC 28feat</div></div>'
-            '<div style="color:#555;font-size:1.4rem;padding:0 4px">→</div>'
-            '<div style="background:#e6510022;border:1px solid #e65100;border-radius:8px;padding:10px 14px;text-align:center;min-width:110px">'
-            '<div style="font-size:1.2rem">📊</div><div style="color:#ffba79;font-weight:700;font-size:0.78rem">BƯỚC 4</div>'
-            '<div style="color:#fff;font-size:0.82rem">Evaluate</div><div style="color:#888;font-size:0.7rem">ROC-AUC / F1</div></div>'
-            '<div style="color:#555;font-size:1.4rem;padding:0 4px">→</div>'
-            '<div style="background:#26a69a22;border:1px solid #26a69a;border-radius:8px;padding:10px 14px;text-align:center;min-width:110px">'
-            '<div style="font-size:1.2rem">💾</div><div style="color:#80cbc4;font-weight:700;font-size:0.78rem">BƯỚC 5</div>'
-            '<div style="color:#fff;font-size:0.82rem">Deploy/Skip</div><div style="color:#888;font-size:0.7rem">Nếu AUC tốt hơn</div></div>'
+            '<div style="font-size:1.05rem;font-weight:700;color:#f1f5f9;margin:16px 0 10px">'
+            'Vòng lặp học liên tục</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            '<div style="background:linear-gradient(135deg,#0a0e17,#111827);border:1px solid #1e293b;'
+            'border-radius:14px;padding:22px;font-family:Inter,sans-serif">'
+            '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:center">'
+            '<div style="background:linear-gradient(135deg,#6366f108,#6366f118);border:1px solid #6366f140;'
+            'border-radius:12px;padding:12px 16px;text-align:center;min-width:110px">'
+            '<div style="font-size:1.3rem">📥</div>'
+            '<div style="color:#6366f1;font-weight:700;font-size:0.72rem;letter-spacing:0.05em">BƯỚC 1</div>'
+            '<div style="color:#f1f5f9;font-size:0.78rem;font-weight:600">Fetch Data</div>'
+            '<div style="color:#64748b;font-size:0.65rem">MT5/CSV preload</div></div>'
+            '<div style="color:#334155;font-size:1.4rem;padding:0 2px">→</div>'
+            '<div style="background:linear-gradient(135deg,#10b98108,#10b98118);border:1px solid #10b98140;'
+            'border-radius:12px;padding:12px 16px;text-align:center;min-width:110px">'
+            '<div style="font-size:1.3rem">🔧</div>'
+            '<div style="color:#10b981;font-weight:700;font-size:0.72rem;letter-spacing:0.05em">BƯỚC 2</div>'
+            '<div style="color:#f1f5f9;font-size:0.78rem;font-weight:600">Feature Eng.</div>'
+            '<div style="color:#64748b;font-size:0.65rem">RSI/MACD/ATR/ICT</div></div>'
+            '<div style="color:#334155;font-size:1.4rem;padding:0 2px">→</div>'
+            '<div style="background:linear-gradient(135deg,#a855f708,#a855f718);border:1px solid #a855f740;'
+            'border-radius:12px;padding:12px 16px;text-align:center;min-width:110px">'
+            '<div style="font-size:1.3rem">🤖</div>'
+            '<div style="color:#a855f7;font-weight:700;font-size:0.72rem;letter-spacing:0.05em">BƯỚC 3</div>'
+            '<div style="color:#f1f5f9;font-size:0.78rem;font-weight:600">Retrain Model</div>'
+            '<div style="color:#64748b;font-size:0.65rem">HistGBC 28feat</div></div>'
+            '<div style="color:#334155;font-size:1.4rem;padding:0 2px">→</div>'
+            '<div style="background:linear-gradient(135deg,#f59e0b08,#f59e0b18);border:1px solid #f59e0b40;'
+            'border-radius:12px;padding:12px 16px;text-align:center;min-width:110px">'
+            '<div style="font-size:1.3rem">📊</div>'
+            '<div style="color:#f59e0b;font-weight:700;font-size:0.72rem;letter-spacing:0.05em">BƯỚC 4</div>'
+            '<div style="color:#f1f5f9;font-size:0.78rem;font-weight:600">Evaluate</div>'
+            '<div style="color:#64748b;font-size:0.65rem">ROC-AUC / F1</div></div>'
+            '<div style="color:#334155;font-size:1.4rem;padding:0 2px">→</div>'
+            '<div style="background:linear-gradient(135deg,#10b98108,#10b98118);border:1px solid #10b98140;'
+            'border-radius:12px;padding:12px 16px;text-align:center;min-width:110px">'
+            '<div style="font-size:1.3rem">💾</div>'
+            '<div style="color:#10b981;font-weight:700;font-size:0.72rem;letter-spacing:0.05em">BƯỚC 5</div>'
+            '<div style="color:#f1f5f9;font-size:0.78rem;font-weight:600">Deploy/Skip</div>'
+            '<div style="color:#64748b;font-size:0.65rem">Nếu AUC tốt hơn</div></div>'
             '</div>'
-            '<div style="color:#666;font-size:0.8rem;margin-top:12px;text-align:center">'
-            'Lặp lại sau mỗi <b>30 phút</b> — Data bổ sung từ MT5 history + CSV preload (3000 bars/timeframe) + yfinance.'
+            '<div style="color:#475569;font-size:0.75rem;margin-top:14px;text-align:center">'
+            'Lặp lại sau mỗi <b style="color:#94a3b8">30 phút</b> — Data bổ sung từ MT5 + CSV preload + yfinance'
             '</div></div>',
             unsafe_allow_html=True,
         )
@@ -1741,33 +2314,86 @@ training:
 # =============================================================================
 def _render_backtest_panel(rpt: dict, trd: pd.DataFrame, training_rpt: dict | None = None, label: str = "") -> None:
     """Render backtest metrics + charts for one account."""
-    b1, b2, b3, b4 = st.columns(4)
-    b1.metric("Lợi nhuận %",    rpt.get("return_pct", "n/a"))
-    b2.metric("Profit Factor",  rpt.get("profit_factor", "n/a"))
-    b3.metric("Max Drawdown %", rpt.get("max_drawdown_pct", "n/a"))
-    b4.metric("Sharpe Ratio",   rpt.get("sharpe_ratio", "n/a"))
+    _ret       = float(rpt.get("return_pct",      0) or 0)
+    _bal_start = float(rpt.get("starting_balance", rpt.get("initial_balance", 200)) or 200)
+    _bal_end   = float(rpt.get("ending_balance",   rpt.get("final_balance", 0)) or 0)
+    _pf        = float(rpt.get("profit_factor",   0) or 0)
+    _dd        = float(rpt.get("max_drawdown_pct",0) or 0)
+    _sharpe    = float(rpt.get("sharpe_like",      rpt.get("sharpe_ratio", 0)) or 0)
+    _gross_p   = float(rpt.get("gross_profit",    0) or 0)
+    _gross_l   = float(rpt.get("gross_loss",      0) or 0)
+    _avg_w     = float(rpt.get("avg_win",         0) or 0)
+    _avg_l     = float(rpt.get("avg_loss",        0) or 0)
+    _sig_filt  = int(rpt.get("signals_filtered_out", 0) or 0)
+    _sig_nslot = int(rpt.get("signals_no_slot",   0) or 0)
+    _n_trades  = int(rpt.get("trades",            0) or 0)
 
+    # ── Core P&L ─────────────────────────────────────────────────────────────
+    b1, b2, b3, b4 = st.columns(4)
+    b1.markdown(_card("Lợi nhuận %",
+                      f"{_ret:.1f}%",
+                      f"${_bal_start:.0f} → ${_bal_end:,.0f} (+${_bal_end - _bal_start:,.0f})",
+                      GREEN if _ret > 0 else RED), unsafe_allow_html=True)
+    b2.markdown(_card("Profit Factor",
+                      f"{_pf:.3f}",
+                      "✅ PF ≥ 1.5 tốt | PF ≥ 2.0 rất tốt" if _pf >= 1.5 else "⚠️ PF < 1.5 cần cải thiện",
+                      GREEN if _pf >= 1.5 else AMBER), unsafe_allow_html=True)
+    b3.markdown(_card("Max Drawdown",
+                      f"{_dd:.1f}%",
+                      "✅ DD < 20% an toàn" if abs(_dd) < 20 else "⚠️ DD cao > 20%",
+                      GREEN if abs(_dd) < 20 else AMBER), unsafe_allow_html=True)
+    b4.markdown(_card("Sharpe Ratio",
+                      f"{_sharpe:.2f}",
+                      "✅ ≥ 1.0 tốt | ≥ 2.0 rất tốt" if _sharpe >= 1.0 else "⚠️ < 1.0",
+                      GREEN if _sharpe >= 1.0 else AMBER), unsafe_allow_html=True)
+
+    # ── Balance và thời gian ──────────────────────────────────────────────────
     b5, b6, b7, b8 = st.columns(4)
-    b5.metric("Bắt đầu",     rpt.get("start",       rpt.get("test_start", "n/a")))
-    b6.metric("Kết thúc",    rpt.get("end",         rpt.get("trade_end",  "n/a")))
-    b7.metric("Vốn đầu",    f"${rpt.get('starting_balance', rpt.get('initial_balance', 200)):.0f}")
-    b8.metric("Vốn cuối",   f"${rpt.get('ending_balance',   rpt.get('final_balance', 0)):.2f}")
+    b5.metric("Bắt đầu",  rpt.get("start",  rpt.get("test_start", "n/a")))
+    b6.metric("Kết thúc", rpt.get("end",    rpt.get("trade_end",  "n/a")))
+    b7.metric("Vốn đầu",  f"${_bal_start:.0f}")
+    b8.metric("Vốn cuối", f"${_bal_end:,.2f}")
+
+    # ── Chi tiết Lãi/Lỗ ──────────────────────────────────────────────────────
+    if _gross_p or _gross_l:
+        st.markdown("#### 💰 Chi tiết Lãi/Lỗ")
+        g1, g2, g3, g4 = st.columns(4)
+        g1.markdown(_card("Tổng lãi gộp",    f"${_gross_p:,.2f}",
+                          "Tổng $ từ lệnh thắng", GREEN), unsafe_allow_html=True)
+        g2.markdown(_card("Tổng lỗ gộp",     f"-${abs(_gross_l):,.2f}",
+                          "Tổng $ từ lệnh thua", RED), unsafe_allow_html=True)
+        g3.markdown(_card("Avg lệnh thắng",  f"${_avg_w:.2f}",
+                          "Lãi TB/lệnh → chất lượng exit", GREEN), unsafe_allow_html=True)
+        g4.markdown(_card("Avg lệnh thua",   f"-${abs(_avg_l):.2f}",
+                          "Thua TB/lệnh → kiểm soát rủi ro", AMBER), unsafe_allow_html=True)
+
+    # ── Signal filter stats ───────────────────────────────────────────────────
+    if _sig_filt or _sig_nslot:
+        _total_raw = _n_trades + _sig_filt + _sig_nslot
+        g5, g6, g7, g8 = st.columns(4)
+        g5.metric("Tổng tín hiệu gốc",  f"{_total_raw:,}")
+        g6.metric("Lọc (threshold)",     f"{_sig_filt:,}",
+                  help="Bị loại vì xác suất thấp hơn ngưỡng")
+        g7.metric("Bỏ (no slot)",        f"{_sig_nslot:,}",
+                  help="Bị bỏ vì đã đủ lệnh đang mở")
+        g8.metric("Thực thi lệnh",       f"{_n_trades:,}",
+                  help=f"Tỷ lệ thực thi: {_n_trades/_total_raw:.1%}" if _total_raw else "0%")
 
     if not trd.empty:
         ts2 = summarize_trades(trd)
         ds2, df2 = summarize_daily(trd)
 
         bt1, bt2, bt3, bt4 = st.columns(4)
-        bt1.metric("Tổng lệnh",     ts2["trades"])
-        bt2.metric("Thắng / Thua",  f"{ts2['wins']} / {ts2['losses']}")
-        bt3.metric("Tỷ lệ thắng",   f"{ts2['win_rate']:.1%}")
+        bt1.metric("Tổng lệnh",      ts2["trades"])
+        bt2.metric("Thắng / Thua",   f"{ts2['wins']} / {ts2['losses']}")
+        bt3.metric("Tỷ lệ thắng",    f"{ts2['win_rate']:.1%}")
         bt4.metric("Lợi nhuận ròng", f"${ts2['net_profit']:.2f}")
 
         st.divider()
         if "balance_after" in trd.columns:
             st.subheader("📈 Đường vốn Backtest")
             eq2 = trd.dropna(subset=["time", "balance_after"]).set_index("time").sort_index()
-            st.line_chart(eq2["balance_after"], height=280)
+            st.line_chart(eq2["balance_after"].pipe(_ds), height=280)
 
         if not df2.empty:
             st.subheader("📅 Hiệu suất hàng ngày")
@@ -1777,7 +2403,7 @@ def _render_backtest_panel(rpt: dict, trd: pd.DataFrame, training_rpt: dict | No
             with dd2:
                 st.line_chart(df2.set_index("date")["net_pnl"], height=200)
             kd1, kd2, kd3, kd4 = st.columns(4)
-            kd1.metric("TB ngày %",      f"{ds2['mean_daily_return']:.3f}%")
+            kd1.metric("TB ngày %",       f"{ds2['mean_daily_return']:.3f}%")
             kd2.metric("Ngày tốt nhất %", f"{ds2['best_day_return']:.3f}%")
             kd3.metric("Ngày tệ nhất %",  f"{ds2['worst_day_return']:.3f}%")
             kd4.metric("Ngày >= 2%",      f"{ds2['share_ge_2'] * 100:.1f}%")
@@ -1786,32 +2412,95 @@ def _render_backtest_panel(rpt: dict, trd: pd.DataFrame, training_rpt: dict | No
             st.subheader("📊 Phân phối P&L")
             st.bar_chart(trd["pnl"].value_counts(bins=30).sort_index(), height=200)
 
-        with st.expander(f"Backtest Report JSON {label}"):
+        # Monthly breakdown from report
+        _monthly = rpt.get("monthly", [])
+        if _monthly:
+            _mo_df = pd.DataFrame(_monthly)
+            _mo_active = _mo_df[_mo_df["trades_n"] > 0] if "trades_n" in _mo_df.columns else _mo_df
+            if not _mo_active.empty:
+                st.subheader("📅 Monthly Breakdown")
+                _mo1, _mo2 = st.columns(2)
+                with _mo1:
+                    st.markdown("**PnL theo tháng ($):**")
+                    st.bar_chart(_mo_active.set_index("month")["pnl_sum"], height=200)
+                with _mo2:
+                    st.markdown("**Win Rate theo tháng:**")
+                    _wr_mo = _mo_active.set_index("month")["win_rate"].copy()
+                    _wr_mo_df = pd.DataFrame({"win_rate": _wr_mo, "target_60pct": 0.60})
+                    st.line_chart(_wr_mo_df, height=200)
+                _mo_disp = _mo_active[[c for c in ["month", "trades_n", "pnl_sum", "wins_n", "win_rate"] if c in _mo_active.columns]].copy()
+                if "win_rate" in _mo_disp.columns:
+                    _mo_disp["win_rate"] = (_mo_disp["win_rate"] * 100).round(1).astype(str) + "%"
+                if "pnl_sum" in _mo_disp.columns:
+                    _mo_disp["pnl_sum"] = _mo_disp["pnl_sum"].round(2)
+                st.dataframe(_mo_disp, use_container_width=True, hide_index=True)
+
+        with st.expander(f"📋 Backtest Report JSON {label}"):
             st.json(rpt)
         if training_rpt:
-            with st.expander(f"Training Report JSON {label}"):
+            with st.expander(f"📋 Training Report JSON {label}"):
                 st.json(training_rpt)
 
-        st.subheader("Danh sách lệnh (200 cuối)")
+        with st.expander(f"📖 Giải thích các chỉ số Backtest", expanded=False):
+            st.markdown("""
+| Chỉ số | Ý nghĩa | Ngưỡng tốt |
+|--------|---------|------------|
+| **Lợi nhuận %** | % tăng trưởng vốn sau toàn bộ backtest | > 100% |
+| **Profit Factor (PF)** | Tổng lãi / tổng lỗ. PF=2 nghĩa là mỗi $1 thua bù được $2 lãi | ≥ 1.5 |
+| **Max Drawdown** | Mức giảm vốn tối đa từ đỉnh → đáy | < 20% |
+| **Sharpe Ratio** | Lợi nhuận điều chỉnh theo rủi ro. Sharpe=2 rất tốt | ≥ 1.0 |
+| **Avg lệnh thắng** | Lãi trung bình mỗi lệnh thắng | Nên cao hơn Avg thua |
+| **Avg lệnh thua** | Thua trung bình mỗi lệnh thua | Nên thấp hơn Avg thắng |
+| **Tín hiệu gốc** | Tổng tín hiệu AI tạo ra trước khi lọc | — |
+| **Lọc (threshold)** | Bị loại vì xác suất < ngưỡng (AI không đủ tự tin) | — |
+| **Bỏ (no slot)** | Bị bỏ vì đang có quá nhiều lệnh mở cùng lúc | — |
+            """)
+
+        st.subheader(f"Danh sách tất cả lệnh ({len(trd):,})")
         dcols2 = [c for c in ["time", "side", "entry_price", "exit_price",
-                               "pnl", "is_win", "balance_after", "drawdown", "realized_rr"]
+                               "pnl", "is_win", "balance_after", "drawdown",
+                               "realized_rr", "probability", "volatility_regime"]
                   if c in trd.columns]
-        st.dataframe(trd[dcols2].tail(200), use_container_width=True)
+        st.dataframe(trd[dcols2], use_container_width=True)
     else:
         st.info(f"Chưa có dữ liệu backtest ({label}). Chạy: python scripts/backtest_ict_wyckoff.py")
 
 
 with tab_backtest:
-    st.header("📊 Kết quả Backtest")
+    st.markdown(
+        '<div style="border-bottom:2px solid #1e293b;padding-bottom:12px;margin-bottom:18px">'
+        '<span style="font-size:1.35rem;font-weight:800;color:#f1f5f9">Kết quả Backtest</span></div>',
+        unsafe_allow_html=True,
+    )
+    # Build dynamic tab labels from actual report data
+    _bt1_wr  = backtest_report.get("win_rate", 0) if backtest_report else 0
+    _bt1_ret = backtest_report.get("return_pct", 0) if backtest_report else 0
+    _bt2_wr  = backtest_report_acc2.get("win_rate", 0) if backtest_report_acc2 else 0
+    _bt2_ret = backtest_report_acc2.get("return_pct", 0) if backtest_report_acc2 else 0
     _bt_acc1_tab, _bt_acc2_tab = st.tabs([
-        "🏦 ACC1 — Model1 (ICT+Wyckoff, WR 76.8%)",
-        "🏦 ACC2 — Model2 (Weekly $500, WR 66.1%)",
+        f"🏦 ACC1 — ICT+Wyckoff | WR {_bt1_wr:.1%} | +{_bt1_ret:.0f}%",
+        f"🏦 ACC2 — v5 P0-P3 | WR {_bt2_wr:.1%} | +{_bt2_ret:.0f}%",
     ])
     with _bt_acc1_tab:
-        st.subheader("ACC1 — Model1: threshold=0.61 | 832 trades | $200→$12,531")
+        _bt1_trades = backtest_report.get("trades", 0) if backtest_report else 0
+        _bt1_end    = backtest_report.get("ending_balance", 0) if backtest_report else 0
+        _bt1_pf     = backtest_report.get("profit_factor", 0) if backtest_report else 0
+        _bt1_dd     = backtest_report.get("max_drawdown_pct", 0) if backtest_report else 0
+        st.subheader(
+            f"ACC1 — ICT+Wyckoff: {_bt1_trades:,} lệnh | WR {_bt1_wr:.1%} | "
+            f"$200→${_bt1_end:,.0f} | +{_bt1_ret:.0f}% | PF {_bt1_pf:.2f} | MaxDD {_bt1_dd:.1f}%"
+        )
         _render_backtest_panel(backtest_report, trades, training_report, "ACC1")
     with _bt_acc2_tab:
-        st.subheader("ACC2 — Model2: threshold=0.55 | 1,285 trades | $200→$13,373 | Dynamic risk 3-5%")
+        _bt2_trades = backtest_report_acc2.get("trades", 0) if backtest_report_acc2 else 0
+        _bt2_end    = backtest_report_acc2.get("ending_balance", 0) if backtest_report_acc2 else 0
+        _bt2_pf     = backtest_report_acc2.get("profit_factor", 0) if backtest_report_acc2 else 0
+        _bt2_dd     = backtest_report_acc2.get("max_drawdown_pct", 0) if backtest_report_acc2 else 0
+        _bt2_net    = backtest_report_acc2.get("net_profit", 0) if backtest_report_acc2 else 0
+        st.subheader(
+            f"ACC2 — v5 ICT+Wyckoff+P0-P3: {_bt2_trades:,} lệnh | WR {_bt2_wr:.1%} | "
+            f"$200→${_bt2_end:,.0f} | +{_bt2_ret:.0f}% | PF {_bt2_pf:.2f} | MaxDD {_bt2_dd:.1f}%"
+        )
         # Weekly breakdown table
         _wk2 = backtest_report_acc2.get("weekly", [])
         _active_wk2 = [w for w in _wk2 if w.get("trades_n", 0) > 0]
@@ -1832,11 +2521,17 @@ with tab_backtest:
 # =============================================================================
 # TAB 6 — WALK-FORWARD
 # =============================================================================
-with tab_walkforward:
-    _wf_hdr_r = load_json(OUTPUTS / "walkforward_report_ict_wyckoff.json")
+def _render_walkforward_panel(wf_report_path, signals_csv_path, label: str = "") -> None:
+    """Render walk-forward analysis panel for one account."""
+    _wf_hdr_r = load_json(wf_report_path)
     _wf_n = _wf_hdr_r.get("walk_forward", {}).get("n_folds", "?") if _wf_hdr_r else "?"
-    st.header(f"🔄 Walk-Forward Analysis — ICT+Wyckoff {_wf_n} Folds")
-    st.caption("Train=20,000 bars (~7 tháng) | Test=4,000 bars (~1.5 tháng) | Step=4,000 bars | 2022-10 → 2026-01")
+    st.markdown(
+        f'<div style="border-bottom:2px solid #1e293b;padding-bottom:12px;margin-bottom:18px">'
+        f'<span style="font-size:1.35rem;font-weight:800;color:#f1f5f9">Walk-Forward Analysis</span>'
+        f'<span style="color:#64748b;font-size:0.82rem;margin-left:12px">'
+        f'{label} — {_wf_n} Folds</span></div>',
+        unsafe_allow_html=True,
+    )
 
     # ── Live progress tracking ──────────────────────────────────────────
     _pdata = load_json(OUTPUTS / "walkforward_progress.json")
@@ -1871,9 +2566,7 @@ with tab_walkforward:
             st.success(f"✅ Walk-Forward hoàn thành! {_ptotal} combinations | {_pmins}m {_psecs}s")
             st.divider()
 
-    wf_r = load_json(OUTPUTS / "walkforward_report_ict_wyckoff.json")
-    if not wf_r:
-        wf_r = load_json(OUTPUTS / "walkforward_report.json")  # fallback
+    wf_r = load_json(wf_report_path)
 
     if wf_r:
         agg = wf_r.get("aggregate", {})
@@ -1882,7 +2575,11 @@ with tab_walkforward:
         # ── Top-level aggregate metrics ──────────────────────────────────────
         st.subheader("Tổng kết Walk-Forward")
         wf1, wf2, wf3, wf4 = st.columns(4)
-        auc_avg = agg.get("avg_roc_auc", 0)
+        # avg_roc_auc may be missing in older reports — compute from folds if needed
+        _agg_folds_roc = [f.get("roc_auc", 0) for f in wf_r.get("folds", [])]
+        auc_avg = agg.get("avg_roc_auc") or (
+            sum(_agg_folds_roc) / max(len(_agg_folds_roc), 1) if _agg_folds_roc else 0.0
+        )
         auc_std = agg.get("std_roc_auc", 0)
         auc_c = GREEN if auc_std < 0.04 else AMBER
         wf1.markdown(_card("Avg ROC-AUC", f"{auc_avg:.4f}",
@@ -1904,18 +2601,62 @@ with tab_walkforward:
         wf4.markdown(_card("Folds", f"{wf_info.get('n_folds', 'n/a')}",
                            f"model: HistGBC 28 feat", BLUE), unsafe_allow_html=True)
 
-        wf5, wf6, wf7, wf8 = st.columns(4)
-        wf5.metric("Avg Precision",    _pct(agg.get("avg_precision")))
-        wf6.metric("Avg Recall",       _pct(agg.get("avg_recall")))
-        wf7.metric("Avg F1",           _pct(agg.get("avg_f1")))
-        wf8.metric("Avg Accuracy",     _pct(agg.get("avg_accuracy")))
-
-        wf9, wf10, wf11, wf12 = st.columns(4)
-        wf9.metric("AUC Min",          f"{agg.get('min_roc_auc', 0):.4f}")
-        wf10.metric("AUC Max",         f"{agg.get('max_roc_auc', 0):.4f}")
-        wf11.metric("Avg Signal Rate", _pct(agg.get("avg_signal_rate")))
+        # ── Hàng 2: Model stats (non-duplicate) ─────────────────────────────
+        wf5c, wf6c, wf7c, wf8c = st.columns(4)
         n_prec50 = sum(1 for f in wf_r.get("folds", []) if f.get("precision", 0) >= 0.50)
-        wf12.metric("Folds prec ≥ 50%", f"{n_prec50} / {wf_info.get('n_folds', 0)}")
+        wf5c.metric("Avg Recall",       _pct(agg.get("avg_recall")),
+                    help="Recall: % số tín hiệu đúng được model bắt được (ra signal)")
+        wf6c.metric("Avg F1",           _pct(agg.get("avg_f1")),
+                    help="F1: cân bằng giữa Precision & Recall. F1=1 hoàn hảo")
+        wf7c.metric("Avg Accuracy",     _pct(agg.get("avg_accuracy")),
+                    help="Accuracy: % dự đoán đúng tổng thể (cả thắng lẫn thua)")
+        wf8c.metric("Folds prec ≥ 50%", f"{n_prec50} / {wf_info.get('n_folds', 0)}",
+                    help="Số fold đạt Precision ≥ 50% — nhiều fold tốt = model nhất quán")
+
+        # ── Hàng 3: Signal & AUC stats ──────────────────────────────────────
+        wf9c, wf10c, wf11c, wf12c = st.columns(4)
+        wf9c.metric("AUC Min",           f"{agg.get('min_roc_auc', 0):.4f}",
+                    help="AUC thấp nhất qua các fold — đo sự ổn định tệ nhất")
+        wf10c.metric("AUC Max",          f"{agg.get('max_roc_auc', 0):.4f}",
+                     help="AUC cao nhất — đo tiềm năng tốt nhất của model")
+        wf11c.metric("Avg Signal Rate",  _pct(agg.get("avg_signal_rate")),
+                     help="% bar có tín hiệu — thấp = thận trọng, cao = tích cực hơn")
+        _cs_top = agg.get("concurrent_sim", {})
+        wf12c.metric("Sim Return TB",    f"{_cs_top.get('avg_return_pct', 0):+.0f}%",
+                     help="Return trung bình mỗi fold trong mô phỏng giao dịch thực tế")
+
+        # ── Hàng 4: P&L từ Concurrent Simulation ────────────────────────────
+        if _cs_top:
+            st.markdown("#### 💰 Kết quả P&L — Walk-Forward Simulation")
+            _cs_wr  = float(_cs_top.get("avg_win_rate", 0) or 0)
+            _cs_pf  = float(_cs_top.get("avg_profit_factor", 0) or 0)
+            _cs_ret = float(_cs_top.get("avg_return_pct", 0) or 0)
+            _cs_dd  = float(_cs_top.get("avg_max_drawdown_pct", 0) or 0)
+            _cs_sig = int(agg.get("total_signals", 0) or 0)
+            _cs_cor = int(agg.get("correct_signals", 0) or 0)
+            p1, p2, p3, p4 = st.columns(4)
+            p1.markdown(_card("Win Rate (Sim)",
+                              f"{_cs_wr:.1%}",
+                              "✅ ≥ 60% xuất sắc" if _cs_wr >= 0.60 else "⚠️ < 60%",
+                              GREEN if _cs_wr >= 0.60 else AMBER), unsafe_allow_html=True)
+            p2.markdown(_card("Profit Factor",
+                              f"{_cs_pf:.3f}",
+                              "✅ PF ≥ 1.5 có lời ổn định" if _cs_pf >= 1.5 else "⚠️ PF < 1.5",
+                              GREEN if _cs_pf >= 1.5 else AMBER), unsafe_allow_html=True)
+            p3.markdown(_card("Return TB/Fold",
+                              f"{_cs_ret:+.0f}%",
+                              "Lợi nhuận trung bình mỗi fold ($200 vốn)",
+                              GREEN if _cs_ret >= 0 else RED), unsafe_allow_html=True)
+            p4.markdown(_card("Max DD TB",
+                              f"{_cs_dd:.1f}%",
+                              "✅ < 20% an toàn" if abs(_cs_dd) < 20 else "⚠️ DD cao > 20%",
+                              GREEN if abs(_cs_dd) < 20 else AMBER), unsafe_allow_html=True)
+
+            p5, p6 = st.columns(2)
+            p5.metric("Tổng tín hiệu WF",   f"{_cs_sig:,}",
+                      help="Tổng số tín hiệu qua tất cả các fold")
+            p6.metric("Tín hiệu đúng",       f"{_cs_cor:,} ({agg.get('signal_win_rate', 0):.1%})",
+                      help="Số tín hiệu model dự đoán đúng chiều thị trường")
 
         # ── Per-fold charts ──────────────────────────────────────────────────
         folds = wf_r.get("folds", [])
@@ -1951,7 +2692,8 @@ with tab_walkforward:
 
             # Fold table
             st.divider()
-            st.subheader("Bảng chi tiết 19 folds")
+            _n_folds_display = wf_info.get("n_folds", len(folds))
+            st.subheader(f"Bảng chi tiết {_n_folds_display} folds")
             display_cols = [c for c in [
                 "fold", "test_start", "test_end", "threshold",
                 "roc_auc", "precision", "recall", "f1", "accuracy",
@@ -1962,11 +2704,11 @@ with tab_walkforward:
                 prec_ok = row.get("precision", 0) >= 0.50
                 auc_ok  = row.get("roc_auc", 0) >= 0.62
                 if prec_ok and auc_ok:
-                    return ["background-color: #1b3a1b"] * len(row)
+                    return ["background-color: #10b98115"] * len(row)
                 elif prec_ok:
-                    return ["background-color: #1a2a0a"] * len(row)
+                    return ["background-color: #10b98108"] * len(row)
                 else:
-                    return ["background-color: #2a1a1a"] * len(row)
+                    return ["background-color: #ef444412"] * len(row)
 
             styled = fd[display_cols].style.apply(_highlight_fold, axis=1).format({
                 "roc_auc":     "{:.4f}",
@@ -2100,14 +2842,49 @@ with tab_walkforward:
                         st.markdown(f"**{grp}:** `{'`, `'.join(names)}`")
 
         # ── Walk-Forward signals CSV ─────────────────────────────────────────
-        wf_signals = load_wf_signals()
-        if not wf_signals.empty:
+        try:
+            _wf_sigs = (pd.read_csv(signals_csv_path, on_bad_lines="skip")
+                        if signals_csv_path and signals_csv_path.exists() else pd.DataFrame())
+            if "time" in _wf_sigs.columns:
+                _wf_sigs["time"] = pd.to_datetime(_wf_sigs["time"], utc=True, errors="coerce")
+        except Exception:
+            _wf_sigs = pd.DataFrame()
+        if not _wf_sigs.empty:
             st.divider()
-            st.subheader(f"Tín hiệu Walk-Forward ({len(wf_signals):,} dòng)")
+            st.subheader(f"Tín hiệu Walk-Forward ({len(_wf_sigs):,} dòng)")
+            st.caption(
+                "⚡ Đây là các tín hiệu model **chấp nhận** (predicted=1, proba ≥ threshold) — "
+                "trước khi lọc giới hạn lệnh đồng thời. "
+                "Xem mục *P&L — Walk-Forward Simulation* bên trên để xem kết quả có tính position slot."
+            )
+            # Normalize column names: proba→confidence, target→actual
+            if "proba" in _wf_sigs.columns and "confidence" not in _wf_sigs.columns:
+                _wf_sigs = _wf_sigs.rename(columns={"proba": "confidence"})
+            if "target" in _wf_sigs.columns and "actual" not in _wf_sigs.columns:
+                _wf_sigs = _wf_sigs.rename(columns={"target": "actual"})
             disp_wf = [c for c in ["time", "fold", "side", "confidence", "predicted",
-                                    "actual", "correct", "strategy_score"] if c in wf_signals.columns]
-            st.dataframe(wf_signals[disp_wf].tail(200) if disp_wf else wf_signals.tail(200),
+                                    "actual", "correct", "strategy_score"] if c in _wf_sigs.columns]
+            st.dataframe(_wf_sigs[disp_wf] if disp_wf else _wf_sigs,
                          use_container_width=True)
+
+        with st.expander("📖 Giải thích các chỉ số Walk-Forward", expanded=False):
+            st.markdown("""
+**Walk-Forward là gì?** Model được train trên dữ liệu quá khứ, rồi test trên dữ liệu tương lai chưa thấy, lặp nhiều lần (folds). Đây là cách đánh giá thực tế nhất cho trading AI.
+
+| Chỉ số | Ý nghĩa | Ngưỡng tốt |
+|--------|---------|------------|
+| **ROC-AUC** | Khả năng phân biệt tín hiệu thắng vs thua. 0.5=random, 1.0=hoàn hảo | ≥ 0.58 |
+| **Precision** | Trong số lệnh AI vào, % thực sự thắng. Cao = ít vào lệnh xấu | ≥ 50% |
+| **Recall** | % tín hiệu thắng thực sự được AI bắt (độ nhạy). Thấp = thận trọng | Tùy chiến lược |
+| **F1 Score** | Cân bằng Precision & Recall. F1=1 hoàn hảo | ≥ 0.20 với threshold cao |
+| **Signal Win Rate** | % tín hiệu AI dự đoán đúng chiều (không tính lãi/lỗ $) | ≥ 55% |
+| **Std AUC** | Độ lệch chuẩn AUC qua các fold — thấp = model ổn định | < 0.04 |
+| **Win Rate (Sim)** | Tỷ lệ thắng trong mô phỏng giao dịch thực (có SL/TP) | ≥ 60% |
+| **Profit Factor** | Tổng lãi / tổng lỗ trong simulation | ≥ 1.5 |
+| **Return TB/Fold** | Lợi nhuận trung bình mỗi period test (từ $200 vốn) | > 0% |
+
+**Tại sao cần nhiều fold?** Mỗi fold = 1 khoảng thời gian khác nhau. Nếu model tốt ở nhiều fold khác nhau → trustworthy. Nếu chỉ tốt ở 1-2 fold → overfitting.
+            """)
 
     else:
         st.info(
@@ -2116,11 +2893,152 @@ with tab_walkforward:
         )
 
 
+with tab_walkforward:
+    _wf_acc1_tab, _wf_acc2_tab = st.tabs([
+        "🏦 ACC1 — ICT+Wyckoff",
+        "🏦 ACC2 — v5 (ICT+Wyckoff+P0-P3)",
+    ])
+    with _wf_acc1_tab:
+        _render_walkforward_panel(
+            OUTPUTS / "walkforward_report_ict_wyckoff.json",
+            OUTPUTS / "walkforward_trades_ict_wyckoff.csv",
+            "ACC1 — ICT+Wyckoff",
+        )
+    with _wf_acc2_tab:
+        # ── Load v5 live text log (updated every fold, even before JSON done) ──
+        _wf5 = load_wf_txt_log(OUTPUTS / "wf_v5_acc2.txt")
+
+        if _wf5:
+            _done   = _wf5.get("completed", 0)
+            _total  = _wf5.get("total_folds", 17)
+            _is_fin = _wf5.get("is_complete", False)
+            _wf_pct = _done / max(_total, 1)
+
+            # ── Status banner ─────────────────────────────────────────────
+            if _is_fin:
+                st.success(f"✅ Walk-Forward v5 hoàn thành — {_done}/{_total} folds | "
+                           f"Avg AUC={_wf5['avg_auc']:.4f} | Avg Prec={_wf5['avg_prec']:.1%}")
+            else:
+                if _HAS_AUTOREFRESH:
+                    _st_autorefresh(interval=20_000, key="wf5_autorefresh")
+                st.warning(f"⏳ Walk-Forward v5 đang chạy: **{_done}/{_total} folds** ({_wf_pct:.0%})")
+                st.progress(_wf_pct)
+
+            # ── Aggregate metrics ─────────────────────────────────────────
+            st.markdown(
+                '<div style="border-bottom:2px solid #1e293b;padding-bottom:10px;margin-bottom:14px">'
+                '<span style="font-size:1.25rem;font-weight:800;color:#f1f5f9">Walk-Forward v5 — ACC2</span>'
+                '<span style="background:#6366f122;border:1px solid #6366f144;border-radius:6px;'
+                'padding:2px 10px;font-size:0.72rem;font-weight:700;color:#a5b4fc;margin-left:12px">'
+                'ICT+Wyckoff+P0-P3 | VotingClassifier HGB+RF+ET</span></div>',
+                unsafe_allow_html=True,
+            )
+            _m1, _m2, _m3, _m4, _m5 = st.columns(5)
+            _auc_c  = GREEN if _wf5["avg_auc"]  >= 0.60 else AMBER
+            _prec_c = GREEN if _wf5["avg_prec"] >= 0.55 else AMBER
+            _m1.markdown(_card("Folds Done", f"{_done}/{_total}",
+                               "hoàn thành" if _is_fin else "đang chạy", BLUE), unsafe_allow_html=True)
+            _m2.markdown(_card("Avg AUC", f"{_wf5['avg_auc']:.4f}",
+                               "≥0.60 là tốt", _auc_c), unsafe_allow_html=True)
+            _m3.markdown(_card("Avg Precision", f"{_wf5['avg_prec']:.1%}",
+                               "mục tiêu ≥55%", _prec_c), unsafe_allow_html=True)
+            _m4.markdown(_card("Avg Recall", f"{_wf5['avg_recall']:.1%}",
+                               "", BLUE), unsafe_allow_html=True)
+            _m5.markdown(_card("Avg F1", f"{_wf5['avg_f1']:.1%}",
+                               "", PURPLE), unsafe_allow_html=True)
+
+            # ── Per-fold table ─────────────────────────────────────────────
+            _folds_df = pd.DataFrame(_wf5["folds"])
+            if not _folds_df.empty:
+                st.divider()
+                st.subheader(f"Kết quả {_done} folds (v5 — ACC2)")
+
+                # Charts
+                _ca, _cb = st.columns(2)
+                with _ca:
+                    st.markdown("**AUC theo fold:**")
+                    _auc_chart = _folds_df.set_index("fold")[["roc_auc"]].copy()
+                    _auc_chart["target_0.60"] = 0.60
+                    st.line_chart(_auc_chart, height=200)
+                with _cb:
+                    st.markdown("**Precision theo fold:**")
+                    _prec_chart = _folds_df.set_index("fold")[["precision"]].copy()
+                    _prec_chart["target_0.55"] = 0.55
+                    st.line_chart(_prec_chart, height=200)
+
+                _cc, _cd = st.columns(2)
+                with _cc:
+                    st.markdown("**Số tín hiệu / fold:**")
+                    st.bar_chart(_folds_df.set_index("fold")["n_signals"], height=180)
+                with _cd:
+                    st.markdown("**Threshold được chọn / fold:**")
+                    st.bar_chart(_folds_df.set_index("fold")["threshold"], height=180)
+
+                # Styled table
+                st.divider()
+
+                def _hl_fold_v5(row):
+                    prec_ok = row.get("precision", 0) >= 0.55
+                    auc_ok  = row.get("roc_auc", 0) >= 0.58
+                    if prec_ok and auc_ok:
+                        return ["background-color: #10b98118"] * len(row)
+                    if prec_ok:
+                        return ["background-color: #10b98108"] * len(row)
+                    return ["background-color: #ef444412"] * len(row)
+
+                _disp = _folds_df[[c for c in [
+                    "fold", "test_start", "test_end",
+                    "roc_auc", "precision", "recall", "f1",
+                    "threshold", "n_signals", "elapsed_s",
+                ] if c in _folds_df.columns]].copy()
+                _disp_styled = _disp.style.apply(_hl_fold_v5, axis=1).format({
+                    "roc_auc":   "{:.4f}",
+                    "precision": "{:.4f}",
+                    "recall":    "{:.4f}",
+                    "f1":        "{:.4f}",
+                    "threshold": "{:.2f}",
+                    "elapsed_s": "{:.1f}s",
+                }, na_rep="—")
+                st.dataframe(_disp_styled, use_container_width=True, hide_index=True)
+                st.caption(
+                    "🟢 AUC≥0.58 & Prec≥55% | 🟩 Prec≥55% saja | 🟥 Prec<55%  "
+                    f"| Config: {_wf5.get('config', 'live_acc2.yaml')} | {_wf5.get('n_features', 0)} features"
+                )
+
+                # Summary stats
+                _prec_ok_n = sum(1 for f in _wf5["folds"] if f["precision"] >= 0.55)
+                _auc_ok_n  = sum(1 for f in _wf5["folds"] if f["roc_auc"]   >= 0.58)
+                _s1, _s2, _s3, _s4 = st.columns(4)
+                _s1.metric("Folds prec ≥55%", f"{_prec_ok_n}/{_done}")
+                _s2.metric("Folds AUC ≥0.58", f"{_auc_ok_n}/{_done}")
+                _s3.metric("Best Precision",  f"{max(f['precision'] for f in _wf5['folds']):.1%}")
+                _s4.metric("Best AUC",        f"{max(f['roc_auc']   for f in _wf5['folds']):.4f}")
+
+        # ── Also show full JSON report if already written ──────────────────
+        if (OUTPUTS / "walkforward_report_acc2.json").exists():
+            st.divider()
+            st.markdown("**Kết quả chi tiết từ JSON report (ACC2 — v5):**")
+            _render_walkforward_panel(
+                OUTPUTS / "walkforward_report_acc2.json",
+                OUTPUTS / "walkforward_trades_acc2.csv",
+                "ACC2 — v5",
+            )
+        elif not _wf5:
+            st.info(
+                "Chưa có dữ liệu Walk-Forward v5. Chạy:\n"
+                "```\npython scripts/walkforward_ict_wyckoff.py --config configs/live_acc2.yaml\n```"
+            )
+
+
 # =============================================================================
 # TAB 7 — RISK & CAI DAT
 # =============================================================================
 with tab_risk:
-    st.header("⚙️ Quản lý Rủi ro & Cài đặt")
+    st.markdown(
+        '<div style="border-bottom:2px solid #1e293b;padding-bottom:12px;margin-bottom:18px">'
+        '<span style="font-size:1.35rem;font-weight:800;color:#f1f5f9">Quản lý Rủi ro & Cài đặt</span></div>',
+        unsafe_allow_html=True,
+    )
 
     st.subheader("Quản lý Vị thế Động")
     st.markdown("""
@@ -2157,11 +3075,12 @@ with tab_risk:
         st.metric("Rủi ro/Số dư",   f"{(ml/cb)*100:.2f}%")
 
     st.divider()
-    if not _selected_signals.empty and "account_balance" in _selected_signals.columns:
+    _risk_sigs = live_signals if not live_signals.empty else live_signals_acc2
+    if not _risk_sigs.empty and "account_balance" in _risk_sigs.columns:
         st.subheader("Live Balance History")
-        bh2 = _selected_signals[["time", "account_balance"]].dropna().sort_values("time").set_index("time")
+        bh2 = _risk_sigs[["time", "account_balance"]].dropna().sort_values("time").set_index("time")
         if not bh2.empty:
-            st.area_chart(bh2["account_balance"], height=200)
+            st.area_chart(bh2["account_balance"].pipe(_ds), height=200)
 
     st.divider()
     sl_ev = [e for e in learn_events if e.get("event") in ("self_learn", "live_retrain")]
@@ -2187,8 +3106,13 @@ with tab_risk:
 # TAB 8 — DU LIEU MT5
 # =============================================================================
 with tab_data:
-    st.header("🗄️ Quản lý Dữ liệu MT5")
-    st.caption("Xem trạng thái dữ liệu OHLCV đã lưu, kiểm tra khoảng thiếu, và hướng dẫn cập nhật từ MT5")
+    st.markdown(
+        '<div style="border-bottom:2px solid #1e293b;padding-bottom:12px;margin-bottom:18px">'
+        '<span style="font-size:1.35rem;font-weight:800;color:#f1f5f9">Quản lý Dữ liệu MT5</span>'
+        '<span style="color:#64748b;font-size:0.82rem;margin-left:12px">'
+        'Trạng thái OHLCV, kiểm tra khoảng thiếu</span></div>',
+        unsafe_allow_html=True,
+    )
 
     # ── Data coverage per timeframe ──────────────────────────────────────────
     st.subheader("📂 Trạng thái Dữ liệu theo Khung Thời Gian")

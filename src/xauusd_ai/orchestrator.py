@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import datetime
 import html
@@ -14,7 +14,7 @@ import pandas as pd
 from dotenv import load_dotenv
 
 from xauusd_ai.backtesting.engine import simulate_prediction_backtest, write_backtest_outputs
-from xauusd_ai.config import Settings
+from xauusd_ai.config import Settings, load_settings
 from xauusd_ai.data.market_data import MarketDataService
 from xauusd_ai.execution.mt5_executor import MT5Executor
 from xauusd_ai.execution.risk import RiskManager
@@ -85,12 +85,20 @@ class _LearnerThread(threading.Thread):
     # ------------------------------------------------------------------
     def run(self) -> None:
         LOGGER.info("LearnerThread: started (background learning)")
+        _last_loss_retrain_ts: float = 0.0
+        _LOSS_RETRAIN_COOLDOWN = 600  # min 10 minutes between loss retrains
         while not self._stop_event.is_set():
             # Æ¯u tiÃªn loss-retrain trÆ°á»›c (ngáº¯n hÆ¡n regular retrain)
             try:
                 loss_count, frames = self._loss_q.get_nowait()
+                now = time.time()
+                if now - _last_loss_retrain_ts < _LOSS_RETRAIN_COOLDOWN:
+                    LOGGER.info("LearnerThread: loss-retrain skipped (cooldown %ds)",
+                                int(_LOSS_RETRAIN_COOLDOWN - (now - _last_loss_retrain_ts)))
+                    continue
                 LOGGER.info("LearnerThread: loss-retrain triggered (losses=%d)", loss_count)
                 result = self._self_learner.maybe_retrain_on_loss(frames, loss_count)
+                _last_loss_retrain_ts = time.time()
                 if result:
                     self._reload_event.set()
                     LOGGER.info("LearnerThread: loss-retrain done â†’ signal reload | %s", result.get("status"))
@@ -530,11 +538,114 @@ def run_paper_trade_loop(settings: Settings) -> None:
 
 def run_live_loop(settings: Settings) -> None:
     data_service, trainer, strategy, notifier, executor, risk_manager, self_learner = _bootstrap_with_learner(settings)
+
+    # ── Config hot-reload: detect YAML file changes ──────────────────────────
+    _config_path = getattr(settings, "_config_path", None)
+    _cp = Path(_config_path) if _config_path else None
+    _config_mtime: float = _cp.stat().st_mtime if _cp and _cp.exists() else 0.0
+    _tunnel_url_mtime: float = 0.0
+    _tunnel_url_sent: str = ""  # track last URL sent to avoid duplicate notifications
+
+    def _maybe_reload_config() -> None:
+        """Reload toggleable settings from YAML without restart."""
+        nonlocal settings, _config_mtime, _exit_model, news_crawler
+        if not _config_path or not Path(_config_path).exists():
+            return
+        try:
+            cur_mtime = Path(_config_path).stat().st_mtime
+            if cur_mtime <= _config_mtime:
+                return
+            _config_mtime = cur_mtime
+            new_settings = load_settings(Path(_config_path))
+            # Hot-reload toggleable fields (keep heavy objects as-is)
+            settings.execution.auto_trade = new_settings.execution.auto_trade
+            settings.execution.trailing_sl.enabled = new_settings.execution.trailing_sl.enabled
+            settings.execution.dca.enabled = new_settings.execution.dca.enabled
+            settings.execution.close_opposite_on_signal = new_settings.execution.close_opposite_on_signal
+            settings.risk.risk_per_trade = new_settings.risk.risk_per_trade
+            settings.risk.max_open_positions = new_settings.risk.max_open_positions
+            settings.risk.take_profit_rr = new_settings.risk.take_profit_rr
+            settings.risk.stop_loss_atr_multiple = new_settings.risk.stop_loss_atr_multiple
+            settings.strategy.signal_threshold = new_settings.strategy.signal_threshold
+            settings.strategy.min_strategy_score = new_settings.strategy.min_strategy_score
+            settings.strategy.force_trade = new_settings.strategy.force_trade
+            settings.strategy.blocked_hours_utc = new_settings.strategy.blocked_hours_utc
+            settings.strategy.blocked_weekdays_utc = new_settings.strategy.blocked_weekdays_utc
+            # Exit model toggle
+            if new_settings.execution.exit_model.enabled and _exit_model is None:
+                try:
+                    from xauusd_ai.model.exit_model import ExitModel
+                    _exit_model = ExitModel(settings)
+                    if not _exit_model.load():
+                        _exit_model = None
+                except Exception:
+                    _exit_model = None
+            elif not new_settings.execution.exit_model.enabled:
+                _exit_model = None
+            settings.execution.exit_model.enabled = new_settings.execution.exit_model.enabled
+            settings.execution.exit_model.exit_threshold = new_settings.execution.exit_model.exit_threshold
+            # News toggle
+            if new_settings.integrations.news.enabled and news_crawler is None:
+                try:
+                    from xauusd_ai.data.news_crawler import NewsCrawler
+                    news_crawler = NewsCrawler(settings)
+                except Exception:
+                    pass
+            elif not new_settings.integrations.news.enabled:
+                news_crawler = None
+            settings.integrations.news.enabled = new_settings.integrations.news.enabled
+            LOGGER.info("Config hot-reloaded from %s", _config_path)
+            notifier.send_message("🔄 <b>Config reloaded</b> — thay đổi đã áp dụng (không cần restart)")
+        except Exception as exc:
+            LOGGER.warning("Config hot-reload failed: %s", exc)
+
     model_ready = trainer.load_artifacts()
     if settings.training.retrain_on_startup or not model_ready:
         LOGGER.info("Training artifacts missing or retrain enabled, starting training")
         run_training(settings)
         trainer.load_artifacts()
+
+    # ── Exit Model (optional) ────────────────────────────────────────────────
+    _exit_model = None
+    if settings.execution.exit_model.enabled:
+        try:
+            from xauusd_ai.model.exit_model import ExitModel  # noqa: PLC0415
+            _exit_model = ExitModel(settings)
+            if _exit_model.load():
+                LOGGER.info(
+                    "ExitModel loaded (thr=%.2f min_rr=%.2f)",
+                    _exit_model.threshold,
+                    settings.execution.exit_model.min_unrealized_rr,
+                )
+            else:
+                LOGGER.warning("ExitModel enabled but artifacts not found — disabled. Run: python scripts/train_exit_model.py")
+                _exit_model = None
+        except Exception as _em_err:
+            LOGGER.error("ExitModel load error: %s", _em_err)
+            _exit_model = None
+
+    # Tracks RSI value at the moment each order was placed: {ticket: rsi_at_entry}
+    _RSI_TRACKER_FILE = Path("outputs/entry_rsi_tracker.json")
+
+    def _load_rsi_tracker() -> dict[int, float]:
+        try:
+            if _RSI_TRACKER_FILE.exists():
+                data = json.loads(_RSI_TRACKER_FILE.read_text(encoding="utf-8"))
+                return {int(k): float(v) for k, v in data.items()}
+        except Exception as _e:
+            LOGGER.warning("Failed to load entry_rsi_tracker: %s", _e)
+        return {}
+
+    def _save_rsi_tracker(tracker: dict[int, float]) -> None:
+        try:
+            _RSI_TRACKER_FILE.parent.mkdir(parents=True, exist_ok=True)
+            tmp = _RSI_TRACKER_FILE.with_suffix(".tmp")
+            tmp.write_text(json.dumps({str(k): v for k, v in tracker.items()}), encoding="utf-8")
+            tmp.replace(_RSI_TRACKER_FILE)
+        except Exception as _e:
+            LOGGER.warning("Failed to save entry_rsi_tracker: %s", _e)
+
+    _entry_rsi_tracker: dict[int, float] = _load_rsi_tracker()
 
     # â”€â”€ Khá»Ÿi táº¡o News Crawler (náº¿u báº­t) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     news_crawler = None
@@ -572,17 +683,50 @@ def run_live_loop(settings: Settings) -> None:
 
     def _save_dca_state(state: dict) -> None:
         _dca_state_path.parent.mkdir(parents=True, exist_ok=True)
-        _dca_state_path.write_text(json.dumps(state), encoding="utf-8")
+        tmp = _dca_state_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(state), encoding="utf-8")
+        tmp.replace(_dca_state_path)
 
     # ── Live closed trades log ────────────────────────────────────────────────
     _live_trades_path = Path(settings.app.live_closed_trades_path)
-    _live_trades_path.parent.mkdir(parents=True, exist_ok=True)    # Reset closed trades + signals CSV at each session start — dashboard chỉ hiển thị session hiện tại
-    _live_trades_header = "time,ticket,side,volume,open_price,close_price,profit,swap,commission,pnl,is_win\n"
-    _live_trades_path.write_text(_live_trades_header, encoding="utf-8")
+    _live_trades_path.parent.mkdir(parents=True, exist_ok=True)
+    _live_trades_header = "time,ticket,side,volume,open_price,close_price,profit,swap,commission,pnl,is_win,close_type,session_id\n"
+    # Preserve history across restarts -- only write header for a brand-new file
+    if not _live_trades_path.exists() or _live_trades_path.stat().st_size == 0:
+        _live_trades_path.write_text(_live_trades_header, encoding="utf-8")
+    else:
+        # Migrate old files: ensure close_type and session_id columns exist
+        try:
+            _mig_df = pd.read_csv(_live_trades_path, on_bad_lines="skip")
+            _mig_changed = False
+            if "session_id" not in _mig_df.columns:
+                _mig_df["session_id"] = "legacy"
+                _mig_changed = True
+            if "close_type" not in _mig_df.columns:
+                # Retroactively fix: SL trades with pnl>=0 that were wrongly marked as win
+                _mig_df["close_type"] = "UNKNOWN"
+                if "is_win" in _mig_df.columns and "pnl" in _mig_df.columns:
+                    # Any row marked is_win=True but pnl<=0 was a data anomaly, fix it
+                    _mig_df.loc[
+                        (_mig_df["is_win"].astype(str).isin(["True", "true", "1"])) &
+                        (_mig_df["pnl"].astype(float) <= 0),
+                        "is_win"
+                    ] = False
+                _mig_changed = True
+            if _mig_changed:
+                _col_order = [c for c in [
+                    "time", "ticket", "side", "volume", "open_price", "close_price",
+                    "profit", "swap", "commission", "pnl", "is_win", "close_type", "session_id"
+                ] if c in _mig_df.columns]
+                _mig_df[_col_order].to_csv(_live_trades_path, index=False)
+                LOGGER.info("Migrated live_trades CSV: added close_type/session_id columns")
+        except Exception as _mig_err:
+            LOGGER.debug("Could not migrate live trades CSV: %s", _mig_err)
     _signals_path = Path(settings.app.paper_trade_log_path)
     _signals_path.parent.mkdir(parents=True, exist_ok=True)
-    _signals_path.write_text("", encoding="utf-8")  # clear stale signals from previous sessions
-    def _append_live_trade(pos: dict, pnl: float, is_win: bool) -> None:
+    # Keep signals CSV across restarts (dashboard de-duplicates by bar time)
+    _session_id = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
+    def _append_live_trade(pos: dict, pnl: float, is_win: bool, close_type: str = "UNKNOWN") -> None:
         """Ghi lệnh đóng vào CSV để dashboard P&L đọc được."""
         import datetime as _dt
         row = pd.DataFrame([{
@@ -597,6 +741,8 @@ def run_live_loop(settings: Settings) -> None:
             "commission":  pos.get("commission", 0),
             "pnl":         pnl,
             "is_win":      is_win,
+            "close_type":  close_type,
+            "session_id":  _session_id,
         }])
         if _live_trades_path.exists():
             row.to_csv(_live_trades_path, mode="a", header=False, index=False)
@@ -605,10 +751,218 @@ def run_live_loop(settings: Settings) -> None:
 
     last_seen_bar_time: pd.Timestamp | None = None
     last_learning_time: float = time.time()
+    # Pre-load last logged bar time so we skip re-logging same candle after restart
+    _last_logged_bar_time: pd.Timestamp | None = None
+    if _signals_path.exists() and _signals_path.stat().st_size > 0:
+        try:
+            import csv as _scsv
+            with _signals_path.open("r", encoding="utf-8") as _sf:
+                _last_csv_row = None
+                for _last_csv_row in _scsv.DictReader(_sf):
+                    pass
+                if _last_csv_row:
+                    _last_logged_bar_time = pd.to_datetime(_last_csv_row.get("time"), utc=True, errors="coerce")
+        except Exception:
+            pass
     # â”€â”€ Loss learning state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     _last_closed_check_epoch: float = time.time() - 300  # look back 5 min on startup
     _known_loss_tickets: set[int] = set()
     _accumulated_losses: int = 0
+    # Pre-load already-recorded tickets so we don't re-notify on restart
+    if _live_trades_path.exists():
+        try:
+            import csv as _csv
+            with _live_trades_path.open("r", encoding="utf-8") as _f:
+                for _row in _csv.DictReader(_f):
+                    _t = int(float(_row.get("ticket", 0) or 0))
+                    if _t:
+                        _known_loss_tickets.add(_t)
+        except Exception as _le:
+            LOGGER.debug("Could not pre-load known tickets: %s", _le)
+    _last_row_ctx: pd.Series | None = None
+    _last_frames_ctx: dict | None = None
+
+    def _check_closed_positions(row_ctx: pd.Series | None, frames_ctx: dict | None) -> None:
+        """Phát hiện lệnh vừa đóng và gửi Telegram ngay lập tức (30s sau khi đóng)."""
+        nonlocal _last_closed_check_epoch, _accumulated_losses
+        if not settings.execution.auto_trade:
+            return
+        try:
+            now_epoch = time.time()
+            closed = executor.get_recently_closed_positions(
+                since_epoch=_last_closed_check_epoch - 60,
+                magic_number=settings.execution.magic_number,
+            )
+            _last_closed_check_epoch = now_epoch
+            for pos in closed:
+                ticket = pos.get("ticket", 0)
+                pnl = pos.get("profit", 0) + pos.get("swap", 0) + pos.get("commission", 0)
+                if ticket in _known_loss_tickets:
+                    continue
+                _known_loss_tickets.add(ticket)
+                # Determine close type from MT5 deal reason
+                # DEAL_REASON_SL=4, DEAL_REASON_TP=5, DEAL_REASON_EXPERT=3
+                _reason_code = int(pos.get("reason", 0))
+                if _reason_code == 4:
+                    _close_type = "SL"
+                elif _reason_code == 5:
+                    _close_type = "TP"
+                elif _reason_code == 3:
+                    _close_type = "EA"
+                else:
+                    _close_type = "MANUAL"
+
+                # SL hit with non-negative PnL = trailing SL closed in profit/breakeven
+                # This must NOT be counted as a win — it is an SL close, not a TP close
+                if _reason_code == 4 and pnl >= 0:
+                    LOGGER.info(
+                        "SL-breakeven ticket=%d side=%s pnl=%.2f (SL moved to profit/BE — NOT a win)",
+                        ticket, pos.get("side"), pnl,
+                    )
+                    notifier.send_message(
+                        f"\u26a1 <b>L\u1ec7nh SL Ho\u00e0 #{ticket}</b> ({pos.get('side','?').upper()}) \u2014 SL ch\u1ea1m nh\u01b0ng PnL d\u01b0\u01a1ng\n"
+                        f"\u251c P&amp;L: <b>{'+' if pnl > 0 else ''}{pnl:.2f}$</b> (kh\u00f4ng t\u00ednh l\u00e0 l\u1ec7nh th\u1eafng)\n"
+                        f"\u251c Entry: {pos.get('open_price', 0):.5f} \u2192 Close: {pos.get('close_price', 0):.5f}\n"
+                        f"\u251c Volume: {pos.get('volume', 0):.2f} lot\n"
+                        f"\u2514 Profit: {pos.get('profit', 0):.2f}$ | Swap: {pos.get('swap', 0):.2f}$ | Comm: {pos.get('commission', 0):.2f}$"
+                    )
+                    _append_live_trade(pos, pnl, is_win=False, close_type="SL")
+                    _entry_rsi_tracker.pop(ticket, None)
+                    _save_rsi_tracker(_entry_rsi_tracker)
+                elif pnl < 0:
+                    _accumulated_losses += 1
+                    self_learner._accumulated_losses = _accumulated_losses
+                    LOGGER.warning("LOSS detected ticket=%d side=%s pnl=%.2f close_type=%s", ticket, pos.get("side"), pnl, _close_type)
+                    _feat: dict = {}
+                    _reasons: list[str] = []
+                    try:
+                        if row_ctx is not None:
+                            analysis = self_learner.log_loss_analysis(pos, row_ctx)
+                            _feat = analysis.get("features", {})
+                            _reasons = analysis.get("reasons", [])
+                            LOGGER.warning("LOSS reasons: %s", " | ".join(_reasons))
+                    except Exception as _ae:
+                        LOGGER.error("Loss analysis failed (notification still sent): %s", _ae)
+                    _regime_label = {0: "sideway", 1: "normal", 2: "volatile"}.get(
+                        int(_feat.get("volatility_regime", 1)), "?"
+                    )
+                    _reasons_text = (
+                        "\n".join(f"  \u2022 {html.escape(str(r))}" for r in _reasons)
+                        if _reasons else "  \u2022 Khong xac dinh ro nguyen nhan"
+                    )
+                    notifier.send_message(
+                        f"\u26a0\ufe0f <b>Lenh THUA #{ticket}</b> ({pos.get('side','?').upper()}) \u2014 Loss #{_accumulated_losses} [{_close_type}]\n"
+                        f"\u251c P&amp;L: <b>{pnl:.2f}$</b>\n"
+                        f"\u251c Entry: {pos.get('open_price', 0):.5f} \u2192 Close: {pos.get('close_price', 0):.5f}\n"
+                        f"\u251c Volume: {pos.get('volume', 0):.2f} lot\n"
+                        f"\u251c ATR: {_feat.get('atr', 0):.2f} | RSI: {_feat.get('rsi', 0):.1f} | Score: {_feat.get('strategy_score', 0):.3f}\n"
+                        f"\u251c Regime: {_regime_label} | Trend: {'OK' if int(_feat.get('trend_alignment', 0)) == 1 else 'MISS'}\n"
+                        f"\u2514 Nguyen nhan:\n{_reasons_text}"
+                    )
+                    _append_live_trade(pos, pnl, is_win=False, close_type=_close_type)
+                    _entry_rsi_tracker.pop(ticket, None)
+                    _save_rsi_tracker(_entry_rsi_tracker)
+                else:
+                    LOGGER.info("Position closed in profit: ticket=%d pnl=%.2f close_type=%s", ticket, pnl, _close_type)
+                    notifier.send_message(
+                        f"\u2705 <b>Lenh THANG #{ticket}</b> ({pos.get('side','?').upper()}) [{_close_type}]\n"
+                        f"\u251c P&amp;L: <b>+{pnl:.2f}$</b>\n"
+                        f"\u251c Entry: {pos.get('open_price', 0):.5f} \u2192 Close: {pos.get('close_price', 0):.5f}\n"
+                        f"\u251c Volume: {pos.get('volume', 0):.2f} lot\n"
+                        f"\u2514 Profit: {pos.get('profit', 0):.2f}$ | Swap: {pos.get('swap', 0):.2f}$ | Comm: {pos.get('commission', 0):.2f}$"
+                    )
+                    _append_live_trade(pos, pnl, is_win=True, close_type=_close_type)
+                    _entry_rsi_tracker.pop(ticket, None)
+                    _save_rsi_tracker(_entry_rsi_tracker)
+            # Trigger loss-retrain sau LOSS_RETRAIN_THRESHOLD lệnh thua
+            if _accumulated_losses >= self_learner.LOSS_RETRAIN_THRESHOLD and learner_thread is not None:
+                LOGGER.info("LossRetrain queued for background thread (losses=%d)", _accumulated_losses)
+                learner_thread.submit_loss(_accumulated_losses, frames_ctx or {})
+                notifier.send_message(
+                    f"🔄 <b>Đang học lại</b> sau {_accumulated_losses} lệnh thua\n"
+                    f"(background \u2013 kh\u00f4ng d\u1eebng giao d\u1ecbch)"
+                )
+                _accumulated_losses = 0
+                self_learner._accumulated_losses = 0
+        except Exception as loss_err:
+            LOGGER.error("Loss learning error: %s", loss_err)
+
+    # timeframe seconds mapping for bars_held computation
+    _tf_secs_map = {"M1": 60, "M5": 300, "M15": 900, "M30": 1800, "H1": 3600, "H4": 14400, "D1": 86400}
+    _exec_tf_secs = _tf_secs_map.get(settings.market.execution_timeframe, 900)
+
+    def _check_exit_model(row_ctx: pd.Series | None, frames_ctx: dict | None) -> None:
+        """Exit open positions early when ExitModel probability exceeds threshold."""
+        import numpy as np  # noqa: PLC0415
+        if _exit_model is None or not settings.execution.auto_trade or row_ctx is None:
+            return
+        exit_cfg = settings.execution.exit_model
+        atr_val = float(row_ctx.get("atr", 0))
+        sl_dist = atr_val * settings.risk.stop_loss_atr_multiple
+        if sl_dist <= 0:
+            return
+        try:
+            open_pos_list = executor.get_open_positions(magic_number=settings.execution.magic_number)
+        except Exception as _ep_err:
+            LOGGER.debug("ExitModel: could not fetch open positions: %s", _ep_err)
+            return
+        for pos in open_pos_list:
+            try:
+                ticket = int(pos["ticket"])
+                side_sign = 1.0 if pos["side"] == "buy" else -1.0
+                entry_price = float(pos["open_price"])
+                current_price = float(pos.get("current_price", entry_price))
+                unrealized_rr = side_sign * (current_price - entry_price) / sl_dist
+
+                # Gate: minimum profit threshold (unless also_cut_losses is enabled)
+                if not exit_cfg.also_cut_losses and unrealized_rr < exit_cfg.min_unrealized_rr:
+                    continue
+                if exit_cfg.also_cut_losses and unrealized_rr < exit_cfg.min_loss_rr:
+                    continue
+
+                # Gate: minimum hold bars
+                open_time_epoch = float(pos.get("open_time", time.time()))
+                bars_held = int((time.time() - open_time_epoch) / _exec_tf_secs)
+                if bars_held < exit_cfg.exit_min_hold_bars:
+                    continue
+
+                # Build position-state features
+                rsi_at_entry = float(_entry_rsi_tracker.get(ticket, 50.0))
+                rsi_now = float(row_ctx.get("rsi", 50.0))
+                # rr_momentum: approximate from bar's open→close direction aligned with trade side
+                _bar_open  = float(row_ctx.get("open",  current_price))
+                _bar_close = float(row_ctx.get("close", current_price))
+                pos_state = {
+                    "xm_bars_held":           min(bars_held, 32) / 32.0,
+                    "xm_unrealized_rr":       float(np.clip(unrealized_rr, -2.0, settings.risk.take_profit_rr + 0.5)),
+                    "xm_pos_side":            side_sign,
+                    "xm_rsi_at_entry":        rsi_at_entry,
+                    "xm_rsi_delta":           rsi_now - rsi_at_entry,
+                    "xm_price_vs_entry_atr":  float(np.clip(side_sign * (current_price - entry_price) / max(atr_val, 1e-6), -3.0, 3.0)),
+                    "xm_progress_to_tp":      float(np.clip(unrealized_rr / max(settings.risk.take_profit_rr, 0.1), -0.5, 1.5)),
+                    "xm_rr_momentum":         float(np.clip(side_sign * (_bar_close - _bar_open) / max(atr_val, 1e-6), -2.0, 2.0)),
+                    "xm_bars_remaining":      float(max(0.0, (32 - bars_held) / 32.0)),
+                }
+                exit_prob = _exit_model.predict(row_ctx, pos_state)
+                LOGGER.debug(
+                    "ExitModel: ticket=%d side=%s rr=%.2f bars=%d prob=%.3f thr=%.2f",
+                    ticket, pos["side"], unrealized_rr, bars_held, exit_prob, _exit_model.threshold,
+                )
+                if exit_prob >= _exit_model.threshold:
+                    executor.close_position(ticket, pos["volume"])
+                    _pnl_str = f"{'+' if unrealized_rr >= 0 else ''}{unrealized_rr:.2f}R"
+                    notifier.send_message(
+                        f"\U0001f3af <b>Exit S\u1edbm #{ticket}</b> ({pos['side'].upper()}) [ExitModel]\n"
+                        f"\u251c X\u00e1c su\u1ea5t \u0111\u1ea3o chi\u1ec1u: <b>{exit_prob:.1%}</b>\n"
+                        f"\u251c Unrealized R:R: <b>{_pnl_str}</b>\n"
+                        f"\u2514 Bars held: {bars_held}"
+                    )
+                    LOGGER.info(
+                        "ExitModel triggered early exit: ticket=%d prob=%.3f rr=%.2f bars=%d",
+                        ticket, exit_prob, unrealized_rr, bars_held,
+                    )
+            except Exception as _pos_err:
+                LOGGER.debug("ExitModel: error processing ticket %s: %s", pos.get("ticket"), _pos_err)
 
     try:
         # ── Đọc public dashboard URL từ tunnel (nếu có) ─────────────────
@@ -629,6 +983,26 @@ def run_live_loop(settings: Settings) -> None:
         )
         while True:
             try:
+                # ── Hot-reload config if YAML file changed ─────────────────────
+                _maybe_reload_config()
+
+                # ── Tunnel URL watcher: notify Telegram when URL changes ───────
+                _tuf = Path("outputs/tunnel_url.txt")
+                if _tuf.exists():
+                    try:
+                        _tuf_mtime = _tuf.stat().st_mtime
+                        if _tuf_mtime > _tunnel_url_mtime:
+                            _tunnel_url_mtime = _tuf_mtime
+                            _new_url = _tuf.read_text(encoding="utf-8").strip()
+                            if _new_url and _new_url != _tunnel_url_sent:
+                                _tunnel_url_sent = _new_url
+                                notifier.send_message(
+                                    f"🌐 <b>Dashboard URL mới</b>\n"
+                                    f"└ {_new_url}"
+                                )
+                    except Exception as _tuf_err:
+                        LOGGER.debug("Tunnel URL watcher error: %s", _tuf_err)
+
                 # ── Reload model nếu background learner vừa train xong ────────
                 if _model_reload_event.is_set():
                     with _model_lock:
@@ -672,83 +1046,13 @@ def run_live_loop(settings: Settings) -> None:
                 latest_row = live_frame.iloc[-1]
                 volatility_regime = int(latest_row["volatility_regime"]) if "volatility_regime" in latest_row.index else 1
                 atr_value = float(latest_row["atr"]) if "atr" in latest_row.index else 0.0
+                # Save fresh context for between-poll close checks
+                _last_row_ctx = latest_row
+                _last_frames_ctx = frames
 
                 # â”€â”€ Loss Learning â€” phÃ¡t hiá»‡n vÃ  phÃ¢n tÃ­ch lá»‡nh thua â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-                if settings.execution.auto_trade:
-                    try:
-                        now_epoch = time.time()
-                        closed = executor.get_recently_closed_positions(
-                            since_epoch=_last_closed_check_epoch - 60,
-                            magic_number=settings.execution.magic_number,
-                        )
-                        _last_closed_check_epoch = now_epoch
-                        for pos in closed:
-                            ticket = pos.get("ticket", 0)
-                            pnl = pos.get("profit", 0) + pos.get("swap", 0) + pos.get("commission", 0)
-                            if ticket in _known_loss_tickets:
-                                continue
-                            _known_loss_tickets.add(ticket)
-                            if pnl < 0:
-                                _accumulated_losses += 1
-                                self_learner._accumulated_losses = _accumulated_losses
-                                LOGGER.warning(
-                                    "LOSS detected ticket=%d side=%s pnl=%.2f",
-                                    ticket, pos.get("side"), pnl,
-                                )
-                                # Run analysis separately — never let it block the notification
-                                _feat: dict = {}
-                                _reasons: list[str] = []
-                                try:
-                                    analysis = self_learner.log_loss_analysis(pos, latest_row)
-                                    _feat = analysis.get("features", {})
-                                    _reasons = analysis.get("reasons", [])
-                                    LOGGER.warning("LOSS reasons: %s", " | ".join(_reasons))
-                                except Exception as _ae:
-                                    LOGGER.error("Loss analysis failed (notification still sent): %s", _ae)
-                                _regime_label = {0: "sideway", 1: "normal", 2: "volatile"}.get(
-                                    int(_feat.get("volatility_regime", 1)), "?"
-                                )
-                                _reasons_text = "\n".join(
-                                    f"  \u2022 {html.escape(str(r))}" for r in _reasons
-                                ) if _reasons else "  • Khong xac dinh ro nguyen nhan"
-                                notifier.send_message(
-                                    f"\u26a0\ufe0f <b>Lenh THUA #{ticket}</b> ({pos.get('side','?').upper()}) \u2014 Loss #{_accumulated_losses}\n"
-                                    f"\u251c P&amp;L: <b>{pnl:.2f}$</b>\n"
-                                    f"\u251c Entry: {pos.get('open_price', 0):.5f} \u2192 Close: {pos.get('close_price', 0):.5f}\n"
-                                    f"\u251c Volume: {pos.get('volume', 0):.2f} lot\n"
-                                    f"\u251c ATR: {_feat.get('atr', 0):.2f} | RSI: {_feat.get('rsi', 0):.1f} | Score: {_feat.get('strategy_score', 0):.3f}\n"
-                                    f"\u251c Regime: {_regime_label} | Trend: {'OK' if int(_feat.get('trend_alignment', 0)) == 1 else 'MISS'}\n"
-                                    f"\u2514 Nguyen nhan:\n{_reasons_text}"
-                                )
-                                _append_live_trade(pos, pnl, is_win=False)
-                            else:
-                                LOGGER.info("Position closed in profit: ticket=%d pnl=%.2f", ticket, pnl)
-                                notifier.send_message(
-                                    f"✅ <b>Lenh THANG #{ticket}</b> ({pos.get('side','?').upper()})\n"
-                                    f"├ P&amp;L: <b>+{pnl:.2f}$</b>\n"
-                                    f"├ Entry: {pos.get('open_price', 0):.5f} → Close: {pos.get('close_price', 0):.5f}\n"
-                                    f"├ Volume: {pos.get('volume', 0):.2f} lot\n"
-                                    f"└ Profit: {pos.get('profit', 0):.2f}$ | Swap: {pos.get('swap', 0):.2f}$ | Comm: {pos.get('commission', 0):.2f}$"
-                                )
-                                _append_live_trade(pos, pnl, is_win=True)
-
-                        # Trigger loss-retrain (song song) sau LOSS_RETRAIN_THRESHOLD lá»‡nh thua
-                        if (
-                            _accumulated_losses >= self_learner.LOSS_RETRAIN_THRESHOLD
-                            and learner_thread is not None
-                        ):
-                            LOGGER.info(
-                                "LossRetrain queued for background thread (losses=%d)", _accumulated_losses
-                            )
-                            learner_thread.submit_loss(_accumulated_losses, frames)
-                            notifier.send_message(
-                                f"🔄 <b>Đang học lại</b> sau {_accumulated_losses} lệnh thua\n"
-                                f"(background – không dừng giao dịch)"
-                            )
-                            _accumulated_losses = 0
-                            self_learner._accumulated_losses = 0
-                    except Exception as loss_err:
-                        LOGGER.error("Loss learning error: %s", loss_err)
+                # -- Loss Learning: detect & notify closed trades immediately
+                _check_closed_positions(latest_row, frames)
 
                 # â”€â”€ Trailing SL â€” dá»‹ch SL cÃ¡c lá»‡nh Ä‘ang má»Ÿ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 if settings.execution.trailing_sl.enabled and settings.execution.auto_trade and atr_value > 0:
@@ -772,6 +1076,9 @@ def run_live_loop(settings: Settings) -> None:
                         LOGGER.error("TrailingSL error: %s", trail_err)
 
                 # â”€â”€ DCA â€” thÃªm lá»‡nh khi giÃ¡ Ä‘i ngÆ°á»£c â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                # Exit Model: check whether open positions should exit early
+                _check_exit_model(latest_row, frames)
+
                 if settings.execution.dca.enabled and settings.execution.auto_trade and atr_value > 0:
                     try:
                         dca_state = _load_dca_state()
@@ -902,8 +1209,11 @@ def run_live_loop(settings: Settings) -> None:
                     "max_positions": max_allowed,
                 }])
                 # Write with header if file is empty/new, append without header otherwise
-                _write_header = not log_path.exists() or log_path.stat().st_size == 0
-                signal_row.to_csv(log_path, mode="a", header=_write_header, index=False)
+                # Skip if same bar was already logged (prevents duplicate on restart)
+                if latest_bar_time != _last_logged_bar_time:
+                    _write_header = not log_path.exists() or log_path.stat().st_size == 0
+                    signal_row.to_csv(log_path, mode="a", header=_write_header, index=False)
+                    _last_logged_bar_time = latest_bar_time
 
                 # ── Ghi live_status.json để dashboard đọc account state realtime ──
                 import datetime as _dtnow
@@ -940,7 +1250,8 @@ def run_live_loop(settings: Settings) -> None:
                                     if _opos["side"] != _opposite:
                                         continue
                                     _opos_pnl = _opos["profit"] + _opos.get("swap", 0)
-                                    if _opos_pnl > 0:
+                                    _min_profit = settings.execution.close_opposite_min_profit
+                                    if _opos_pnl >= _min_profit:
                                         try:
                                             executor.close_position(_opos["ticket"], _opos["volume"])
                                             LOGGER.info(
@@ -966,6 +1277,11 @@ def run_live_loop(settings: Settings) -> None:
                                 account_balance, open_positions + 1, max_allowed,
                                 result,
                             )
+                            # Track RSI at entry for exit model position-state features
+                            _new_ticket = int(result.get("order", 0) or result.get("deal", 0))
+                            if _new_ticket and "rsi" in latest_row.index:
+                                _entry_rsi_tracker[_new_ticket] = float(latest_row.get("rsi", 50.0))
+                                _save_rsi_tracker(_entry_rsi_tracker)
                         except Exception as order_err:
                             LOGGER.error("MT5 order failed: %s", order_err)
                 else:
@@ -977,7 +1293,17 @@ def run_live_loop(settings: Settings) -> None:
             except Exception as loop_err:
                 LOGGER.error("Live loop error (will retry in %ss): %s", settings.app.poll_seconds, loop_err, exc_info=True)
 
-            time.sleep(settings.app.poll_seconds)
+            # -- Sleep in 30s chunks; check for closed trades between polls
+            _close_poll_secs = 30
+            _poll_waited = 0
+            _poll_total = settings.app.poll_seconds
+            while _poll_waited < _poll_total:
+                _chunk = min(_close_poll_secs, _poll_total - _poll_waited)
+                time.sleep(_chunk)
+                _poll_waited += _chunk
+                if _poll_waited < _poll_total:  # avoid double-check at loop start
+                    _check_closed_positions(_last_row_ctx, _last_frames_ctx)
+                    _check_exit_model(_last_row_ctx, _last_frames_ctx)
 
     finally:
         if learner_thread is not None:
