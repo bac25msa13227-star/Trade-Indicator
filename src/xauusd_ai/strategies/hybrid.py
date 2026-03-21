@@ -72,12 +72,43 @@ class HybridStrategy:
         blocked_by_time, blocked_reason = self._blocked_by_time(getattr(row, "time", None))
         if blocked_by_time:
             return False, blocked_reason
-        if probability < self.settings.risk.min_confidence:
-            return False, "confidence_below_floor"
+
+        # Regime-specific confidence thresholds
+        if volatility_regime == 0:
+            min_conf = self.settings.strategy.sideway_min_confidence
+        elif volatility_regime == 2:
+            min_conf = self.settings.strategy.volatile_min_confidence
+        else:
+            min_conf = self.settings.risk.min_confidence
+
+        # Silver Bullet boost: increase effective probability during high-probability windows
+        effective_prob = probability
+        if self.settings.strategy.silver_bullet_enabled:
+            timestamp = getattr(row, "time", None)
+            if timestamp is not None:
+                resolved = timestamp
+                if not isinstance(resolved, (pd.Timestamp, datetime)):
+                    resolved = pd.to_datetime(resolved, utc=True, errors="coerce")
+                if not pd.isna(resolved):
+                    hour = int(resolved.hour)
+                    for window in self.settings.strategy.silver_bullet_windows_utc:
+                        if len(window) == 2 and window[0] <= hour <= window[1]:
+                            effective_prob += self.settings.strategy.silver_bullet_confidence_boost
+                            break
+
+        if effective_prob < min_conf:
+            return False, f"confidence_below_floor ({effective_prob:.3f} < {min_conf:.3f})"
         if self.settings.strategy.require_trend_alignment and trend_alignment != 1:
             return False, "trend_misaligned"
         if strategy_score < self.required_strategy_score(volatility_regime):
             return False, "strategy_score_too_weak"
+
+        # ADX gate: only trade when there's sufficient trend strength
+        if self.settings.strategy.adx_gate_enabled:
+            adx_val = float(getattr(row, "adx", 0.0))
+            if adx_val < self.settings.strategy.adx_min_trend:
+                return False, f"adx_too_low ({adx_val:.1f} < {self.settings.strategy.adx_min_trend})"
+
         return True, "ok"
 
     def annotate_dataset(self, frame: pd.DataFrame) -> pd.DataFrame:

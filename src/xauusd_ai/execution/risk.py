@@ -33,10 +33,18 @@ class OrderPlan:
 
 class RiskManager:
     _PEAK_FILE = Path("outputs/risk_peak_balance.json")
+    _DAILY_STATE_FILE = Path("outputs/risk_daily_state.json")
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self._peak_balance: float = self._load_peak_balance()
+        # Circuit breaker state
+        self._consecutive_losses: int = 0
+        self._cooldown_bars_remaining: int = 0
+        self._daily_loss: float = 0.0
+        self._daily_date: str = ""
+        self._killed: bool = False  # max drawdown kill switch
+        self._load_daily_state()
 
     # ------------------------------------------------------------------
     # Peak balance persistence
@@ -64,6 +72,119 @@ class RiskManager:
             tmp.replace(self._PEAK_FILE)
         except Exception as exc:
             LOGGER.warning("RiskManager: failed to save peak_balance: %s", exc)
+
+    # ------------------------------------------------------------------
+    # Daily state persistence (circuit breaker)
+    # ------------------------------------------------------------------
+    def _load_daily_state(self) -> None:
+        try:
+            if self._DAILY_STATE_FILE.exists():
+                data = json.loads(self._DAILY_STATE_FILE.read_text(encoding="utf-8"))
+                self._daily_date = str(data.get("date", ""))
+                self._daily_loss = float(data.get("daily_loss", 0.0))
+                self._consecutive_losses = int(data.get("consecutive_losses", 0))
+                self._cooldown_bars_remaining = int(data.get("cooldown_bars", 0))
+                self._killed = bool(data.get("killed", False))
+        except Exception:
+            pass
+
+    def _save_daily_state(self) -> None:
+        try:
+            self._DAILY_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self._DAILY_STATE_FILE.with_suffix(".tmp")
+            tmp.write_text(json.dumps({
+                "date": self._daily_date,
+                "daily_loss": round(self._daily_loss, 4),
+                "consecutive_losses": self._consecutive_losses,
+                "cooldown_bars": self._cooldown_bars_remaining,
+                "killed": self._killed,
+            }), encoding="utf-8")
+            tmp.replace(self._DAILY_STATE_FILE)
+        except Exception as exc:
+            LOGGER.warning("RiskManager: failed to save daily state: %s", exc)
+
+    def record_trade_result(self, pnl: float, balance: float) -> None:
+        """Call after each trade closes to update circuit breaker state."""
+        import datetime as _dt
+        today = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d")
+        if today != self._daily_date:
+            self._daily_date = today
+            self._daily_loss = 0.0
+
+        if pnl < 0:
+            self._daily_loss += abs(pnl)
+            self._consecutive_losses += 1
+            # Check consecutive loss cooldown
+            pause_count = self.settings.risk.consecutive_loss_pause_count
+            if pause_count > 0 and self._consecutive_losses >= pause_count:
+                self._cooldown_bars_remaining = self.settings.risk.consecutive_loss_cooldown_bars
+                LOGGER.warning(
+                    "CircuitBreaker: %d consecutive losses → cooldown %d bars",
+                    self._consecutive_losses, self._cooldown_bars_remaining,
+                )
+        else:
+            self._consecutive_losses = 0  # Reset on win
+
+        # Check max drawdown kill switch
+        if self._peak_balance > 0:
+            dd = (self._peak_balance - balance) / self._peak_balance
+            if dd >= self.settings.risk.max_drawdown_kill_pct:
+                self._killed = True
+                LOGGER.critical(
+                    "KILL SWITCH: drawdown %.1f%% exceeds %.1f%% limit — TRADING HALTED",
+                    dd * 100, self.settings.risk.max_drawdown_kill_pct * 100,
+                )
+
+        self._save_daily_state()
+
+    def tick_cooldown(self) -> None:
+        """Call once per bar to decrement cooldown timer."""
+        if self._cooldown_bars_remaining > 0:
+            self._cooldown_bars_remaining -= 1
+            self._save_daily_state()
+
+    def is_circuit_breaker_active(self, balance: float) -> tuple[bool, str]:
+        """Check if any circuit breaker is active. Returns (blocked, reason)."""
+        # Kill switch
+        if self._killed:
+            return True, "KILL_SWITCH: max drawdown exceeded — manual restart required"
+
+        # Daily loss limit
+        limit_pct = self.settings.risk.daily_loss_limit_pct
+        if limit_pct > 0 and self._peak_balance > 0:
+            limit_amount = self._peak_balance * limit_pct
+            if self._daily_loss >= limit_amount:
+                return True, f"DAILY_LOSS_LIMIT: lost ${self._daily_loss:.2f} today (limit ${limit_amount:.2f})"
+
+        # Consecutive loss cooldown
+        if self._cooldown_bars_remaining > 0:
+            return True, f"COOLDOWN: {self._cooldown_bars_remaining} bars remaining after {self._consecutive_losses} consecutive losses"
+
+        return False, "ok"
+
+    def get_anti_martingale_factor(self) -> float:
+        """Returns risk multiplier based on consecutive losses (anti-martingale)."""
+        factor = self.settings.risk.anti_martingale_factor
+        max_reductions = self.settings.risk.anti_martingale_max_reductions
+        if factor >= 1.0 or self._consecutive_losses == 0:
+            return 1.0
+        n = min(self._consecutive_losses, max_reductions)
+        return factor ** n
+
+    def check_total_exposure(
+        self, balance: float, current_risk_amount: float, existing_risk_total: float
+    ) -> tuple[bool, str]:
+        """Check if adding a new trade would exceed total exposure cap."""
+        cap = self.settings.risk.max_total_exposure_pct
+        if cap <= 0:
+            return True, "ok"
+        max_risk = balance * cap
+        if existing_risk_total + current_risk_amount > max_risk:
+            return False, (
+                f"EXPOSURE_CAP: total risk ${existing_risk_total + current_risk_amount:.2f} "
+                f"would exceed {cap*100:.0f}% cap (${max_risk:.2f})"
+            )
+        return True, "ok"
 
     # ------------------------------------------------------------------
     # Dynamic position limit — phụ thuộc balance + market regime
@@ -174,6 +295,11 @@ class RiskManager:
         Trả về (True, 'ok') khi được phép mở lệnh.
         Trả về (False, lý_do) khi bị chặn.
         """
+        # Circuit breaker check (daily loss, kill switch, cooldown)
+        cb_blocked, cb_reason = self.is_circuit_breaker_active(balance)
+        if cb_blocked:
+            return False, cb_reason
+
         if balance < 50:
             return False, f"Balance quá thấp (${balance:.2f}), cần tối thiểu $50"
 
@@ -233,7 +359,10 @@ class RiskManager:
                 # Linearly scale 0.7 (score=0) to 1.0 (score=0.5)
                 score_multiplier = 0.7 + 0.6 * abs_score
 
-        return min(base_fraction * regime_multiplier * score_multiplier, self.settings.risk.max_risk_fraction)
+        # Anti-martingale: reduce risk after consecutive losses
+        anti_mart = self.get_anti_martingale_factor()
+
+        return min(base_fraction * regime_multiplier * score_multiplier * anti_mart, self.settings.risk.max_risk_fraction)
 
     # ------------------------------------------------------------------
     # Build order plan with dynamic sizing

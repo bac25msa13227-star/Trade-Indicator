@@ -14,6 +14,7 @@ from xauusd_ai.features.indicators import (
     adx, obv_slope, candle_body_ratio, price_roc,
     pullback_depth, atr_expansion, wick_rejection,
     volume_surge, close_position_in_range, macd_hist_acceleration,
+    volume_delta_momentum, institutional_candle_score, swing_failure_pattern,
 )
 
 
@@ -81,6 +82,10 @@ FEATURE_COLUMNS = [
     "volume_surge",         # Volume / 20-bar avg — confirms moves
     "close_in_range",       # Close position in bar range 0=low 1=high
     "macd_accel",           # MACD histogram acceleration — turning points
+    # --- v4: Institutional Order Flow & Smart Money (3) ---
+    "vol_delta_momentum",   # Bookmap-inspired volume delta momentum
+    "inst_candle_score",    # Institutional candle detection score -1..+1
+    "swing_failure",        # ICT Swing Failure Pattern +1=bullish -1=bearish
 ]
 
 
@@ -133,16 +138,10 @@ def _enrich_execution_frame(settings: Settings, frame: pd.DataFrame) -> pd.DataF
     hour = enriched["time"].dt.hour + enriched["time"].dt.minute / 60.0
     enriched["time_hour_sin"] = np.sin(2 * np.pi * hour / 24.0)
     enriched["time_hour_cos"] = np.cos(2 * np.pi * hour / 24.0)
-    # ATR percentile: current volatility rank in rolling window (vectorized)
-    _atr = enriched["atr"].values
+    # ATR percentile: current volatility rank in rolling window (vectorized using pandas)
+    _atr_s = enriched["atr"]
     _window = 100
-    _min_p = 20
-    _pct = np.full(len(_atr), np.nan)
-    for i in range(_min_p, len(_atr)):
-        start = max(0, i - _window + 1)
-        w = _atr[start:i + 1]
-        _pct[i] = np.sum(w <= _atr[i]) / len(w)
-    enriched["atr_percentile"] = pd.Series(_pct, index=enriched.index).fillna(0.5)
+    enriched["atr_percentile"] = _atr_s.rolling(_window, min_periods=20).rank(pct=True).fillna(0.5)
     # v3: Microstructure & momentum quality features
     enriched["pullback_depth"] = pullback_depth(enriched, trend_lookback=50)
     enriched["atr_expansion"] = atr_expansion(enriched, fast=7, slow=28)
@@ -150,6 +149,10 @@ def _enrich_execution_frame(settings: Settings, frame: pd.DataFrame) -> pd.DataF
     enriched["volume_surge"] = volume_surge(enriched, lookback=20)
     enriched["close_in_range"] = close_position_in_range(enriched)
     enriched["macd_accel"] = macd_hist_acceleration(enriched["close"])
+    # v4: Institutional Order Flow & Smart Money features
+    enriched["vol_delta_momentum"] = volume_delta_momentum(enriched, fast=5, slow=20)
+    enriched["inst_candle_score"] = institutional_candle_score(enriched, lookback=14)
+    enriched["swing_failure"] = swing_failure_pattern(enriched, lookback=20)
     return enriched
 
 

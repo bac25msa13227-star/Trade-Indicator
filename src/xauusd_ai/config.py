@@ -81,6 +81,18 @@ class StrategySettings(BaseModel):
     blocked_weekdays_utc: list[str] = Field(default_factory=list)
     blocked_weekday_hours_utc: dict[str, list[int]] = Field(default_factory=dict)
     allowed_weekday_hours_utc: dict[str, list[int]] = Field(default_factory=dict)
+    # Silver Bullet session windows — high-probability ICT timing (UTC)
+    silver_bullet_enabled: bool = False
+    silver_bullet_windows_utc: list[list[int]] = Field(
+        default_factory=lambda: [[3, 4], [10, 11], [14, 15]]  # Asian, London, NY
+    )
+    silver_bullet_confidence_boost: float = 0.05  # Boost confidence by 5% during SB windows
+    # ADX gate — only trade when trend strength is sufficient
+    adx_gate_enabled: bool = False
+    adx_min_trend: float = 20.0  # Minimum ADX value to allow entry
+    # Regime-specific confidence thresholds (override min_confidence per regime)
+    sideway_min_confidence: float = 0.65    # Higher bar in choppy markets
+    volatile_min_confidence: float = 0.60   # Moderate bar in volatile markets
 
 
 class RiskSettings(BaseModel):
@@ -120,6 +132,23 @@ class RiskSettings(BaseModel):
     # max_spread_points:  max allowed spread in price points for live order (0=disabled)
     #   XAUUSD ~30 pts normal; reject if > 80 pts (news/off-hours)
     max_spread_points: float = 0.0
+    # ── Circuit breaker & capital preservation ─────────────────────
+    # Daily loss limit: stop trading when cumulative daily loss exceeds N% of starting balance
+    daily_loss_limit_pct: float = 0.08    # 8% max daily loss → stop all trading today
+    # Max drawdown kill switch: halt trading when drawdown from peak exceeds this
+    max_drawdown_kill_pct: float = 0.20   # 20% drawdown → full stop (manual restart needed)
+    # Consecutive loss cooldown: skip N bars after M consecutive losses
+    consecutive_loss_pause_count: int = 3  # After 3 consecutive losses...
+    consecutive_loss_cooldown_bars: int = 8  # ...wait 8 bars (2h on M15) before resuming
+    # Anti-martingale: reduce risk_per_trade by this factor after each consecutive loss
+    anti_martingale_factor: float = 0.6    # risk *= 0.6 per consecutive loss (compounds)
+    anti_martingale_max_reductions: int = 3  # Max 3 reductions (0.6^3 = 21.6% of base)
+    # Total exposure cap: max % of balance at risk across all open positions
+    max_total_exposure_pct: float = 0.12   # 12% total risk across all open positions
+    # ── Partial Take Profit ────────────────────────────────────────
+    partial_tp_enabled: bool = False
+    partial_tp_rr: float = 1.0             # Close partial_tp_pct at 1R profit
+    partial_tp_pct: float = 0.5            # Close 50% of position at partial_tp_rr
 
 
 class TrailingSlSettings(BaseModel):

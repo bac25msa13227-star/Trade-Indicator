@@ -4,7 +4,7 @@
 # Symbol: XAUUSDm  |  Threshold: 0.55  |  Risk: 3-5% dynamic
 # ─────────────────────────────────────────────────────────────────
 app:
-  poll_seconds: 300
+  poll_seconds: 120
   model_path:          outputs/model2_weekly500.pkl
   scaler_path:         outputs/scaler2_weekly500.pkl
   model_meta_path:     outputs/model_meta2_weekly500.json
@@ -58,19 +58,30 @@ strategy:
   ict_weight: 0.40
   wyckoff_weight: 0.35
   momentum_weight: 0.25
-  min_strategy_score: 0.05
-  sideway_min_strategy_score: 0.05
-  strong_volatility_min_strategy_score: 0.10
+  min_strategy_score: 0.10           # Tăng từ 0.05 → filter yếu hơn bị loại
+  sideway_min_strategy_score: 0.15   # Tăng từ 0.05 → chỉ trade sideway khi score rõ ràng
+  strong_volatility_min_strategy_score: 0.12  # Tăng từ 0.10
   require_trend_alignment: false    # Tắt — model confidence là cổng chính cho hướng
   force_trade: false
-  blocked_hours_utc: []             # ACC2: không block giờ nào
+  blocked_hours_utc: [22, 23]       # Block rollover (spread rộng nhất)
   blocked_weekdays_utc: []
-  blocked_weekday_hours_utc: {}
+  blocked_weekday_hours_utc:
+    Friday: [20, 21, 22, 23]         # Block cuối tuần (spread + slippage cao)
+  # Silver Bullet ICT windows
+  silver_bullet_enabled: true
+  silver_bullet_windows_utc: [[3, 4], [10, 11], [14, 15]]
+  silver_bullet_confidence_boost: 0.03
+  # ADX trend gate
+  adx_gate_enabled: true
+  adx_min_trend: 18.0               # Chỉ trade khi có xu hướng đủ rõ
+  # Regime-specific confidence
+  sideway_min_confidence: 0.65       # Cao hơn cho thị trường sideway
+  volatile_min_confidence: 0.60
 
 risk:
   mode: fixed_fractional
-  risk_per_trade: 0.05              # 5% max — dynamic (giảm dần khi drawdown)
-  risk_tier_floor: 0.03             # 3% floor khi drawdown >= 10%
+  risk_per_trade: 0.03              # 3% base — safer than 5%, still aggressive
+  risk_tier_floor: 0.015            # 1.5% floor khi drawdown >= 10%
   max_open_positions: 3             # giới hạn concurrent
   stop_loss_atr_multiple: 1.5
   take_profit_rr: 3.5              # ACC2 Model2: RR 1:3.5
@@ -78,10 +89,22 @@ risk:
   sideway_take_profit_rr: 2.5      # Sideways regime RR 1:2.5
   min_confidence: 0.55
   fixed_lot: 0.01
-  max_risk_fraction: 0.08          # 8% cap tổng risk
-  sideway_risk_multiplier: 0.5
+  max_risk_fraction: 0.05           # 5% cap tổng risk per trade (was 8%)
+  sideway_risk_multiplier: 0.4      # Giảm risk trong sideway
   normal_risk_multiplier: 1.0
-  strong_volatility_risk_multiplier: 0.8
+  strong_volatility_risk_multiplier: 0.65
+  # Circuit breaker & Capital Preservation
+  daily_loss_limit_pct: 0.06        # 6% max daily loss → stop all trading
+  max_drawdown_kill_pct: 0.15       # 15% drawdown → full stop (manual restart)
+  consecutive_loss_pause_count: 3    # After 3 consecutive losses...
+  consecutive_loss_cooldown_bars: 8  # ...wait 8 bars (2h M15) before resuming
+  anti_martingale_factor: 0.6        # Risk × 0.6 per consecutive loss
+  anti_martingale_max_reductions: 3  # Max 3 reductions (down to ~21% of base risk)
+  max_total_exposure_pct: 0.09       # 9% max total risk across all open positions
+  # Partial Take Profit
+  partial_tp_enabled: true
+  partial_tp_rr: 1.0                # Close 50% at 1R profit
+  partial_tp_pct: 0.5               # Close 50% of position
 
 execution:
   auto_trade: true

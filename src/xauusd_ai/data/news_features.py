@@ -284,6 +284,8 @@ def fetch_finnhub_calendar(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFra
         else:
             LOGGER.info("Finnhub: fetching year %d from API...", year)
             raw = _fetch_finnhub_year(key, year)
+            if _finnhub_disabled:
+                break  # 403/401 received — stop trying remaining years
             if raw:
                 _save_finnhub_cache(year, raw)
             df_y = _finnhub_to_df(raw)
@@ -525,8 +527,18 @@ def attach_news_features(
             df[col] = val
         return df
 
-    bar_ns  = df["time"].values.astype("int64")
-    hi_ns   = hi["datetime_utc"].values.astype("int64")
+    # Reliably convert to epoch nanoseconds regardless of pandas version.
+    # pandas 2.x stores tz-aware datetimes as datetime64[us], so
+    # `.values.astype("int64")` returns MICROSECONDS — off by 1000x from
+    # ns_bo, causing all bars to fall inside the blackout window.
+    # Fix: strip tz first, then force datetime64[ns] resolution before view.
+    def _to_epoch_ns(s: pd.Series) -> np.ndarray:
+        if s.dt.tz is not None:
+            s = s.dt.tz_convert("UTC").dt.tz_localize(None)
+        return s.values.astype("datetime64[ns]").view("int64")
+
+    bar_ns  = _to_epoch_ns(df["time"])
+    hi_ns   = _to_epoch_ns(hi["datetime_utc"])
     hi_gold = hi["gold_direction"].fillna(0).astype(int).values
 
     NS    = int(3_600_000_000_000)

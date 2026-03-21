@@ -438,3 +438,73 @@ def macd_hist_acceleration(
     _, _, hist = macd(series, fast, slow, signal)
     return hist.diff().fillna(0)
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# v4 Indicators — Institutional Order Flow & Smart Money
+# ─────────────────────────────────────────────────────────────────────────────
+
+def volume_delta_momentum(frame: pd.DataFrame, fast: int = 5, slow: int = 20) -> pd.Series:
+    """Bookmap-inspired: volume delta smoothed momentum.
+    Estimates buy/sell pressure from candle structure × volume.
+    Positive = buying pressure accelerating; Negative = selling pressure."""
+    vol = frame.get("tick_volume", frame.get("volume", pd.Series(0, index=frame.index)))
+    bar_range = (frame["high"] - frame["low"]).replace(0, np.nan)
+    # Estimate buy volume fraction from close position in range
+    buy_pct = ((frame["close"] - frame["low"]) / bar_range).fillna(0.5)
+    sell_pct = 1.0 - buy_pct
+    delta = (buy_pct - sell_pct) * vol
+    fast_ma = delta.rolling(fast).mean()
+    slow_ma = delta.rolling(slow).mean().replace(0, np.nan)
+    return ((fast_ma - slow_ma) / slow_ma.abs().clip(lower=1)).fillna(0).clip(-3, 3)
+
+
+def institutional_candle_score(frame: pd.DataFrame, lookback: int = 14) -> pd.Series:
+    """Detects institutional activity from candle patterns:
+    - Large body + above-average volume + closing near extreme = institutional move
+    - Score: -1 to +1 (positive = bullish institutional, negative = bearish)"""
+    body = (frame["close"] - frame["open"])
+    body_abs = body.abs()
+    avg_body = body_abs.rolling(lookback).mean()
+    vol = frame.get("tick_volume", frame.get("volume", pd.Series(0, index=frame.index)))
+    avg_vol = vol.rolling(lookback).mean().replace(0, np.nan)
+    bar_range = (frame["high"] - frame["low"]).replace(0, np.nan)
+
+    # Body strength (how much of the candle is body)
+    body_ratio = (body_abs / bar_range).fillna(0)
+    # Volume conviction (is this move backed by volume)
+    vol_ratio = (vol / avg_vol).fillna(1).clip(0, 5)
+    # Size relative to average (is this an outsized move)
+    size_ratio = (body_abs / avg_body.replace(0, np.nan)).fillna(1).clip(0, 5)
+
+    # Combine: direction × body_quality × volume_conviction × size
+    direction = np.sign(body)
+    raw_score = direction * body_ratio * np.minimum(vol_ratio, 2.0) * np.minimum(size_ratio, 2.0)
+    return raw_score.fillna(0).clip(-1, 1)
+
+
+def swing_failure_pattern(frame: pd.DataFrame, lookback: int = 20) -> pd.Series:
+    """ICT Swing Failure Pattern (SFP): price sweeps a high/low then reverses.
+    More reliable than simple liquidity sweep — requires close back inside range.
+    +1 = bullish SFP (swept lows, reversed up)
+    -1 = bearish SFP (swept highs, reversed down)"""
+    swing_high = frame["high"].rolling(lookback).max().shift(1)
+    swing_low = frame["low"].rolling(lookback).min().shift(1)
+
+    # Bullish SFP: low penetrates swing low but close is ABOVE swing low AND above open
+    bullish_sfp = (
+        (frame["low"] < swing_low) &
+        (frame["close"] > swing_low) &
+        (frame["close"] > frame["open"]) &
+        (frame["close"] > frame["low"] + (frame["high"] - frame["low"]) * 0.5)  # closes in upper half
+    ).astype(int)
+
+    # Bearish SFP: high penetrates swing high but close is BELOW swing high AND below open
+    bearish_sfp = (
+        (frame["high"] > swing_high) &
+        (frame["close"] < swing_high) &
+        (frame["close"] < frame["open"]) &
+        (frame["close"] < frame["low"] + (frame["high"] - frame["low"]) * 0.5)  # closes in lower half
+    ).astype(int)
+
+    return (bullish_sfp - bearish_sfp).fillna(0).astype(int)
+

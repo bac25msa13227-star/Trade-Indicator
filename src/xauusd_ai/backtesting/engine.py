@@ -189,9 +189,21 @@ def simulate_dynamic_concurrent_backtest(
     losses = 0
     skipped_by_filters = 0
     skipped_no_slot = 0
+    skipped_circuit_breaker = 0  # NEW: track circuit breaker blocks
 
     balance_history: list[float] = [balance]
     max_concurrent_seen = 0
+
+    # Circuit breaker state for backtest realism
+    _consecutive_losses = 0
+    _cooldown_remaining = 0
+    _daily_loss = 0.0
+    _current_date = ""
+    _anti_mart_factor = float(getattr(settings.risk, "anti_martingale_factor", 0.6))
+    _anti_mart_max = int(getattr(settings.risk, "anti_martingale_max_reductions", 3))
+    _pause_count = int(getattr(settings.risk, "consecutive_loss_pause_count", 3))
+    _cooldown_bars = int(getattr(settings.risk, "consecutive_loss_cooldown_bars", 8))
+    _daily_limit = float(getattr(settings.risk, "daily_loss_limit_pct", 0.0))
 
     for i, row in enumerate(test_rows.itertuples(index=False)):
         # ── close matured positions ────────────────────────────────────────
@@ -210,13 +222,39 @@ def simulate_dynamic_concurrent_backtest(
                 trades.append(entry["meta"])
                 if pnl > 0:
                     wins += 1
+                    _consecutive_losses = 0  # Reset on win
                 elif pnl < 0:
                     losses += 1
+                    _consecutive_losses += 1
+                    _daily_loss += abs(pnl)
+                    # Trigger cooldown after N consecutive losses
+                    if _pause_count > 0 and _consecutive_losses >= _pause_count:
+                        _cooldown_remaining = _cooldown_bars
             else:
                 still_pending.append(entry)
         pending = still_pending
 
+        # ── Cooldown tick ──────────────────────────────────────────────────
+        if _cooldown_remaining > 0:
+            _cooldown_remaining -= 1
+
+        # ── Daily loss reset ───────────────────────────────────────────────
+        _row_date = str(getattr(row, "time", ""))[:10]
+        if _row_date != _current_date:
+            _current_date = _row_date
+            _daily_loss = 0.0
+
         if row.prediction == 0:
+            balance_history.append(balance)
+            continue
+
+        # ── circuit breaker gates ──────────────────────────────────────────
+        if _cooldown_remaining > 0:
+            skipped_circuit_breaker += 1
+            balance_history.append(balance)
+            continue
+        if _daily_limit > 0 and peak_balance > 0 and _daily_loss >= peak_balance * _daily_limit:
+            skipped_circuit_breaker += 1
             balance_history.append(balance)
             continue
 
@@ -251,6 +289,11 @@ def simulate_dynamic_concurrent_backtest(
                 rf = rf_base            # < 3% drawdown: full risk
         else:
             rf = rf_base
+
+        # Anti-martingale: reduce risk after consecutive losses
+        if _anti_mart_factor < 1.0 and _consecutive_losses > 0:
+            _n_reductions = min(_consecutive_losses, _anti_mart_max)
+            rf *= _anti_mart_factor ** _n_reductions
         # compound=False: always use starting balance -> linear expectancy (no explosion).
         effective_bal = balance if compound else start_bal
         # Apply compound cap: prevent unrealistic exponential growth
@@ -376,6 +419,7 @@ def simulate_dynamic_concurrent_backtest(
         "sharpe_like": round(sharpe, 4),
         "signals_filtered_out": skipped_by_filters,
         "signals_no_slot": skipped_no_slot,
+        "signals_circuit_breaker": skipped_circuit_breaker,
         "max_concurrent_positions": max_concurrent_seen,
         "avg_concurrent_positions": round(avg_concurrent, 2),
         "position_tier_breakdown": tier_breakdown,

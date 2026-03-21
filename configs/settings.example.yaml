@@ -69,6 +69,16 @@ strategy:
     Tuesday: [16, 18]
     Wednesday: [5, 8, 9]
     Monday: [18]
+  # Silver Bullet ICT windows (UTC) — high-probability session timing
+  silver_bullet_enabled: false
+  silver_bullet_windows_utc: [[3, 4], [10, 11], [14, 15]]
+  silver_bullet_confidence_boost: 0.03
+  # ADX trend gate — only enter when trend is clear
+  adx_gate_enabled: false
+  adx_min_trend: 20.0
+  # Regime-specific confidence thresholds
+  sideway_min_confidence: 0.65
+  volatile_min_confidence: 0.60
 
 risk:
   mode: fixed_fractional
@@ -82,6 +92,18 @@ risk:
   sideway_risk_multiplier: 0.3
   normal_risk_multiplier: 0.9
   strong_volatility_risk_multiplier: 0.55
+  # Circuit Breaker & Capital Preservation
+  daily_loss_limit_pct: 0.08     # 8% max daily loss → stop all trading
+  max_drawdown_kill_pct: 0.20    # 20% drawdown → halt (manual restart)
+  consecutive_loss_pause_count: 3
+  consecutive_loss_cooldown_bars: 8
+  anti_martingale_factor: 0.6
+  anti_martingale_max_reductions: 3
+  max_total_exposure_pct: 0.12
+  # Partial Take Profit
+  partial_tp_enabled: false
+  partial_tp_rr: 1.0
+  partial_tp_pct: 0.5
 
 execution:
   auto_trade: false

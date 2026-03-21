@@ -1,0 +1,1381 @@
+{
+  "walk_forward": {
+    "train_bars": 30000,
+    "test_bars": 4000,
+    "step_bars": 4000,
+    "n_folds": 17,
+    "features": [
+      "daily_bias",
+      "h4_bos",
+      "h4_choch",
+      "h4_fvg",
+      "h4_order_block",
+      "h4_displacement",
+      "h4_ehl",
+      "h4_market_structure_bias",
+      "h4_ict_confluence",
+      "h4_premium_discount",
+      "hourly_bias",
+      "vsa_signal",
+      "wyckoff_spring_signal",
+      "trend_alignment",
+      "rsi",
+      "macd_hist",
+      "atr_ratio",
+      "range_efficiency",
+      "liquidity_sweep",
+      "order_flow_proxy",
+      "wyckoff_phase",
+      "volatility_regime",
+      "session_return",
+      "tick_volume_zscore",
+      "spread_points",
+      "strategy_score",
+      "kill_zone_flag",
+      "judas_swing_signal",
+      "news_impact_ahead",
+      "news_hours_ahead",
+      "news_hours_since",
+      "news_surprise_gold",
+      "news_is_blackout",
+      "bb_position",
+      "stoch_k",
+      "stoch_kd_diff",
+      "rsi_slope",
+      "price_vs_h4_sma",
+      "adx",
+      "candle_body_ratio",
+      "obv_slope",
+      "price_roc",
+      "multi_tf_consensus",
+      "h4_h1_bias_agree",
+      "atr_percentile",
+      "time_hour_sin",
+      "time_hour_cos",
+      "pullback_depth",
+      "atr_expansion",
+      "wick_rejection",
+      "volume_surge",
+      "close_in_range",
+      "macd_accel"
+    ],
+    "model": "Ensemble(HGB+RF+ET, weights=3:2:1, feature_sel=top70%) | 53 features"
+  },
+  "aggregate": {
+    "avg_roc_auc": 0.5972,
+    "std_roc_auc": 0.0213,
+    "min_roc_auc": 0.5577,
+    "max_roc_auc": 0.6394,
+    "avg_precision": 0.6455,
+    "std_precision": 0.0739,
+    "min_precision": 0.5327,
+    "max_precision": 0.7929,
+    "avg_recall": 0.1725,
+    "avg_f1": 0.2622,
+    "avg_accuracy": 0.6037,
+    "avg_signal_rate": 0.1188,
+    "signal_win_rate": 0.6327,
+    "total_signals": 8076,
+    "correct_signals": 5110,
+    "concurrent_sim": {
+      "avg_win_rate": 0.6287,
+      "avg_profit_factor": 1.5357,
+      "avg_return_pct": 384.7,
+      "avg_max_drawdown_pct": -40.22,
+      "avg_concurrent_positions": 1.52,
+      "max_concurrent_positions": 3
+    }
+  },
+  "folds": [
+    {
+      "fold": 1,
+      "train_start": "2021-12-13",
+      "train_end": "2023-03-22",
+      "test_start": "2023-03-22",
+      "test_end": "2023-05-23",
+      "train_rows": 30000,
+      "test_rows": 4000,
+      "threshold": 0.78,
+      "roc_auc": 0.6183,
+      "precision": 0.6245,
+      "recall": 0.1021,
+      "f1": 0.1756,
+      "accuracy": 0.6525,
+      "n_signals": 237,
+      "signal_rate": 0.0592,
+      "elapsed_s": 669.1,
+      "rr_sweep": {
+        "1.8": {
+          "final_balance": 31550.93,
+          "win_rate": 0.6245,
+          "ev_per_trade": 0.5785,
+          "trades": 237
+        },
+        "2.0": {
+          "final_balance": 46736.8,
+          "win_rate": 0.6245,
+          "ev_per_trade": 0.7034,
+          "trades": 237
+        },
+        "2.2": {
+          "final_balance": 61391.68,
+          "win_rate": 0.6245,
+          "ev_per_trade": 0.8283,
+          "trades": 237
+        },
+        "2.5": {
+          "final_balance": 84151.01,
+          "win_rate": 0.6245,
+          "ev_per_trade": 1.0157,
+          "trades": 237
+        },
+        "3.0": {
+          "final_balance": 120584.57,
+          "win_rate": 0.6245,
+          "ev_per_trade": 1.3279,
+          "trades": 237
+        },
+        "3.5": {
+          "final_balance": 157193.19,
+          "win_rate": 0.6245,
+          "ev_per_trade": 1.6401,
+          "trades": 237
+        }
+      },
+      "concurrent_sim": {
+        "starting_balance": 200.0,
+        "ending_balance": 243.79,
+        "return_pct": 21.89,
+        "trades": 114,
+        "wins": 64,
+        "losses": 50,
+        "win_rate": 0.5614,
+        "profit_factor": 1.103,
+        "max_drawdown_pct": -40.88,
+        "max_concurrent_positions": 2,
+        "avg_concurrent_positions": 1.41,
+        "position_tier_breakdown": {
+          "<$500 (3 slots)": 114
+        }
+      }
+    },
+    {
+      "fold": 2,
+      "train_start": "2022-02-14",
+      "train_end": "2023-05-23",
+      "test_start": "2023-05-23",
+      "test_end": "2023-07-24",
+      "train_rows": 30000,
+      "test_rows": 4000,
+      "threshold": 0.8,
+      "roc_auc": 0.6035,
+      "precision": 0.5885,
+      "recall": 0.0848,
+      "f1": 0.1483,
+      "accuracy": 0.618,
+      "n_signals": 226,
+      "signal_rate": 0.0565,
+      "elapsed_s": 602.1,
+      "rr_sweep": {
+        "1.8": {
+          "final_balance": 82965.93,
+          "win_rate": 0.5885,
+          "ev_per_trade": 0.4778,
+          "trades": 226
+        },
+        "2.0": {
+          "final_balance": 111451.8,
+          "win_rate": 0.5885,
+          "ev_per_trade": 0.5955,
+          "trades": 226
+        },
+        "2.2": {
+          "final_balance": 139406.68,
+          "win_rate": 0.5885,
+          "ev_per_trade": 0.7132,
+          "trades": 226
+        },
+        "2.5": {
+          "final_balance": 182116.01,
+          "win_rate": 0.5885,
+          "ev_per_trade": 0.8897,
+          "trades": 226
+        },
+        "3.0": {
+          "final_balance": 251799.57,
+          "win_rate": 0.5885,
+          "ev_per_trade": 1.184,
+          "trades": 226
+        },
+        "3.5": {
+          "final_balance": 321658.19,
+          "win_rate": 0.5885,
+          "ev_per_trade": 1.4782,
+          "trades": 226
+        }
+      },
+      "concurrent_sim": {
+        "starting_balance": 200.0,
+        "ending_balance": 383.59,
+        "return_pct": 91.8,
+        "trades": 80,
+        "wins": 49,
+        "losses": 31,
+        "win_rate": 0.6125,
+        "profit_factor": 1.397,
+        "max_drawdown_pct": -28.82,
+        "max_concurrent_positions": 2,
+        "avg_concurrent_positions": 1.5,
+        "position_tier_breakdown": {
+          "<$500 (3 slots)": 80
+        }
+      }
+    },
+    {
+      "fold": 3,
+      "train_start": "2022-04-18",
+      "train_end": "2023-07-24",
+      "test_start": "2023-07-24",
+      "test_end": "2023-09-22",
+      "train_rows": 30000,
+      "test_rows": 4000,
+      "threshold": 0.8,
+      "roc_auc": 0.5795,
+      "precision": 0.5729,
+      "recall": 0.1018,
+      "f1": 0.1729,
+      "accuracy": 0.6052,
+      "n_signals": 288,
+      "signal_rate": 0.072,
+      "elapsed_s": 648.1,
+      "rr_sweep": {
+        "1.8": {
+          "final_balance": 142750.93,
+          "win_rate": 0.5729,
+          "ev_per_trade": 0.4342,
+          "trades": 288
+        },
+        "2.0": {
+          "final_balance": 187736.8,
+          "win_rate": 0.5729,
+          "ev_per_trade": 0.5487,
+          "trades": 288
+        },
+        "2.2": {
+          "final_balance": 232191.68,
+          "win_rate": 0.5729,
+          "ev_per_trade": 0.6633,
+          "trades": 288
+        },
+        "2.5": {
+          "final_balance": 299651.01,
+          "win_rate": 0.5729,
+          "ev_per_trade": 0.8352,
+          "trades": 288
+        },
+        "3.0": {
+          "final_balance": 410584.57,
+          "win_rate": 0.5729,
+          "ev_per_trade": 1.1217,
+          "trades": 288
+        },
+        "3.5": {
+          "final_balance": 521693.19,
+          "win_rate": 0.5729,
+          "ev_per_trade": 1.4081,
+          "trades": 288
+        }
+      },
+      "concurrent_sim": {
+        "starting_balance": 200.0,
+        "ending_balance": 586.69,
+        "return_pct": 193.35,
+        "trades": 156,
+        "wins": 95,
+        "losses": 61,
+        "win_rate": 0.609,
+        "profit_factor": 1.4204,
+        "max_drawdown_pct": -41.01,
+        "max_concurrent_positions": 2,
+        "avg_concurrent_positions": 1.47,
+        "position_tier_breakdown": {
+          "<$500 (3 slots)": 126,
+          "$500-$2k (5 slots)": 30
+        }
+      }
+    },
+    {
+      "fold": 4,
+      "train_start": "2022-06-16",
+      "train_end": "2023-09-22",
+      "test_start": "2023-09-22",
+      "test_end": "2023-11-22",
+      "train_rows": 30000,
+      "test_rows": 4000,
+      "threshold": 0.8,
+      "roc_auc": 0.5715,
+      "precision": 0.7538,
+      "recall": 0.1009,
+      "f1": 0.1779,
+      "accuracy": 0.5473,
+      "n_signals": 260,
+      "signal_rate": 0.065,
+      "elapsed_s": 807.0,
+      "rr_sweep": {
+        "1.8": {
+          "final_balance": 262175.93,
+          "win_rate": 0.7538,
+          "ev_per_trade": 0.9408,
+          "trades": 260
+        },
+        "2.0": {
+          "final_balance": 326761.8,
+          "win_rate": 0.7538,
+          "ev_per_trade": 1.0915,
+          "trades": 260
+        },
+        "2.2": {
+          "final_balance": 390816.68,
+          "win_rate": 0.7538,
+          "ev_per_trade": 1.2423,
+          "trades": 260
+        },
+        "2.5": {
+          "final_balance": 487676.01,
+          "win_rate": 0.7538,
+          "ev_per_trade": 1.4685,
+          "trades": 260
+        },
+        "3.0": {
+          "final_balance": 647609.57,
+          "win_rate": 0.7538,
+          "ev_per_trade": 1.8454,
+          "trades": 260
+        },
+        "3.5": {
+          "final_balance": 807718.19,
+          "win_rate": 0.7538,
+          "ev_per_trade": 2.2223,
+          "trades": 260
+        }
+      },
+      "concurrent_sim": {
+        "starting_balance": 200.0,
+        "ending_balance": 1665.5,
+        "return_pct": 732.75,
+        "trades": 114,
+        "wins": 82,
+        "losses": 32,
+        "win_rate": 0.7193,
+        "profit_factor": 2.0999,
+        "max_drawdown_pct": -29.52,
+        "max_concurrent_positions": 2,
+        "avg_concurrent_positions": 1.48,
+        "position_tier_breakdown": {
+          "<$500 (3 slots)": 36,
+          "$500-$2k (5 slots)": 78
+        }
+      }
+    },
+    {
+      "fold": 5,
+      "train_start": "2022-08-17",
+      "train_end": "2023-11-22",
+      "test_start": "2023-11-22",
+      "test_end": "2024-01-25",
+      "train_rows": 30000,
+      "test_rows": 4000,
+      "threshold": 0.8,
+      "roc_auc": 0.583,
+      "precision": 0.7929,
+      "recall": 0.0675,
+      "f1": 0.1244,
+      "accuracy": 0.6095,
+      "n_signals": 140,
+      "signal_rate": 0.035,
+      "elapsed_s": 336.9,
+      "rr_sweep": {
+        "1.8": {
+          "final_balance": 334835.93,
+          "win_rate": 0.7929,
+          "ev_per_trade": 1.05,
+          "trades": 140
+        },
+        "2.0": {
+          "final_balance": 410521.8,
+          "win_rate": 0.7929,
+          "ev_per_trade": 1.2086,
+          "trades": 140
+        },
+        "2.2": {
+          "final_balance": 485676.68,
+          "win_rate": 0.7929,
+          "ev_per_trade": 1.3671,
+          "trades": 140
+        },
+        "2.5": {
+          "final_balance": 599186.01,
+          "win_rate": 0.7929,
+          "ev_per_trade": 1.605,
+          "trades": 140
+        },
+        "3.0": {
+          "final_balance": 786869.57,
+          "win_rate": 0.7929,
+          "ev_per_trade": 2.0014,
+          "trades": 140
+        },
+        "3.5": {
+          "final_balance": 974728.19,
+          "win_rate": 0.7929,
+          "ev_per_trade": 2.3979,
+          "trades": 140
+        }
+      },
+      "concurrent_sim": {
+        "starting_balance": 200.0,
+        "ending_balance": 786.84,
+        "return_pct": 293.42,
+        "trades": 75,
+        "wins": 54,
+        "losses": 21,
+        "win_rate": 0.72,
+        "profit_factor": 2.0984,
+        "max_drawdown_pct": -15.19,
+        "max_concurrent_positions": 2,
+        "avg_concurrent_positions": 1.41,
+        "position_tier_breakdown": {
+          "<$500 (3 slots)": 51,
+          "$500-$2k (5 slots)": 24
+        }
+      }
+    },
+    {
+      "fold": 6,
+      "train_start": "2022-10-18",
+      "train_end": "2024-01-25",
+      "test_start": "2024-01-25",
+      "test_end": "2024-03-27",
+      "train_rows": 30000,
+      "test_rows": 4000,
+      "threshold": 0.8,
+      "roc_auc": 0.6013,
+      "precision": 0.6071,
+      "recall": 0.0844,
+      "f1": 0.1481,
+      "accuracy": 0.609,
+      "n_signals": 224,
+      "signal_rate": 0.056,
+      "elapsed_s": 252.6,
+      "rr_sweep": {
+        "1.8": {
+          "final_balance": 392150.93,
+          "win_rate": 0.6071,
+          "ev_per_trade": 0.53,
+          "trades": 224
+        },
+        "2.0": {
+          "final_balance": 481436.8,
+          "win_rate": 0.6071,
+          "ev_per_trade": 0.6514,
+          "trades": 224
+        },
+        "2.2": {
+          "final_balance": 570191.68,
+          "win_rate": 0.6071,
+          "ev_per_trade": 0.7729,
+          "trades": 224
+        },
+        "2.5": {
+          "final_balance": 704101.01,
+          "win_rate": 0.6071,
+          "ev_per_trade": 0.955,
+          "trades": 224
+        },
+        "3.0": {
+          "final_balance": 925784.57,
+          "win_rate": 0.6071,
+          "ev_per_trade": 1.2586,
+          "trades": 224
+        },
+        "3.5": {
+          "final_balance": 1147643.19,
+          "win_rate": 0.6071,
+          "ev_per_trade": 1.5621,
+          "trades": 224
+        }
+      },
+      "concurrent_sim": {
+        "starting_balance": 200.0,
+        "ending_balance": 462.12,
+        "return_pct": 131.06,
+        "trades": 107,
+        "wins": 66,
+        "losses": 41,
+        "win_rate": 0.6168,
+        "profit_factor": 1.4327,
+        "max_drawdown_pct": -28.72,
+        "max_concurrent_positions": 2,
+        "avg_concurrent_positions": 1.51,
+        "position_tier_breakdown": {
+          "<$500 (3 slots)": 97,
+          "$500-$2k (5 slots)": 10
+        }
+      }
+    },
+    {
+      "fold": 7,
+      "train_start": "2022-12-18",
+      "train_end": "2024-03-27",
+      "test_start": "2024-03-27",
+      "test_end": "2024-05-29",
+      "train_rows": 30000,
+      "test_rows": 4000,
+      "threshold": 0.77,
+      "roc_auc": 0.5577,
+      "precision": 0.6393,
+      "recall": 0.1292,
+      "f1": 0.215,
+      "accuracy": 0.602,
+      "n_signals": 341,
+      "signal_rate": 0.0853,
+      "elapsed_s": 239.0,
+      "rr_sweep": {
+        "1.8": {
+          "final_balance": 492045.93,
+          "win_rate": 0.6393,
+          "ev_per_trade": 0.62,
+          "trades": 341
+        },
+        "2.0": {
+          "final_balance": 603131.8,
+          "win_rate": 0.6393,
+          "ev_per_trade": 0.7479,
+          "trades": 341
+        },
+        "2.2": {
+          "final_balance": 713686.68,
+          "win_rate": 0.6393,
+          "ev_per_trade": 0.8757,
+          "trades": 341
+        },
+        "2.5": {
+          "final_balance": 880296.01,
+          "win_rate": 0.6393,
+          "ev_per_trade": 1.0675,
+          "trades": 341
+        },
+        "3.0": {
+          "final_balance": 1156479.57,
+          "win_rate": 0.6393,
+          "ev_per_trade": 1.3872,
+          "trades": 341
+        },
+        "3.5": {
+          "final_balance": 1432838.19,
+          "win_rate": 0.6393,
+          "ev_per_trade": 1.7068,
+          "trades": 341
+        }
+      },
+      "concurrent_sim": {
+        "starting_balance": 200.0,
+        "ending_balance": 428.07,
+        "return_pct": 114.03,
+        "trades": 118,
+        "wins": 72,
+        "losses": 46,
+        "win_rate": 0.6102,
+        "profit_factor": 1.4438,
+        "max_drawdown_pct": -33.85,
+        "max_concurrent_positions": 2,
+        "avg_concurrent_positions": 1.51,
+        "position_tier_breakdown": {
+          "<$500 (3 slots)": 118
+        }
+      }
+    },
+    {
+      "fold": 8,
+      "train_start": "2023-02-20",
+      "train_end": "2024-05-29",
+      "test_start": "2024-05-29",
+      "test_end": "2024-07-29",
+      "train_rows": 30000,
+      "test_rows": 4000,
+      "threshold": 0.74,
+      "roc_auc": 0.5978,
+      "precision": 0.5327,
+      "recall": 0.2046,
+      "f1": 0.2957,
+      "accuracy": 0.6118,
+      "n_signals": 612,
+      "signal_rate": 0.153,
+      "elapsed_s": 500.8,
+      "rr_sweep": {
+        "1.8": {
+          "final_balance": 582110.93,
+          "win_rate": 0.5327,
+          "ev_per_trade": 0.3215,
+          "trades": 612
+        },
+        "2.0": {
+          "final_balance": 725796.8,
+          "win_rate": 0.5327,
+          "ev_per_trade": 0.428,
+          "trades": 612
+        },
+        "2.2": {
+          "final_balance": 868951.68,
+          "win_rate": 0.5327,
+          "ev_per_trade": 0.5346,
+          "trades": 612
+        },
+        "2.5": {
+          "final_balance": 1084461.01,
+          "win_rate": 0.5327,
+          "ev_per_trade": 0.6944,
+          "trades": 612
+        },
+        "3.0": {
+          "final_balance": 1442144.57,
+          "win_rate": 0.5327,
+          "ev_per_trade": 0.9607,
+          "trades": 612
+        },
+        "3.5": {
+          "final_balance": 1800003.19,
+          "win_rate": 0.5327,
+          "ev_per_trade": 1.2271,
+          "trades": 612
+        }
+      },
+      "concurrent_sim": {
+        "starting_balance": 200.0,
+        "ending_balance": 312.58,
+        "return_pct": 56.29,
+        "trades": 223,
+        "wins": 121,
+        "losses": 102,
+        "win_rate": 0.5426,
+        "profit_factor": 1.1462,
+        "max_drawdown_pct": -72.56,
+        "max_concurrent_positions": 3,
+        "avg_concurrent_positions": 1.52,
+        "position_tier_breakdown": {
+          "<$500 (3 slots)": 223
+        }
+      }
+    },
+    {
+      "fold": 9,
+      "train_start": "2023-04-24",
+      "train_end": "2024-07-29",
+      "test_start": "2024-07-29",
+      "test_end": "2024-09-27",
+      "train_rows": 30000,
+      "test_rows": 4000,
+      "threshold": 0.78,
+      "roc_auc": 0.5815,
+      "precision": 0.6018,
+      "recall": 0.1884,
+      "f1": 0.287,
+      "accuracy": 0.5887,
+      "n_signals": 550,
+      "signal_rate": 0.1375,
+      "elapsed_s": 285.6,
+      "rr_sweep": {
+        "1.8": {
+          "final_balance": 713605.93,
+          "win_rate": 0.6018,
+          "ev_per_trade": 0.5151,
+          "trades": 550
+        },
+        "2.0": {
+          "final_balance": 890391.8,
+          "win_rate": 0.6018,
+          "ev_per_trade": 0.6355,
+          "trades": 550
+        },
+        "2.2": {
+          "final_balance": 1066646.68,
+          "win_rate": 0.6018,
+          "ev_per_trade": 0.7558,
+          "trades": 550
+        },
+        "2.5": {
+          "final_balance": 1331806.01,
+          "win_rate": 0.6018,
+          "ev_per_trade": 0.9364,
+          "trades": 550
+        },
+        "3.0": {
+          "final_balance": 1772239.57,
+          "win_rate": 0.6018,
+          "ev_per_trade": 1.2373,
+          "trades": 550
+        },
+        "3.5": {
+          "final_balance": 2212848.19,
+          "win_rate": 0.6018,
+          "ev_per_trade": 1.5382,
+          "trades": 550
+        }
+      },
+      "concurrent_sim": {
+        "starting_balance": 200.0,
+        "ending_balance": 933.48,
+        "return_pct": 366.74,
+        "trades": 183,
+        "wins": 111,
+        "losses": 72,
+        "win_rate": 0.6066,
+        "profit_factor": 1.6009,
+        "max_drawdown_pct": -49.76,
+        "max_concurrent_positions": 3,
+        "avg_concurrent_positions": 1.55,
+        "position_tier_breakdown": {
+          "<$500 (3 slots)": 145,
+          "$500-$2k (5 slots)": 38
+        }
+      }
+    },
+    {
+      "fold": 10,
+      "train_start": "2023-06-22",
+      "train_end": "2024-09-27",
+      "test_start": "2024-09-27",
+      "test_end": "2024-11-27",
+      "train_rows": 30000,
+      "test_rows": 4000,
+      "threshold": 0.77,
+      "roc_auc": 0.59,
+      "precision": 0.6729,
+      "recall": 0.2347,
+      "f1": 0.348,
+      "accuracy": 0.5935,
+      "n_signals": 645,
+      "signal_rate": 0.1613,
+      "elapsed_s": 248.8,
+      "rr_sweep": {
+        "1.8": {
+          "final_balance": 934525.93,
+          "win_rate": 0.6729,
+          "ev_per_trade": 0.714,
+          "trades": 645
+        },
+        "2.0": {
+          "final_balance": 1154711.8,
+          "win_rate": 0.6729,
+          "ev_per_trade": 0.8486,
+          "trades": 645
+        },
+        "2.2": {
+          "final_balance": 1374366.68,
+          "win_rate": 0.6729,
+          "ev_per_trade": 0.9832,
+          "trades": 645
+        },
+        "2.5": {
+          "final_balance": 1704626.01,
+          "win_rate": 0.6729,
+          "ev_per_trade": 1.185,
+          "trades": 645
+        },
+        "3.0": {
+          "final_balance": 2253559.57,
+          "win_rate": 0.6729,
+          "ev_per_trade": 1.5215,
+          "trades": 645
+        },
+        "3.5": {
+          "final_balance": 2802668.19,
+          "win_rate": 0.6729,
+          "ev_per_trade": 1.8579,
+          "trades": 645
+        }
+      },
+      "concurrent_sim": {
+        "starting_balance": 200.0,
+        "ending_balance": 894.07,
+        "return_pct": 347.03,
+        "trades": 207,
+        "wins": 129,
+        "losses": 78,
+        "win_rate": 0.6232,
+        "profit_factor": 1.6304,
+        "max_drawdown_pct": -39.72,
+        "max_concurrent_positions": 2,
+        "avg_concurrent_positions": 1.54,
+        "position_tier_breakdown": {
+          "<$500 (3 slots)": 191,
+          "$500-$2k (5 slots)": 16
+        }
+      }
+    },
+    {
+      "fold": 11,
+      "train_start": "2023-08-23",
+      "train_end": "2024-11-27",
+      "test_start": "2024-11-28",
+      "test_end": "2025-01-31",
+      "train_rows": 30000,
+      "test_rows": 4000,
+      "threshold": 0.8,
+      "roc_auc": 0.6394,
+      "precision": 0.6967,
+      "recall": 0.1788,
+      "f1": 0.2845,
+      "accuracy": 0.6505,
+      "n_signals": 399,
+      "signal_rate": 0.0998,
+      "elapsed_s": 241.0,
+      "rr_sweep": {
+        "1.8": {
+          "final_balance": 1087060.93,
+          "win_rate": 0.6967,
+          "ev_per_trade": 0.7809,
+          "trades": 399
+        },
+        "2.0": {
+          "final_balance": 1335046.8,
+          "win_rate": 0.6967,
+          "ev_per_trade": 0.9202,
+          "trades": 399
+        },
+        "2.2": {
+          "final_balance": 1582501.68,
+          "win_rate": 0.6967,
+          "ev_per_trade": 1.0596,
+          "trades": 399
+        },
+        "2.5": {
+          "final_balance": 1954461.01,
+          "win_rate": 0.6967,
+          "ev_per_trade": 1.2686,
+          "trades": 399
+        },
+        "3.0": {
+          "final_balance": 2572894.57,
+          "win_rate": 0.6967,
+          "ev_per_trade": 1.617,
+          "trades": 399
+        },
+        "3.5": {
+          "final_balance": 3191503.19,
+          "win_rate": 0.6967,
+          "ev_per_trade": 1.9653,
+          "trades": 399
+        }
+      },
+      "concurrent_sim": {
+        "starting_balance": 200.0,
+        "ending_balance": 1630.91,
+        "return_pct": 715.46,
+        "trades": 136,
+        "wins": 96,
+        "losses": 40,
+        "win_rate": 0.7059,
+        "profit_factor": 1.9242,
+        "max_drawdown_pct": -19.14,
+        "max_concurrent_positions": 2,
+        "avg_concurrent_positions": 1.55,
+        "position_tier_breakdown": {
+          "<$500 (3 slots)": 46,
+          "$500-$2k (5 slots)": 90
+        }
+      }
+    },
+    {
+      "fold": 12,
+      "train_start": "2023-10-24",
+      "train_end": "2025-01-31",
+      "test_start": "2025-01-31",
+      "test_end": "2025-04-02",
+      "train_rows": 30000,
+      "test_rows": 4000,
+      "threshold": 0.78,
+      "roc_auc": 0.6087,
+      "precision": 0.6597,
+      "recall": 0.225,
+      "f1": 0.3355,
+      "accuracy": 0.595,
+      "n_signals": 620,
+      "signal_rate": 0.155,
+      "elapsed_s": 243.4,
+      "rr_sweep": {
+        "1.8": {
+          "final_balance": 1288490.93,
+          "win_rate": 0.6597,
+          "ev_per_trade": 0.6771,
+          "trades": 620
+        },
+        "2.0": {
+          "final_balance": 1577376.8,
+          "win_rate": 0.6597,
+          "ev_per_trade": 0.809,
+          "trades": 620
+        },
+        "2.2": {
+          "final_balance": 1865731.68,
+          "win_rate": 0.6597,
+          "ev_per_trade": 0.941,
+          "trades": 620
+        },
+        "2.5": {
+          "final_balance": 2299041.01,
+          "win_rate": 0.6597,
+          "ev_per_trade": 1.1389,
+          "trades": 620
+        },
+        "3.0": {
+          "final_balance": 3019724.57,
+          "win_rate": 0.6597,
+          "ev_per_trade": 1.4687,
+          "trades": 620
+        },
+        "3.5": {
+          "final_balance": 3740583.19,
+          "win_rate": 0.6597,
+          "ev_per_trade": 1.7985,
+          "trades": 620
+        }
+      },
+      "concurrent_sim": {
+        "starting_balance": 200.0,
+        "ending_balance": 1732.02,
+        "return_pct": 766.01,
+        "trades": 225,
+        "wins": 146,
+        "losses": 79,
+        "win_rate": 0.6489,
+        "profit_factor": 1.7078,
+        "max_drawdown_pct": -33.26,
+        "max_concurrent_positions": 2,
+        "avg_concurrent_positions": 1.5,
+        "position_tier_breakdown": {
+          "<$500 (3 slots)": 137,
+          "$500-$2k (5 slots)": 88
+        }
+      }
+    },
+    {
+      "fold": 13,
+      "train_start": "2023-12-25",
+      "train_end": "2025-04-02",
+      "test_start": "2025-04-02",
+      "test_end": "2025-06-04",
+      "train_rows": 30000,
+      "test_rows": 4000,
+      "threshold": 0.78,
+      "roc_auc": 0.6237,
+      "precision": 0.7913,
+      "recall": 0.1521,
+      "f1": 0.2551,
+      "accuracy": 0.6015,
+      "n_signals": 345,
+      "signal_rate": 0.0862,
+      "elapsed_s": 229.0,
+      "rr_sweep": {
+        "1.8": {
+          "final_balance": 1464380.93,
+          "win_rate": 0.7913,
+          "ev_per_trade": 1.0457,
+          "trades": 345
+        },
+        "2.0": {
+          "final_balance": 1780566.8,
+          "win_rate": 0.7913,
+          "ev_per_trade": 1.2039,
+          "trades": 345
+        },
+        "2.2": {
+          "final_balance": 2096221.68,
+          "win_rate": 0.7913,
+          "ev_per_trade": 1.3622,
+          "trades": 345
+        },
+        "2.5": {
+          "final_balance": 2570481.01,
+          "win_rate": 0.7913,
+          "ev_per_trade": 1.5996,
+          "trades": 345
+        },
+        "3.0": {
+          "final_balance": 3359414.57,
+          "win_rate": 0.7913,
+          "ev_per_trade": 1.9952,
+          "trades": 345
+        },
+        "3.5": {
+          "final_balance": 4148523.19,
+          "win_rate": 0.7913,
+          "ev_per_trade": 2.3909,
+          "trades": 345
+        }
+      },
+      "concurrent_sim": {
+        "starting_balance": 200.0,
+        "ending_balance": 887.77,
+        "return_pct": 343.89,
+        "trades": 123,
+        "wins": 84,
+        "losses": 39,
+        "win_rate": 0.6829,
+        "profit_factor": 1.5942,
+        "max_drawdown_pct": -29.53,
+        "max_concurrent_positions": 3,
+        "avg_concurrent_positions": 1.51,
+        "position_tier_breakdown": {
+          "<$500 (3 slots)": 56,
+          "$500-$2k (5 slots)": 67
+        }
+      }
+    },
+    {
+      "fold": 14,
+      "train_start": "2024-02-26",
+      "train_end": "2025-06-04",
+      "test_start": "2025-06-04",
+      "test_end": "2025-08-05",
+      "train_rows": 30000,
+      "test_rows": 4000,
+      "threshold": 0.73,
+      "roc_auc": 0.6193,
+      "precision": 0.6319,
+      "recall": 0.2463,
+      "f1": 0.3545,
+      "accuracy": 0.5857,
+      "n_signals": 720,
+      "signal_rate": 0.18,
+      "elapsed_s": 280.5,
+      "rr_sweep": {
+        "1.8": {
+          "final_balance": 1671420.93,
+          "win_rate": 0.6319,
+          "ev_per_trade": 0.5994,
+          "trades": 720
+        },
+        "2.0": {
+          "final_balance": 2033106.8,
+          "win_rate": 0.6319,
+          "ev_per_trade": 0.7258,
+          "trades": 720
+        },
+        "2.2": {
+          "final_balance": 2394261.68,
+          "win_rate": 0.6319,
+          "ev_per_trade": 0.8522,
+          "trades": 720
+        },
+        "2.5": {
+          "final_balance": 2936771.01,
+          "win_rate": 0.6319,
+          "ev_per_trade": 1.0418,
+          "trades": 720
+        },
+        "3.0": {
+          "final_balance": 3839454.57,
+          "win_rate": 0.6319,
+          "ev_per_trade": 1.3578,
+          "trades": 720
+        },
+        "3.5": {
+          "final_balance": 4742313.19,
+          "win_rate": 0.6319,
+          "ev_per_trade": 1.6738,
+          "trades": 720
+        }
+      },
+      "concurrent_sim": {
+        "starting_balance": 200.0,
+        "ending_balance": 1670.49,
+        "return_pct": 735.24,
+        "trades": 249,
+        "wins": 154,
+        "losses": 95,
+        "win_rate": 0.6185,
+        "profit_factor": 1.3489,
+        "max_drawdown_pct": -50.05,
+        "max_concurrent_positions": 3,
+        "avg_concurrent_positions": 1.54,
+        "position_tier_breakdown": {
+          "<$500 (3 slots)": 82,
+          "$500-$2k (5 slots)": 165,
+          "$2k-$10k (8 slots)": 2
+        }
+      }
+    },
+    {
+      "fold": 15,
+      "train_start": "2024-04-29",
+      "train_end": "2025-08-05",
+      "test_start": "2025-08-05",
+      "test_end": "2025-10-03",
+      "train_rows": 30000,
+      "test_rows": 4000,
+      "threshold": 0.75,
+      "roc_auc": 0.5715,
+      "precision": 0.5825,
+      "recall": 0.2166,
+      "f1": 0.3158,
+      "accuracy": 0.6025,
+      "n_signals": 630,
+      "signal_rate": 0.1575,
+      "elapsed_s": 378.0,
+      "rr_sweep": {
+        "1.8": {
+          "final_balance": 1807720.93,
+          "win_rate": 0.5825,
+          "ev_per_trade": 0.4611,
+          "trades": 630
+        },
+        "2.0": {
+          "final_balance": 2206106.8,
+          "win_rate": 0.5825,
+          "ev_per_trade": 0.5776,
+          "trades": 630
+        },
+        "2.2": {
+          "final_balance": 2603961.68,
+          "win_rate": 0.5825,
+          "ev_per_trade": 0.6941,
+          "trades": 630
+        },
+        "2.5": {
+          "final_balance": 3201521.01,
+          "win_rate": 0.5825,
+          "ev_per_trade": 0.8689,
+          "trades": 630
+        },
+        "3.0": {
+          "final_balance": 4195954.57,
+          "win_rate": 0.5825,
+          "ev_per_trade": 1.1602,
+          "trades": 630
+        },
+        "3.5": {
+          "final_balance": 5190563.19,
+          "win_rate": 0.5825,
+          "ev_per_trade": 1.4514,
+          "trades": 630
+        }
+      },
+      "concurrent_sim": {
+        "starting_balance": 200.0,
+        "ending_balance": 987.03,
+        "return_pct": 393.51,
+        "trades": 227,
+        "wins": 139,
+        "losses": 88,
+        "win_rate": 0.6123,
+        "profit_factor": 1.5507,
+        "max_drawdown_pct": -51.33,
+        "max_concurrent_positions": 3,
+        "avg_concurrent_positions": 1.52,
+        "position_tier_breakdown": {
+          "<$500 (3 slots)": 186,
+          "$500-$2k (5 slots)": 41
+        }
+      }
+    },
+    {
+      "fold": 16,
+      "train_start": "2024-06-27",
+      "train_end": "2025-10-03",
+      "test_start": "2025-10-03",
+      "test_end": "2025-12-04",
+      "train_rows": 30000,
+      "test_rows": 4000,
+      "threshold": 0.71,
+      "roc_auc": 0.6163,
+      "precision": 0.6518,
+      "recall": 0.3274,
+      "f1": 0.4359,
+      "accuracy": 0.593,
+      "n_signals": 965,
+      "signal_rate": 0.2412,
+      "elapsed_s": 456.3,
+      "rr_sweep": {
+        "1.8": {
+          "final_balance": 2110750.93,
+          "win_rate": 0.6518,
+          "ev_per_trade": 0.6551,
+          "trades": 965
+        },
+        "2.0": {
+          "final_balance": 2572036.8,
+          "win_rate": 0.6518,
+          "ev_per_trade": 0.7854,
+          "trades": 965
+        },
+        "2.2": {
+          "final_balance": 3032791.68,
+          "win_rate": 0.6518,
+          "ev_per_trade": 0.9158,
+          "trades": 965
+        },
+        "2.5": {
+          "final_balance": 3724701.01,
+          "win_rate": 0.6518,
+          "ev_per_trade": 1.1113,
+          "trades": 965
+        },
+        "3.0": {
+          "final_balance": 4876384.57,
+          "win_rate": 0.6518,
+          "ev_per_trade": 1.4373,
+          "trades": 965
+        },
+        "3.5": {
+          "final_balance": 6028243.19,
+          "win_rate": 0.6518,
+          "ev_per_trade": 1.7632,
+          "trades": 965
+        }
+      },
+      "concurrent_sim": {
+        "starting_balance": 200.0,
+        "ending_balance": 1382.45,
+        "return_pct": 591.22,
+        "trades": 329,
+        "wins": 196,
+        "losses": 133,
+        "win_rate": 0.5957,
+        "profit_factor": 1.1923,
+        "max_drawdown_pct": -53.16,
+        "max_concurrent_positions": 3,
+        "avg_concurrent_positions": 1.65,
+        "position_tier_breakdown": {
+          "<$500 (3 slots)": 93,
+          "$500-$2k (5 slots)": 206,
+          "$2k-$10k (8 slots)": 30
+        }
+      }
+    },
+    {
+      "fold": 17,
+      "train_start": "2024-08-28",
+      "train_end": "2025-12-04",
+      "test_start": "2025-12-04",
+      "test_end": "2026-02-06",
+      "train_rows": 30000,
+      "test_rows": 4000,
+      "threshold": 0.71,
+      "roc_auc": 0.5894,
+      "precision": 0.5732,
+      "recall": 0.2886,
+      "f1": 0.3839,
+      "accuracy": 0.598,
+      "n_signals": 874,
+      "signal_rate": 0.2185,
+      "elapsed_s": 333.3,
+      "rr_sweep": {
+        "1.8": {
+          "final_balance": 2290725.93,
+          "win_rate": 0.5732,
+          "ev_per_trade": 0.435,
+          "trades": 874
+        },
+        "2.0": {
+          "final_balance": 2802111.8,
+          "win_rate": 0.5732,
+          "ev_per_trade": 0.5497,
+          "trades": 874
+        },
+        "2.2": {
+          "final_balance": 3312966.68,
+          "win_rate": 0.5732,
+          "ev_per_trade": 0.6643,
+          "trades": 874
+        },
+        "2.5": {
+          "final_balance": 4080026.01,
+          "win_rate": 0.5732,
+          "ev_per_trade": 0.8363,
+          "trades": 874
+        },
+        "3.0": {
+          "final_balance": 5356959.57,
+          "win_rate": 0.5732,
+          "ev_per_trade": 1.1229,
+          "trades": 874
+        },
+        "3.5": {
+          "final_balance": 6634068.19,
+          "win_rate": 0.5732,
+          "ev_per_trade": 1.4095,
+          "trades": 874
+        }
+      },
+      "concurrent_sim": {
+        "starting_balance": 200.0,
+        "ending_balance": 1492.44,
+        "return_pct": 646.22,
+        "trades": 307,
+        "wins": 185,
+        "losses": 122,
+        "win_rate": 0.6026,
+        "profit_factor": 1.416,
+        "max_drawdown_pct": -67.26,
+        "max_concurrent_positions": 3,
+        "avg_concurrent_positions": 1.6,
+        "position_tier_breakdown": {
+          "<$500 (3 slots)": 150,
+          "$500-$2k (5 slots)": 157
+        }
+      }
+    }
+  ],
+  "rr_optimal": 3.5,
+  "rr_analysis": {
+    "1.8": {
+      "avg_balance": 922898.28,
+      "final_balance": 2290725.93,
+      "avg_win_rate": 0.6455,
+      "avg_ev_per_trade": 0.6374,
+      "total_trades": 8076,
+      "max_drawdown": 0.0
+    },
+    "2.0": {
+      "avg_balance": 1132060.62,
+      "final_balance": 2802111.8,
+      "avg_win_rate": 0.6455,
+      "avg_ev_per_trade": 0.7665,
+      "total_trades": 8076,
+      "max_drawdown": 0.0
+    },
+    "2.2": {
+      "avg_balance": 1340691.97,
+      "final_balance": 3312966.68,
+      "avg_win_rate": 0.6455,
+      "avg_ev_per_trade": 0.8956,
+      "total_trades": 8076,
+      "max_drawdown": 0.0
+    },
+    "2.5": {
+      "avg_balance": 1654416.01,
+      "final_balance": 4080026.01,
+      "avg_win_rate": 0.6455,
+      "avg_ev_per_trade": 1.0893,
+      "total_trades": 8076,
+      "max_drawdown": 0.0
+    },
+    "3.0": {
+      "avg_balance": 2175790.75,
+      "final_balance": 5356959.57,
+      "avg_win_rate": 0.6455,
+      "avg_ev_per_trade": 1.412,
+      "total_trades": 8076,
+      "max_drawdown": 0.0
+    },
+    "3.5": {
+      "avg_balance": 2697340.54,
+      "final_balance": 6634068.19,
+      "avg_win_rate": 0.6455,
+      "avg_ev_per_trade": 1.7348,
+      "total_trades": 8076,
+      "max_drawdown": 0.0
+    }
+  }
+}

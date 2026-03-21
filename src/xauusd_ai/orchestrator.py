@@ -860,6 +860,8 @@ def run_live_loop(settings: Settings) -> None:
                         f"\u2514 Nguyen nhan:\n{_reasons_text}"
                     )
                     _append_live_trade(pos, pnl, is_win=False, close_type=_close_type)
+                    # Record loss for circuit breaker
+                    risk_manager.record_trade_result(pnl, account_info.get("balance", 0.0) if 'account_info' in dir() else 0.0)
                     _entry_rsi_tracker.pop(ticket, None)
                     _save_rsi_tracker(_entry_rsi_tracker)
                 else:
@@ -872,6 +874,8 @@ def run_live_loop(settings: Settings) -> None:
                         f"\u2514 Profit: {pos.get('profit', 0):.2f}$ | Swap: {pos.get('swap', 0):.2f}$ | Comm: {pos.get('commission', 0):.2f}$"
                     )
                     _append_live_trade(pos, pnl, is_win=True, close_type=_close_type)
+                    # Record win for circuit breaker (resets consecutive loss counter)
+                    risk_manager.record_trade_result(pnl, account_info.get("balance", 0.0) if 'account_info' in dir() else 0.0)
                     _entry_rsi_tracker.pop(ticket, None)
                     _save_rsi_tracker(_entry_rsi_tracker)
             # Trigger loss-retrain sau LOSS_RETRAIN_THRESHOLD lệnh thua
@@ -1054,6 +1058,9 @@ def run_live_loop(settings: Settings) -> None:
                 # -- Loss Learning: detect & notify closed trades immediately
                 _check_closed_positions(latest_row, frames)
 
+                # ── Circuit breaker cooldown tick ──────────────────────────────────
+                risk_manager.tick_cooldown()
+
                 # â”€â”€ Trailing SL â€” dá»‹ch SL cÃ¡c lá»‡nh Ä‘ang má»Ÿ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 if settings.execution.trailing_sl.enabled and settings.execution.auto_trade and atr_value > 0:
                     try:
@@ -1074,6 +1081,39 @@ def run_live_loop(settings: Settings) -> None:
                                 )
                     except Exception as trail_err:
                         LOGGER.error("TrailingSL error: %s", trail_err)
+
+                # ── Partial Take Profit — close partial position at 1R ────────────
+                if settings.risk.partial_tp_enabled and settings.execution.auto_trade and atr_value > 0:
+                    try:
+                        _sl_dist = atr_value * settings.risk.stop_loss_atr_multiple
+                        if _sl_dist > 0:
+                            _ptp_positions = executor.get_open_positions(
+                                magic_number=settings.execution.magic_number
+                            )
+                            for _ptp_pos in _ptp_positions:
+                                _ptp_ticket = int(_ptp_pos["ticket"])
+                                _ptp_side = 1.0 if _ptp_pos["side"] == "buy" else -1.0
+                                _ptp_entry = float(_ptp_pos["open_price"])
+                                _ptp_price = float(_ptp_pos.get("current_price", _ptp_entry))
+                                _ptp_rr = _ptp_side * (_ptp_price - _ptp_entry) / _sl_dist
+                                _ptp_vol = float(_ptp_pos["volume"])
+                                # Check if position has reached partial TP level and has enough volume to split
+                                if _ptp_rr >= settings.risk.partial_tp_rr and _ptp_vol >= 0.02:
+                                    _close_vol = round(max(0.01, _ptp_vol * settings.risk.partial_tp_pct / 0.01) * 0.01, 2)
+                                    _close_vol = min(_close_vol, _ptp_vol - 0.01)  # Keep at least 0.01 lot open
+                                    if _close_vol >= 0.01:
+                                        executor.close_position(_ptp_ticket, _close_vol)
+                                        LOGGER.info(
+                                            "PartialTP: ticket=%d closed %.2f lot at %.2fR (%.2f/%.2f)",
+                                            _ptp_ticket, _close_vol, _ptp_rr, _close_vol, _ptp_vol,
+                                        )
+                                        notifier.send_message(
+                                            f"\U0001f4b0 <b>Partial TP #{_ptp_ticket}</b> ({_ptp_pos['side'].upper()})\n"
+                                            f"\u251c Closed {_close_vol:.2f}/{_ptp_vol:.2f} lot at {_ptp_rr:.1f}R\n"
+                                            f"\u2514 Remaining {_ptp_vol - _close_vol:.2f} lot running to full TP"
+                                        )
+                    except Exception as _ptp_err:
+                        LOGGER.error("PartialTP error: %s", _ptp_err)
 
                 # â”€â”€ DCA â€” thÃªm lá»‡nh khi giÃ¡ Ä‘i ngÆ°á»£c â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 # Exit Model: check whether open positions should exit early

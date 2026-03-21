@@ -12,6 +12,8 @@ from sklearn.ensemble import (
     ExtraTreesClassifier,
     VotingClassifier,
 )
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.inspection import permutation_importance
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
 from sklearn.preprocessing import StandardScaler
 
@@ -81,10 +83,11 @@ class ModelTrainer:
             sw = None
 
         # Feature selection: drop bottom 30% by importance (scout model)
-        _scout = HistGradientBoostingClassifier(
-            max_iter=300, learning_rate=0.03, max_depth=5,
-            min_samples_leaf=25, max_bins=128,
-            early_stopping=False, random_state=42,
+        # Use RandomForest (always has feature_importances_) as scout
+        _scout = RandomForestClassifier(
+            n_estimators=200, max_depth=8, min_samples_leaf=20,
+            max_features="sqrt", class_weight="balanced",
+            n_jobs=-1, random_state=42,
         )
         _scout.fit(x_train, y_train, sample_weight=sw)
         _imp = _scout.feature_importances_
@@ -96,7 +99,26 @@ class ModelTrainer:
         x_test_sel = x_test[:, self._feature_mask]
 
         self.model.fit(x_train_sel, y_train, sample_weight=sw)
-        probabilities = self.model.predict_proba(x_test_sel)[:, 1]
+
+        # Probability calibration via isotonic regression on validation holdout
+        # This ensures model probabilities are well-calibrated for threshold decisions
+        _val_size = max(int(len(x_train_sel) * 0.15), 50)
+        if _val_size < len(x_train_sel):
+            _cal_x = x_train_sel[-_val_size:]
+            _cal_y = y_train.values[-_val_size:]
+            try:
+                self._calibrator = CalibratedClassifierCV(
+                    self.model, method="isotonic", cv="prefit",
+                )
+                self._calibrator.fit(_cal_x, _cal_y)
+                probabilities = self._calibrator.predict_proba(x_test_sel)[:, 1]
+            except Exception:
+                self._calibrator = None
+                probabilities = self.model.predict_proba(x_test_sel)[:, 1]
+        else:
+            self._calibrator = None
+            probabilities = self.model.predict_proba(x_test_sel)[:, 1]
+
         predictions = (probabilities >= self.decision_threshold).astype(int)
 
         metrics = {
@@ -202,6 +224,13 @@ class ModelTrainer:
             pickle.dump(self.model, file_handle)
         with scaler_path.open("wb") as file_handle:
             pickle.dump(self.scaler, file_handle)
+        # Save calibrator alongside model
+        _cal_path = model_path.with_suffix(".cal.pkl")
+        if hasattr(self, "_calibrator") and self._calibrator is not None:
+            with _cal_path.open("wb") as fh:
+                pickle.dump(self._calibrator, fh)
+        elif _cal_path.exists():
+            _cal_path.unlink()
         meta_dict: dict = {
             "decision_threshold": self.decision_threshold,
             "feature_columns": self.feature_columns,
@@ -228,6 +257,16 @@ class ModelTrainer:
             self.model = pickle.load(file_handle)
         with scaler_path.open("rb") as file_handle:
             self.scaler = pickle.load(file_handle)
+        # Load calibrator if available
+        _cal_path = model_path.with_suffix(".cal.pkl")
+        if _cal_path.exists():
+            try:
+                with _cal_path.open("rb") as fh:
+                    self._calibrator = pickle.load(fh)
+            except Exception:
+                self._calibrator = None
+        else:
+            self._calibrator = None
         if meta_path.exists():
             metadata = json.loads(meta_path.read_text(encoding="utf-8"))
             self.decision_threshold = float(metadata.get("decision_threshold", self.settings.strategy.signal_threshold))
@@ -251,7 +290,10 @@ class ModelTrainer:
         frame = dataset.copy()
         x_scaled = self.scaler.transform(frame[self.feature_columns])
         x_sel = self._apply_feature_mask(x_scaled)
-        probabilities = self.model.predict_proba(x_sel)[:, 1]
+        if hasattr(self, "_calibrator") and self._calibrator is not None:
+            probabilities = self._calibrator.predict_proba(x_sel)[:, 1]
+        else:
+            probabilities = self.model.predict_proba(x_sel)[:, 1]
         frame["probability"] = probabilities
         frame["prediction"] = (probabilities >= self.decision_threshold).astype(int)
         return frame
@@ -260,7 +302,10 @@ class ModelTrainer:
         latest = live_frame.iloc[[-1]][self.feature_columns]
         x_scaled = self.scaler.transform(latest)
         x_sel = self._apply_feature_mask(x_scaled)
-        probability = float(self.model.predict_proba(x_sel)[:, 1][0])
+        if hasattr(self, "_calibrator") and self._calibrator is not None:
+            probability = float(self._calibrator.predict_proba(x_sel)[:, 1][0])
+        else:
+            probability = float(self.model.predict_proba(x_sel)[:, 1][0])
         prediction = int(probability >= self.decision_threshold)
         return {"probability": probability, "prediction": prediction}
 
@@ -314,11 +359,11 @@ class ModelTrainer:
         x_test = self.scaler.transform(test_df[self.feature_columns])
         y_test = test_df["target"]
 
-        # Feature selection (scout model)
-        _scout = HistGradientBoostingClassifier(
-            max_iter=300, learning_rate=0.03, max_depth=5,
-            min_samples_leaf=25, max_bins=128,
-            early_stopping=False, random_state=42,
+        # Feature selection (scout model — use RF for reliable feature_importances_)
+        _scout = RandomForestClassifier(
+            n_estimators=200, max_depth=8, min_samples_leaf=20,
+            max_features="sqrt", class_weight="balanced",
+            n_jobs=-1, random_state=42,
         )
         _scout.fit(x_train, y_train, sample_weight=weights)
         _imp = _scout.feature_importances_
