@@ -267,6 +267,9 @@ class TrainingSettings(BaseModel):
     # Effective balance for PnL is limited to start_bal × this multiplier.
     # 0 = no cap (default). E.g. 200 caps at 200× initial = $40k for $200 start.
     backtest_max_balance_multiplier: float = 200.0
+    # Limit bars per timeframe used for training (0 = no limit).
+    # Use e.g. 30000 M5 bars (~104 days) to avoid OOM during live startup training.
+    max_train_bars: int = 0
 
 
 class NotificationSettings(BaseModel):

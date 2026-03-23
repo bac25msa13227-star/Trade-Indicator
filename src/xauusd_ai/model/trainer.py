@@ -9,8 +9,6 @@ import pandas as pd
 from sklearn.ensemble import (
     HistGradientBoostingClassifier,
     RandomForestClassifier,
-    ExtraTreesClassifier,
-    VotingClassifier,
 )
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.inspection import permutation_importance
@@ -24,30 +22,16 @@ from xauusd_ai.features.dataset import FEATURE_COLUMNS
 class ModelTrainer:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        # Ensemble: HGB (primary) + RF + ET — diverse learners improve AUC
-        _hgb = HistGradientBoostingClassifier(
-            max_iter=2000, learning_rate=0.01, max_depth=7,
+        # Single HGB model — memory-efficient, good calibration, supports sample_weight directly
+        self.model = HistGradientBoostingClassifier(
+            max_iter=300, learning_rate=0.05, max_depth=5,
             min_samples_leaf=20, l2_regularization=1.0,
-            max_bins=128, class_weight=None,
+            max_bins=63, class_weight=None,
             early_stopping=True, validation_fraction=0.1,
-            n_iter_no_change=80, random_state=42,
+            n_iter_no_change=20, random_state=42,
         )
-        _rf = RandomForestClassifier(
-            n_estimators=400, max_depth=12, min_samples_leaf=15,
-            max_features="sqrt", class_weight="balanced",
-            n_jobs=-1, random_state=42,
-        )
-        _et = ExtraTreesClassifier(
-            n_estimators=400, max_depth=14, min_samples_leaf=10,
-            max_features="sqrt", class_weight="balanced",
-            n_jobs=-1, random_state=42,
-        )
-        self.model = VotingClassifier(
-            estimators=[("hgb", _hgb), ("rf", _rf), ("et", _et)],
-            voting="soft",
-            weights=[3, 2, 1],
-        )
-        self._feature_mask = None  # set during train()
+        self._feature_mask = None
+        self._calibrator = None
         self.scaler = StandardScaler()
         self.decision_threshold = settings.strategy.signal_threshold
         self.feature_columns: list[str] = list(FEATURE_COLUMNS)  # updated by load_artifacts for backward compat
@@ -82,26 +66,14 @@ class ModelTrainer:
         else:
             sw = None
 
-        # Feature selection: drop bottom 30% by importance (scout model)
-        # Use RandomForest (always has feature_importances_) as scout
-        _scout = RandomForestClassifier(
-            n_estimators=200, max_depth=8, min_samples_leaf=20,
-            max_features="sqrt", class_weight="balanced",
-            n_jobs=-1, random_state=42,
-        )
-        _scout.fit(x_train, y_train, sample_weight=sw)
-        _imp = _scout.feature_importances_
-        _imp_thr = np.percentile(_imp, 30)
-        self._feature_mask = _imp >= _imp_thr
-        if self._feature_mask.sum() < 10:
-            self._feature_mask = np.ones(len(_imp), dtype=bool)
-        x_train_sel = x_train[:, self._feature_mask]
-        x_test_sel = x_test[:, self._feature_mask]
+        # No feature selection mask — use all features
+        self._feature_mask = None
+        x_train_sel = x_train
+        x_test_sel = x_test
 
         self.model.fit(x_train_sel, y_train, sample_weight=sw)
 
         # Probability calibration via isotonic regression on validation holdout
-        # This ensures model probabilities are well-calibrated for threshold decisions
         _val_size = max(int(len(x_train_sel) * 0.15), 50)
         if _val_size < len(x_train_sel):
             _cal_x = x_train_sel[-_val_size:]
@@ -151,86 +123,95 @@ class ModelTrainer:
         )
         prec_floor = self.settings.training.min_precision_floor
 
-        # 3-fold temporal CV: each fold trains on earlier data, validates on later chunk
-        splits = [
-            (0, int(n * 0.50), int(n * 0.50), int(n * 0.70)),
-            (0, int(n * 0.60), int(n * 0.60), int(n * 0.80)),
-            (0, int(n * 0.70), int(n * 0.70), n),
-        ]
-        fold_thresholds = []
-        for t_start, t_end, v_start, v_end in splits:
-            sub_df = train_df.iloc[t_start:t_end]
-            val_df = train_df.iloc[v_start:v_end]
-            if val_df.empty or sub_df.empty:
-                continue
-            local_scaler = StandardScaler()
-            local_model = HistGradientBoostingClassifier(
-                max_iter=300, learning_rate=0.05, max_depth=5,
-                min_samples_leaf=20, class_weight=None,
-                early_stopping=False, random_state=42,
-            )
-            x_sub = local_scaler.fit_transform(sub_df[self.feature_columns])
-            y_sub = sub_df["target"]
-            x_val = local_scaler.transform(val_df[self.feature_columns])
-            y_val = val_df["target"]
-            _pos_c = int(y_sub.sum())
-            _neg_c = int(len(y_sub) - _pos_c)
-            if _pos_c > 5 and _neg_c > 5:
-                _pw = 2.0 * _neg_c / _pos_c
-                _sw = np.where(y_sub.values == 1, _pw, 1.0).astype(float)
-                _sw /= _sw.mean()
-            else:
-                _sw = None
-            local_model.fit(x_sub, y_sub, sample_weight=_sw)
-            probabilities = local_model.predict_proba(x_val)[:, 1]
+        # Use last 30K rows for speed — still captures recent market regime
+        n_max = min(n, 30000)
+        sub_df_all = train_df.iloc[-n_max:]
+        n2 = len(sub_df_all)
 
-            best_thr = float(self.settings.training.threshold_min)
-            best_score = -float("inf")
-            safe_thr = float(self.settings.training.threshold_max)
-            safe_prec = -1.0
-            for candidate in candidates:
-                preds = (probabilities >= candidate).astype(int)
-                if int(preds.sum()) < 5:
-                    continue
-                precision = precision_score(y_val, preds, zero_division=0)
-                recall = recall_score(y_val, preds, zero_division=0)
-                if recall < 0.05:
-                    continue
-                if precision > safe_prec:
-                    safe_prec = precision
-                    safe_thr = float(candidate)
-                if precision < prec_floor:
-                    continue
-                score = precision * np.sqrt(recall)
-                if score > best_score:
-                    best_score = score
-                    best_thr = float(candidate)
-            if best_score == -float("inf"):
-                best_thr = safe_thr
-            fold_thresholds.append(best_thr)
-
-        if not fold_thresholds:
+        # 1-fold: train on first 70%, validate on last 30%
+        split_idx = int(n2 * 0.70)
+        sub_df = sub_df_all.iloc[:split_idx]
+        val_df = sub_df_all.iloc[split_idx:]
+        if val_df.empty or sub_df.empty:
             return self.settings.strategy.signal_threshold
-        return float(np.max(fold_thresholds))
+
+        local_scaler = StandardScaler()
+        local_model = HistGradientBoostingClassifier(
+            max_iter=100, learning_rate=0.1, max_depth=4,
+            min_samples_leaf=30, class_weight=None,
+            early_stopping=False, random_state=42,
+        )
+        x_sub = local_scaler.fit_transform(sub_df[self.feature_columns])
+        y_sub = sub_df["target"]
+        x_val = local_scaler.transform(val_df[self.feature_columns])
+        y_val = val_df["target"]
+        _pos_c = int(y_sub.sum())
+        _neg_c = int(len(y_sub) - _pos_c)
+        if _pos_c > 5 and _neg_c > 5:
+            _pw = 2.0 * _neg_c / _pos_c
+            _sw = np.where(y_sub.values == 1, _pw, 1.0).astype(float)
+            _sw /= _sw.mean()
+        else:
+            _sw = None
+        local_model.fit(x_sub, y_sub, sample_weight=_sw)
+        probabilities = local_model.predict_proba(x_val)[:, 1]
+
+        best_thr = float(self.settings.training.threshold_min)
+        best_score = -float("inf")
+        safe_thr = float(self.settings.training.threshold_max)
+        safe_prec = -1.0
+        for candidate in candidates:
+            preds = (probabilities >= candidate).astype(int)
+            if int(preds.sum()) < 5:
+                continue
+            precision = precision_score(y_val, preds, zero_division=0)
+            recall = recall_score(y_val, preds, zero_division=0)
+            if recall < 0.05:
+                continue
+            if precision > safe_prec:
+                safe_prec = precision
+                safe_thr = float(candidate)
+            if precision < prec_floor:
+                continue
+            score = precision * np.sqrt(recall)
+            if score > best_score:
+                best_score = score
+                best_thr = float(candidate)
+        if best_score == -float("inf"):
+            best_thr = safe_thr
+
+        return best_thr
+
+    @staticmethod
+    def _atomic_write_pickle(obj: object, dest: Path) -> None:
+        """Write pickle to a temp file in the same dir, then replace dest."""
+        import tempfile, os
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=str(dest.parent), suffix=".tmp")
+        try:
+            with os.fdopen(fd, "wb") as fh:
+                pickle.dump(obj, fh)
+            # os.replace atomically overwrites dest even if held open for reading
+            os.replace(tmp, str(dest))
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
 
     def _save_artifacts(self) -> None:
         model_path = Path(self.settings.app.model_path)
         scaler_path = Path(self.settings.app.scaler_path)
         meta_path = Path(self.settings.app.model_meta_path)
-        model_path.parent.mkdir(parents=True, exist_ok=True)
-        scaler_path.parent.mkdir(parents=True, exist_ok=True)
-        meta_path.parent.mkdir(parents=True, exist_ok=True)
-        with model_path.open("wb") as file_handle:
-            pickle.dump(self.model, file_handle)
-        with scaler_path.open("wb") as file_handle:
-            pickle.dump(self.scaler, file_handle)
+        self._atomic_write_pickle(self.model, model_path)
+        self._atomic_write_pickle(self.scaler, scaler_path)
         # Save calibrator alongside model
         _cal_path = model_path.with_suffix(".cal.pkl")
         if hasattr(self, "_calibrator") and self._calibrator is not None:
-            with _cal_path.open("wb") as fh:
-                pickle.dump(self._calibrator, fh)
+            self._atomic_write_pickle(self._calibrator, _cal_path)
         elif _cal_path.exists():
-            _cal_path.unlink()
+            _cal_path.unlink(missing_ok=True)
         meta_dict: dict = {
             "decision_threshold": self.decision_threshold,
             "feature_columns": self.feature_columns,
@@ -253,15 +234,15 @@ class ModelTrainer:
         meta_path = Path(self.settings.app.model_meta_path)
         if not model_path.exists() or not scaler_path.exists():
             return False
-        with model_path.open("rb") as file_handle:
+        with open(str(model_path), "rb") as file_handle:
             self.model = pickle.load(file_handle)
-        with scaler_path.open("rb") as file_handle:
+        with open(str(scaler_path), "rb") as file_handle:
             self.scaler = pickle.load(file_handle)
         # Load calibrator if available
         _cal_path = model_path.with_suffix(".cal.pkl")
         if _cal_path.exists():
             try:
-                with _cal_path.open("rb") as fh:
+                with open(str(_cal_path), "rb") as fh:
                     self._calibrator = pickle.load(fh)
             except Exception:
                 self._calibrator = None
@@ -359,20 +340,10 @@ class ModelTrainer:
         x_test = self.scaler.transform(test_df[self.feature_columns])
         y_test = test_df["target"]
 
-        # Feature selection (scout model — use RF for reliable feature_importances_)
-        _scout = RandomForestClassifier(
-            n_estimators=200, max_depth=8, min_samples_leaf=20,
-            max_features="sqrt", class_weight="balanced",
-            n_jobs=-1, random_state=42,
-        )
-        _scout.fit(x_train, y_train, sample_weight=weights)
-        _imp = _scout.feature_importances_
-        _imp_thr = np.percentile(_imp, 30)
-        self._feature_mask = _imp >= _imp_thr
-        if self._feature_mask.sum() < 10:
-            self._feature_mask = np.ones(len(_imp), dtype=bool)
-        x_train_sel = x_train[:, self._feature_mask]
-        x_test_sel = x_test[:, self._feature_mask]
+        # No feature selection — use all features
+        self._feature_mask = None
+        x_train_sel = x_train
+        x_test_sel = x_test
 
         # Fit with sample_weight
         self.model.fit(x_train_sel, y_train, sample_weight=weights)

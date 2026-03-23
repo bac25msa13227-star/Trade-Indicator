@@ -101,7 +101,7 @@ class SelfLearner:
             dataset = prepare_training_dataset(live_settings, frames, self.strategy)
             if len(dataset) < self.settings.training.live_learning_min_rows:
                 LOGGER.info(
-                    "SelfLearner: dataset quá nhỏ (%d rows), bỏ qua", len(dataset)
+                    "SelfLearner: dataset too small (%d rows), skipping", len(dataset)
                 )
                 return None
 
@@ -110,7 +110,8 @@ class SelfLearner:
             self._retrain_count += 1
 
             roc_auc = float(metrics.get("roc_auc", 0.0))
-            improved = roc_auc >= self._best_roc_auc
+            _min_floor = self.settings.training.min_self_learning_roc_auc
+            improved = roc_auc >= max(self._best_roc_auc, _min_floor)
 
             if improved:
                 self._best_roc_auc = roc_auc
@@ -182,14 +183,14 @@ class SelfLearner:
             except Exception as e:
                 LOGGER.warning("yfinance fetch failed (%s): %s", ticker, e)
 
-        LOGGER.warning("SelfLearner: không lấy được data từ yfinance")
+        LOGGER.warning("SelfLearner: could not fetch data from yfinance")
         return pd.DataFrame()
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
     # Maximum bars to keep per timeframe to prevent unbounded memory growth
-    _MAX_CACHE_BARS = {"M15": 10_000, "H1": 5_000, "H4": 3_000, "D1": 2_000}
+    _MAX_CACHE_BARS = {"M1": 5_000, "M5": 12_000, "M15": 10_000, "H1": 5_000, "H4": 3_000, "D1": 2_000}
 
     def _merge_with_cache(self, frames: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
         """
@@ -243,7 +244,7 @@ class SelfLearner:
         """Pre-load historical CSV data vào cache để live-learning luôn có đủ dataset."""
         csv_path = Path(self.settings.market.csv_folder_path)
         if not csv_path.exists():
-            LOGGER.warning("SelfLearner: csv_folder_path không tồn tại, bỏ qua preload")
+            LOGGER.warning("SelfLearner: csv_folder_path not found, skipping preload")
             return
         tf_file_map = {
             "M1": "XAUUSDm_M1.csv",
@@ -260,6 +261,14 @@ class SelfLearner:
                 continue
             try:
                 df = pd.read_csv(fpath)
+                # Normalize column names (MT5 CSVs use Title case: Open/High/Low/Close)
+                df.rename(columns={
+                    "Open": "open", "High": "high", "Low": "low", "Close": "close",
+                    "Volume": "tick_volume", "TickVolume": "tick_volume",
+                    "RealVolume": "real_volume", "Spread": "spread_points",
+                }, inplace=True)
+                if "time" not in df.columns and df.index.name:
+                    df = df.rename_axis("time").reset_index()
                 df["time"] = pd.to_datetime(df["time"], utc=True)
                 # Chỉ lấy 8000 hàng gần nhất để cân bằng data đủ/retrain vừa phải
                 df = df.sort_values("time").tail(8000).reset_index(drop=True)

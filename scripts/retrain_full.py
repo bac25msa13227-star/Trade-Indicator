@@ -60,6 +60,10 @@ def _load_self_learning_frames(log_path: Path, csv_path: Path) -> dict[str, pd.D
         if not fpath.exists():
             continue
         df = pd.read_csv(fpath)
+        # Normalize column names: lowercase + map Volume→tick_volume etc.
+        df.columns = [c.lower() for c in df.columns]
+        rename_map = {"volume": "tick_volume", "realvolume": "real_volume"}
+        df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
         df["time"] = pd.to_datetime(df["time"], utc=True)
         df = df.sort_values("time").reset_index(drop=True)
         if "tick_volume_delta" not in df.columns:
@@ -139,7 +143,15 @@ def retrain_account(config_path: Path, label: str) -> dict:
     print(f"    Label dist — Test:  {test_set['target'].value_counts().to_dict()}")
     print(f"    Time range test: {str(test_set['time'].min())[:16]} – {str(test_set['time'].max())[:16]}")
 
-    metrics = trainer.train(dataset)
+    try:
+        metrics = trainer.train(dataset)
+    except Exception as _train_exc:
+        import traceback
+        _err_path = Path("outputs/retrain_err.txt")
+        _err_path.write_text(traceback.format_exc(), encoding="utf-8")
+        print(f"    [FATAL] Training crashed: {_train_exc}")
+        print(f"    Full traceback written to {_err_path}")
+        raise
     print(f"    Train done in {time.time()-t0:.1f}s")
     print(f"    Precision: {metrics.get('precision', 0):.4f}  Recall: {metrics.get('recall', 0):.4f}  "
           f"F1: {metrics.get('f1', 0):.4f}  ROC-AUC: {metrics.get('roc_auc', 0):.4f}")
@@ -192,7 +204,7 @@ def retrain_account(config_path: Path, label: str) -> dict:
     wf_result = subprocess.run(
         [sys.executable, "scripts/walkforward_ict_wyckoff.py", str(config_path), "5"],
         capture_output=False,
-        timeout=1200,   # 20-minute hard cap per account
+        timeout=7200,   # 2-hour cap per account (17 folds × ~5 min each)
     )
     if wf_result.returncode != 0:
         print(f"    [warn] Walk-forward exited with code {wf_result.returncode}")

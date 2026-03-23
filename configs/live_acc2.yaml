@@ -4,7 +4,7 @@
 # Symbol: XAUUSDm  |  Threshold: 0.55  |  Risk: 3-5% dynamic
 # ─────────────────────────────────────────────────────────────────
 app:
-  poll_seconds: 120
+  poll_seconds: 60
   model_path:          outputs/model2_weekly500.pkl
   scaler_path:         outputs/scaler2_weekly500.pkl
   model_meta_path:     outputs/model_meta2_weekly500.json
@@ -33,12 +33,14 @@ market:
   higher_timeframe: D1
   mid_timeframe: H1
   structure_timeframe: H4
-  execution_timeframe: M15
+  execution_timeframe: M5
   bars:
     D1: 100
     H1: 500
     H4: 200
     M15: 300
+    M5: 500
+    M1: 200
   timezone: UTC
 
 strategy:
@@ -51,7 +53,7 @@ strategy:
   volatility_window: 20
   signal_threshold: 0.55             # ACC2 Model2: threshold tối ưu từ backtest (0.55)
   sideways_volatility_threshold: 0.003
-  strong_volatility_threshold: 0.010
+  strong_volatility_threshold: 0.016  # Raised: current ATR/close ~0.014 (ATR=45, price=3200)
   news_block_minutes: 0
   rsi_long_threshold: 52
   rsi_short_threshold: 48
@@ -75,8 +77,8 @@ strategy:
   adx_gate_enabled: true
   adx_min_trend: 18.0               # Chỉ trade khi có xu hướng đủ rõ
   # Regime-specific confidence
-  sideway_min_confidence: 0.65       # Cao hơn cho thị trường sideway
-  volatile_min_confidence: 0.60
+  sideway_min_confidence: 0.60       # Lowered from 0.65 to allow more trades
+  volatile_min_confidence: 0.55      # Lowered from 0.60 — high ATR regime
 
 risk:
   mode: fixed_fractional
@@ -127,7 +129,7 @@ execution:
     max_total_risk_pct: 0.03
 
   exit_model:
-    enabled: true                   # v2: dương ở mọi threshold trên backtest thực tế
+    enabled: false                  # Disabled: exit model trained on M15 scale, needs retrain for M5
     exit_model_path: "outputs/exit_model_acc2.pkl"
     exit_scaler_path: "outputs/exit_scaler_acc2.pkl"
     exit_model_meta_path: "outputs/exit_model_meta_acc2.json"
@@ -143,18 +145,18 @@ execution:
 
 
 training:
-  # ── RATIO SPLIT 70/30 — toàn bộ dữ liệu từ D1 đến M1 ────────────────────────
-  train_start_date: null
-  train_end_date:   null
-  test_start_date:  null
-  test_end_date:    null
-  train_split: 0.70                  # 70% train, 30% test — ~30k M15 bars test
-  label_horizon: 12                  # 12 × M15 = 3 giờ — TP 2:1 dễ đạt hơn
-  min_return_threshold: 0.0015       # Nhãn win ≥0.15% — thêm nhiều trade cơ hội
+  # ── DATE-BASED SPLIT: train 2023-2026/03/08, test 09/03 → nay ──────────
+  train_start_date: "2023-01-01"    # 3 năm — bao gồm bull run 2025-2026
+  train_end_date:   "2026-03-08"    # Train đến ngày trước test
+  test_start_date:  "2026-03-09"    # Test: gold 3200→4375 (14 ngày)
+  test_end_date:    null            # Đến cuối data (23/03/2026)
+  train_split: 0.70                  # bị bỏ qua khi dùng date split
   use_sltp_label: true
-  sltp_label_max_horizon: 64          # v2: 16h scan (tăng từ 32 → 64) — đủ thời gian cho TP
-  label_tp_rr: 2.0                    # v2: label dùng RR 2.0 (dễ dự đoán hơn 3.5)
-  retrain_on_startup: false
+  sltp_label_max_horizon: 192        # M5: 16h = 192 bars
+  label_tp_rr: 2.0                   # Label dùng RR 2.0 (dễ dự đoán hơn 3.5)
+  label_horizon: 36                  # M5: 3h = 36 bars
+  min_return_threshold: 0.0010       # Tăng positive rate
+  retrain_on_startup: true           # Force retrain với data hiện tại
   live_learning_enabled: true
   live_learning_interval_minutes: 30
   live_learning_min_new_bars: 0
@@ -163,10 +165,10 @@ training:
   dataset_path: outputs/training_dataset_acc2.csv
   optimize_threshold: true
   validation_split: 0.15
-  threshold_min: 0.45                # v2: không cho xuống quá thấp (tránh precision rác)
-  threshold_max: 0.80
+  threshold_min: 0.40                # Hạ xuống 0.40 — tăng recall signal
+  threshold_max: 0.78
   threshold_step: 0.01
-  min_precision_floor: 0.55          # v2: WR >= 55% (EV dương mạnh với RR 3.5)
+  min_precision_floor: 0.45          # Hạ xuống 0.45 — với RR 3.5 vẫn EV dương
   backtest_initial_balance: 200.0    # vốn khởi đầu
 
 notifications:

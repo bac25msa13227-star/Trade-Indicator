@@ -130,7 +130,8 @@ data_service = MarketDataService(settings)
 strategy = HybridStrategy(settings)
 risk_mgr = RiskManager(settings)
 frames = data_service.fetch_multi_timeframe_data(source="csv_folder", all_bars=True)
-print(f"      M15:{len(frames['M15']):,}  H4:{len(frames['H4']):,}  "
+_exec_tf = settings.market.execution_timeframe
+print(f"      {_exec_tf}:{len(frames[_exec_tf]):,}  H4:{len(frames['H4']):,}  "
       f"H1:{len(frames['H1']):,}  D1:{len(frames['D1']):,} rows  ({time.time()-t0:.1f}s)")
 
 # ── 2. Build full dataset (features computed ONCE) ───────────────────────────

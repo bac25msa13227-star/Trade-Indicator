@@ -1,5 +1,14 @@
 ﻿import os, sys, pathlib
 os.environ.setdefault('PYTHONIOENCODING','utf-8')
+# Reconfigure stdout/stderr to UTF-8 before logging is set up.
+# On Windows, sys.stdout uses the system codepage (cp1252) by default, which
+# cannot encode Vietnamese characters.  PYTHONIOENCODING is set above but only
+# takes effect for a fresh interpreter — if stdout was already opened we must
+# reconfigure it explicitly.
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 sys.path.insert(0, 'src')
 
 # Load .env manually
@@ -29,7 +38,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s | %(levelname)s | %(name)s | %(message)s',
     handlers=[
-        logging.StreamHandler(sys.stdout),
+        logging.StreamHandler(sys.stdout),  # stdout already reconfigured to utf-8 above
         logging.FileHandler(_log_file, encoding='utf-8'),
     ]
 )

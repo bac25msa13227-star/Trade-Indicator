@@ -178,6 +178,12 @@ def _log_live_learning_event(settings: Settings, event: dict[str, object]) -> No
 def run_training(settings: Settings) -> None:
     data_service, trainer, strategy, _, _, _ = _bootstrap(settings)
     frames = data_service.fetch_multi_timeframe_data(source=settings.market.training_data_source, all_bars=True)
+    max_bars = settings.training.max_train_bars
+    if max_bars and max_bars > 0:
+        for tf in list(frames.keys()):
+            if len(frames[tf]) > max_bars:
+                frames[tf] = frames[tf].tail(max_bars).reset_index(drop=True)
+        LOGGER.info("Training capped to last %d bars per TF (max_train_bars)", max_bars)
     _, metrics = _train_on_frames(settings, trainer, strategy, frames)
 
     LOGGER.info("Training complete: %s", metrics)
@@ -1326,8 +1332,8 @@ def run_live_loop(settings: Settings) -> None:
                             LOGGER.error("MT5 order failed: %s", order_err)
                 else:
                     LOGGER.info(
-                        "No trade: %s | bal=%.2f open=%d/%d atr=%.2f",
-                        decision.reason, account_balance, open_positions, max_allowed, atr_value,
+                        "No trade: %s | conf=%.3f | bal=%.2f open=%d/%d atr=%.2f",
+                        decision.reason, decision.confidence, account_balance, open_positions, max_allowed, atr_value,
                     )
 
             except Exception as loop_err:

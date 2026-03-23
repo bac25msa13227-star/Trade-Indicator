@@ -527,41 +527,40 @@ def attach_news_features(
             df[col] = val
         return df
 
-    # Reliably convert to epoch nanoseconds regardless of pandas version.
-    # pandas 2.x stores tz-aware datetimes as datetime64[us], so
-    # `.values.astype("int64")` returns MICROSECONDS — off by 1000x from
-    # ns_bo, causing all bars to fall inside the blackout window.
-    # Fix: strip tz first, then force datetime64[ns] resolution before view.
-    def _to_epoch_ns(s: pd.Series) -> np.ndarray:
+    # Use epoch SECONDS (datetime64[s]) for all comparisons to avoid the
+    # pandas 2.x datetime64[us] vs datetime64[ns] ambiguity.
+    # datetime64[s].astype("int64") always returns epoch seconds — unambiguous
+    # regardless of numpy/pandas version.
+    def _to_epoch_s(s: pd.Series) -> np.ndarray:
         if s.dt.tz is not None:
             s = s.dt.tz_convert("UTC").dt.tz_localize(None)
-        return s.values.astype("datetime64[ns]").view("int64")
+        return s.values.astype("datetime64[s]").astype("int64")
 
-    bar_ns  = _to_epoch_ns(df["time"])
-    hi_ns   = _to_epoch_ns(hi["datetime_utc"])
+    bar_s   = _to_epoch_s(df["time"])
+    hi_s    = _to_epoch_s(hi["datetime_utc"])
     hi_gold = hi["gold_direction"].fillna(0).astype(int).values
 
-    NS    = int(3_600_000_000_000)
-    ns_la = int(lookahead_hours * NS)
-    ns_bo = int(blackout_hours  * NS)
-    ns_2h = int(2 * NS)
-    ns_48 = int(48 * NS)
+    SPH   = int(3600)  # seconds per hour
+    s_la  = int(lookahead_hours * SPH)
+    s_bo  = int(blackout_hours  * SPH)
+    s_2h  = int(2 * SPH)
+    s_48  = int(48 * SPH)
 
-    idx_n  = np.searchsorted(hi_ns, bar_ns, side="right")
+    idx_n  = np.searchsorted(hi_s, bar_s, side="right")
     idx_p  = idx_n - 1
 
-    valid_n  = idx_n < len(hi_ns)
-    clamp_n  = np.minimum(idx_n, len(hi_ns) - 1)
-    diff_n   = np.where(valid_n, hi_ns[clamp_n] - bar_ns, ns_48 + NS)
-    hours_ahead  = np.clip(diff_n.astype(float) / NS, 0.0, 48.0)
-    in_la        = valid_n & (diff_n <= ns_la)
+    valid_n  = idx_n < len(hi_s)
+    clamp_n  = np.minimum(idx_n, len(hi_s) - 1)
+    diff_n   = np.where(valid_n, hi_s[clamp_n] - bar_s, s_48 + SPH)
+    hours_ahead  = np.clip(diff_n.astype(float) / SPH, 0.0, 48.0)
+    in_la        = valid_n & (diff_n <= s_la)
     gold_pre     = np.where(in_la, hi_gold[clamp_n], 0)
 
     valid_p  = idx_p >= 0
     clamp_p  = np.maximum(idx_p, 0)
-    diff_p   = np.where(valid_p, bar_ns - hi_ns[clamp_p], ns_48 + NS)
-    hours_since  = np.clip(diff_p.astype(float) / NS, 0.0, 48.0)
-    in_post      = valid_p & (diff_p <= ns_2h)
+    diff_p   = np.where(valid_p, bar_s - hi_s[clamp_p], s_48 + SPH)
+    hours_since  = np.clip(diff_p.astype(float) / SPH, 0.0, 48.0)
+    in_post      = valid_p & (diff_p <= s_2h)
     gold_post    = np.where(in_post, hi_gold[clamp_p], 0)
 
     df["news_impact_ahead"]  = np.where(in_la, 2, 0).astype(int)
@@ -569,7 +568,7 @@ def attach_news_features(
     df["news_hours_since"]   = hours_since.round(2)
     df["news_surprise_gold"] = np.where(gold_post != 0, gold_post, gold_pre).astype(int)
     df["news_is_blackout"]   = (
-        (valid_n & (diff_n <= ns_bo)) | (valid_p & (diff_p <= ns_bo))
+        (valid_n & (diff_n <= s_bo)) | (valid_p & (diff_p <= s_bo))
     ).astype(int)
 
     src_cnt = nc["source"].value_counts().to_dict() if "source" in nc.columns else {}

@@ -53,7 +53,8 @@ print("[1/4] Loading multi-timeframe CSV data...")
 t0 = time.time()
 svc    = MarketDataService(settings)
 frames = svc.fetch_multi_timeframe_data(source="csv_folder", all_bars=True)
-print(f"      M15:{len(frames['M15'])}  H4:{len(frames['H4'])}  H1:{len(frames['H1'])}  D1:{len(frames['D1'])}  ({time.time()-t0:.1f}s)")
+_exec_tf = settings.market.execution_timeframe
+print(f"      {_exec_tf}:{len(frames[_exec_tf])}  H4:{len(frames['H4'])}  H1:{len(frames['H1'])}  D1:{len(frames['D1'])}  ({time.time()-t0:.1f}s)")
 
 # ── 2. Build features + labels ────────────────────────────────────────────
 print("\n[2/4] Building features & labels...")
@@ -70,16 +71,16 @@ if args.eval_only:
         print("ERROR: saved model not found at", settings.app.model_path)
         sys.exit(1)
     best_thr = trainer.decision_threshold
-    # Use the saved model's feature columns (may differ from current FEATURE_COLUMNS)
-    _feat_cols = trainer.feature_columns
     print(f"      Loaded: {settings.app.model_path}  (threshold={best_thr:.2f})")
-    # attach predictions using saved model/scaler
+    print(f"      Features: {len(trainer.feature_columns)}  mask_selected: {int(trainer._feature_mask.sum()) if trainer._feature_mask is not None else 'all'}")
+    # Use predict_dataset() which correctly applies scaler + _feature_mask
+    # Only predict on test set to minimize memory usage (train rows not needed for simulation)
+    test_pred = trainer.predict_dataset(test_df)
     dataset = dataset.copy()
-    _avail = [c for c in _feat_cols if c in dataset.columns]
-    dataset["probability"] = trainer.model.predict_proba(
-        trainer.scaler.transform(dataset[_avail])
-    )[:, 1]
-    dataset["prediction"] = (dataset["probability"] >= best_thr).astype(int)
+    dataset["probability"] = 0.0
+    dataset["prediction"]  = 0
+    dataset.loc[test_pred.index, "probability"] = test_pred["probability"].values
+    dataset.loc[test_pred.index, "prediction"]  = test_pred["prediction"].values
 else:
     print("\n[3/4] Training model (HistGBC 500, balanced, threshold-optimised)...")
     from sklearn.ensemble import HistGradientBoostingClassifier
