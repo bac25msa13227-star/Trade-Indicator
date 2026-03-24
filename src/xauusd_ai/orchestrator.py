@@ -5,6 +5,7 @@ import html
 import itertools
 import json
 import logging
+import os
 import queue
 import threading
 import time
@@ -127,11 +128,25 @@ def _configure_logging(level: str) -> None:
     )
 
 
+def _make_mlflow_tracker(settings: Settings):
+    """Create an MLflowTracker for the given settings, or None if unavailable."""
+    try:
+        from xauusd_ai.infra.mlflow_client import MLflowTracker
+        from pathlib import Path as _Path
+        _stem = _Path(settings.app.model_path).stem  # e.g. model_ict_wyckoff / model2_weekly500
+        _experiment = f"xauusd_{_stem}"
+        return MLflowTracker(experiment_name=_experiment)
+    except Exception as _exc:  # noqa: BLE001
+        LOGGER.warning("MLflow tracker unavailable: %s", _exc)
+        return None
+
+
 def _bootstrap(settings: Settings) -> tuple[MarketDataService, ModelTrainer, HybridStrategy, TelegramNotifier, MT5Executor, RiskManager]:
     load_dotenv()
     _configure_logging(settings.app.log_level)
     data_service = MarketDataService(settings)
-    trainer = ModelTrainer(settings)
+    mlflow_tracker = _make_mlflow_tracker(settings)
+    trainer = ModelTrainer(settings, mlflow_tracker=mlflow_tracker)
     strategy = HybridStrategy(settings)
     notifier = TelegramNotifier(settings)
     executor = MT5Executor(settings)
@@ -545,6 +560,35 @@ def run_paper_trade_loop(settings: Settings) -> None:
 def run_live_loop(settings: Settings) -> None:
     data_service, trainer, strategy, notifier, executor, risk_manager, self_learner = _bootstrap_with_learner(settings)
 
+    # ── Infrastructure: PostgreSQL + Prometheus ───────────────────────────────
+    _account_tag = Path(settings.app.live_closed_trades_path).stem.replace("live_closed_trades_", "").strip("_") or "default"
+    _trade_store = None
+    _trading_metrics = None
+    try:
+        from xauusd_ai.infra.db import get_engine, init_tables, TradeStore
+        _db_engine = get_engine()
+        init_tables(_db_engine)
+        _trade_store = TradeStore(_db_engine)
+        LOGGER.info("PostgreSQL TradeStore initialized (account=%s)", _account_tag)
+    except Exception as _db_exc:
+        LOGGER.warning("PostgreSQL unavailable — falling back to CSV only: %s", _db_exc)
+    try:
+        from xauusd_ai.infra.metrics import TradingMetrics
+        _trading_metrics = TradingMetrics(_account_tag)
+        LOGGER.info("Prometheus metrics initialized (account=%s)", _account_tag)
+        # Start HTTP metrics server so Prometheus (in Docker) can scrape via host.docker.internal
+        try:
+            from prometheus_client import start_http_server
+            _metrics_port = int(os.environ.get("METRICS_PORT", 8002 if "acc2" in _account_tag else 8001))
+            start_http_server(_metrics_port)
+            LOGGER.info("Prometheus metrics HTTP server started on port %d (account=%s)", _metrics_port, _account_tag)
+        except OSError as _port_exc:
+            LOGGER.warning("Prometheus HTTP server port busy (already running?): %s", _port_exc)
+        except Exception as _hs_exc:
+            LOGGER.warning("Prometheus HTTP server failed to start: %s", _hs_exc)
+    except Exception as _pm_exc:
+        LOGGER.warning("Prometheus metrics unavailable: %s", _pm_exc)
+
     # ── Config hot-reload: detect YAML file changes ──────────────────────────
     _config_path = getattr(settings, "_config_path", None)
     _cp = Path(_config_path) if _config_path else None
@@ -733,9 +777,9 @@ def run_live_loop(settings: Settings) -> None:
     # Keep signals CSV across restarts (dashboard de-duplicates by bar time)
     _session_id = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
     def _append_live_trade(pos: dict, pnl: float, is_win: bool, close_type: str = "UNKNOWN") -> None:
-        """Ghi lệnh đóng vào CSV để dashboard P&L đọc được."""
+        """Ghi lệnh đóng vào CSV + PostgreSQL để dashboard P&L đọc được."""
         import datetime as _dt
-        row = pd.DataFrame([{
+        _trade_row = {
             "time":        _dt.datetime.now(_dt.timezone.utc).isoformat(),
             "ticket":      pos.get("ticket", 0),
             "side":        pos.get("side", ""),
@@ -749,11 +793,25 @@ def run_live_loop(settings: Settings) -> None:
             "is_win":      is_win,
             "close_type":  close_type,
             "session_id":  _session_id,
-        }])
+        }
+        row = pd.DataFrame([_trade_row])
+        # CSV (backward compat)
         if _live_trades_path.exists():
             row.to_csv(_live_trades_path, mode="a", header=False, index=False)
         else:
             row.to_csv(_live_trades_path, index=False)
+        # PostgreSQL
+        if _trade_store is not None:
+            try:
+                _trade_store.insert_trade(_account_tag, _trade_row)
+            except Exception as _pg_exc:
+                LOGGER.debug("PostgreSQL insert_trade failed (non-fatal): %s", _pg_exc)
+        # Prometheus
+        if _trading_metrics is not None:
+            try:
+                _trading_metrics.record_trade(pnl=pnl, is_win=is_win, side=pos.get("side", "none"))
+            except Exception:
+                pass
 
     last_seen_bar_time: pd.Timestamp | None = None
     last_learning_time: float = time.time()
@@ -1260,26 +1318,54 @@ def run_live_loop(settings: Settings) -> None:
                     _write_header = not log_path.exists() or log_path.stat().st_size == 0
                     signal_row.to_csv(log_path, mode="a", header=_write_header, index=False)
                     _last_logged_bar_time = latest_bar_time
+                    # PostgreSQL signal insert
+                    if _trade_store is not None:
+                        try:
+                            _trade_store.insert_signal(_account_tag, signal_row.iloc[0].to_dict())
+                        except Exception as _pg_sig_exc:
+                            LOGGER.debug("PostgreSQL insert_signal failed: %s", _pg_sig_exc)
 
                 # ── Ghi live_status.json để dashboard đọc account state realtime ──
                 import datetime as _dtnow
                 _is_acc2 = "acc2" in log_path.stem
                 _status_path = log_path.parent / ("live_status_acc2.json" if _is_acc2 else "live_status_acc1.json")
+                _status_payload = {
+                    "ts": _dtnow.datetime.now(_dtnow.timezone.utc).isoformat(),
+                    "bar_time": str(latest_bar_time),
+                    "account_balance": account_balance,
+                    "open_positions": open_positions,
+                    "max_positions": max_allowed,
+                    "volatility_regime": volatility_regime,
+                    "confidence": round(decision.confidence, 4),
+                    "should_trade": decision.should_trade,
+                    "side": decision.side,
+                    "reason": decision.reason,
+                }
                 try:
-                    _status_path.write_text(json.dumps({
-                        "ts": _dtnow.datetime.now(_dtnow.timezone.utc).isoformat(),
-                        "bar_time": str(latest_bar_time),
-                        "account_balance": account_balance,
-                        "open_positions": open_positions,
-                        "max_positions": max_allowed,
-                        "volatility_regime": volatility_regime,
-                        "confidence": round(decision.confidence, 4),
-                        "should_trade": decision.should_trade,
-                        "side": decision.side,
-                        "reason": decision.reason,
-                    }, ensure_ascii=False), encoding="utf-8")
+                    _status_path.write_text(json.dumps(_status_payload, ensure_ascii=False), encoding="utf-8")
                 except Exception:
                     pass
+                # PostgreSQL upsert (non-blocking, best-effort)
+                if _trade_store is not None:
+                    try:
+                        _trade_store.upsert_live_status(_account_tag, _status_payload)
+                    except Exception as _pg_exc:
+                        LOGGER.debug("PostgreSQL upsert_live_status failed: %s", _pg_exc)
+                # Prometheus account metrics
+                if _trading_metrics is not None:
+                    try:
+                        _trading_metrics.record_signal(
+                            confidence=decision.confidence,
+                            should_trade=decision.should_trade,
+                            side=decision.side or "none",
+                        )
+                        _peak_balance = account_balance  # simplified; real drawdown tracked in risk module
+                        _trading_metrics.update_account(
+                            balance=account_balance,
+                            open_positions=open_positions,
+                        )
+                    except Exception:
+                        pass
 
                 # ── Đặt lệnh thật ──────────────────────────────────────────────────────────
                 if decision.should_trade:

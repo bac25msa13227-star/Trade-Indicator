@@ -18,10 +18,17 @@ from sklearn.preprocessing import StandardScaler
 from xauusd_ai.config import Settings
 from xauusd_ai.features.dataset import FEATURE_COLUMNS
 
+try:
+    from xauusd_ai.infra.mlflow_client import MLflowTracker
+    _MLFLOW_AVAILABLE = True
+except ImportError:
+    _MLFLOW_AVAILABLE = False
+
 
 class ModelTrainer:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, mlflow_tracker=None) -> None:
         self.settings = settings
+        self._mlflow: MLflowTracker | None = mlflow_tracker  # type: ignore[name-defined]
         # Single HGB model — memory-efficient, good calibration, supports sample_weight directly
         self.model = HistGradientBoostingClassifier(
             max_iter=300, learning_rate=0.05, max_depth=5,
@@ -109,6 +116,7 @@ class ModelTrainer:
         if save_artifacts:
             self._last_roc_auc = metrics.get("roc_auc", 0.0)
             self._save_artifacts()
+            self._mlflow_log_training(metrics)
         return metrics
 
     def _optimize_threshold(self, train_df: pd.DataFrame) -> float:
@@ -181,6 +189,36 @@ class ModelTrainer:
             best_thr = safe_thr
 
         return best_thr
+
+    def _mlflow_log_training(self, metrics: dict) -> None:
+        """Log training params + metrics to MLflow if tracker is available."""
+        if self._mlflow is None:
+            return
+        import datetime as _dt
+        _run_name = f"train_{_dt.datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+        try:
+            with self._mlflow.start_run(run_name=_run_name, tags={"source": "live_runner"}):
+                params = {
+                    "max_iter": self.model.max_iter,
+                    "learning_rate": self.model.learning_rate,
+                    "max_depth": self.model.max_depth,
+                    "signal_threshold": self.decision_threshold,
+                    "feature_count": len(self.feature_columns),
+                }
+                self._mlflow.log_params(params)
+                self._mlflow.log_metrics({k: v for k, v in metrics.items() if isinstance(v, float)})
+                # Upload artifacts to MinIO via MLflow
+                model_path = Path(self.settings.app.model_path)
+                scaler_path = Path(self.settings.app.scaler_path)
+                for artifact in [model_path, scaler_path]:
+                    if artifact.exists():
+                        self._mlflow.log_artifact(artifact, artifact_path="artifacts")
+                cal_path = model_path.with_suffix(".cal.pkl")
+                if cal_path.exists():
+                    self._mlflow.log_artifact(cal_path, artifact_path="artifacts")
+        except Exception as exc:  # noqa: BLE001
+            import logging
+            logging.getLogger(__name__).warning("MLflow log_training failed: %s", exc)
 
     @staticmethod
     def _atomic_write_pickle(obj: object, dest: Path) -> None:
