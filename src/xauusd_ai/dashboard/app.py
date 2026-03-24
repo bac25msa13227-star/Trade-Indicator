@@ -973,7 +973,12 @@ def _render_live_tab() -> None:
     _acc_options = ["Acc 1 — 270832477 (Exness-MT5Trial17)", "Acc 2 — 433326057 (Exness-MT5Trial7)"]
     _sel_acc = st.radio("Xem chi tiết tài khoản:", _acc_options, horizontal=True, key="acc_selector")
     _selected_signals = _live_sigs if "Acc 1" in _sel_acc else _live_sigs_acc2
-    _sel_thr = _thr_acc2 if "Acc 2" in _sel_acc else _thr
+    _sel_thr  = _thr_acc2 if "Acc 2" in _sel_acc else _thr
+    # Model metadata & walk-forward report for the selected account
+    _sel_meta     = model_meta_acc2 if "Acc 2" in _sel_acc else model_meta
+    _sel_wf_file  = "walkforward_report_acc2.json" if "Acc 2" in _sel_acc else "walkforward_report_ict_wyckoff.json"
+    # Live-status JSON — single read, reused across all sections below
+    _detail_status = load_json(OUTPUTS / ("live_status_acc2.json" if "Acc 2" in _sel_acc else "live_status_acc1.json"))
 
     # Convert ONCE to plain dict — avoids all Series-truth-value errors
     _sel_row: dict = _selected_signals.iloc[0].to_dict() if not _selected_signals.empty else {}
@@ -987,13 +992,17 @@ def _render_live_tab() -> None:
         except (TypeError, ValueError):
             return float(default)
 
-    if not _selected_signals.empty:
-        conf    = _f("confidence")
-        side    = str(_sel_row.get("side", "flat"))
+    if not _selected_signals.empty or _detail_status:
+        # Prefer live_status.json (real-time, updated every scan) over CSV row
+        # for fields that are available in both.  strategy_score/entry/sl/tp
+        # are only in the CSV so those still use _f().
+        _st_traded = _detail_status.get("should_trade")
+        conf    = float(_detail_status.get("confidence")   or _f("confidence"))
+        side    = str(_detail_status.get("side")           or _sel_row.get("side", "flat"))
         score   = _f("strategy_score")
-        regime  = int(_f("volatility_regime", 1))
-        traded  = bool(_sel_row.get("should_trade", False))
-        reason  = str(_sel_row.get("reason", ""))
+        regime  = int(float(_detail_status.get("volatility_regime") or _f("volatility_regime", 1)))
+        traded  = bool(_st_traded if _st_traded is not None else _sel_row.get("should_trade", False))
+        reason  = str(_detail_status.get("reason")         or _sel_row.get("reason", ""))
         r_label = {0: "Sideways", 1: "Normal", 2: "Strong Vol"}.get(regime, "?")
         side_c  = {"buy": GREEN, "sell": RED}.get(side, GREY)
         conf_c  = GREEN if conf >= _sel_thr else (AMBER if conf >= _sel_thr * 0.7 else RED)
@@ -1007,8 +1016,10 @@ def _render_live_tab() -> None:
             unsafe_allow_html=True,
         )
         c1, c2, c3, c4, c5 = st.columns(5)
+        # Timestamp: prefer bar_time from live_status.json (most current)
+        _sig_ts = str(_detail_status.get("bar_time") or _sel_row.get("time", ""))[:16]
         c1.markdown(_card("Tín hiệu", {"buy": "BUY", "sell": "SELL"}.get(side, "FLAT"),
-                          str(_sel_row.get("time", ""))[:16], side_c), unsafe_allow_html=True)
+                          _sig_ts, side_c), unsafe_allow_html=True)
         c2.markdown(_card("ML Confidence", f"{conf:.1%}", f"ngưỡng {_sel_thr:.0%}", conf_c), unsafe_allow_html=True)
         c3.markdown(_card("Strategy Score", f"{score:+.4f}", ">= 0.30 để vào lệnh", score_c), unsafe_allow_html=True)
         c4.markdown(_card("Chế độ", r_label, "thị trường", reg_c), unsafe_allow_html=True)
@@ -1016,9 +1027,8 @@ def _render_live_tab() -> None:
                           "" if traded else reason[:40], dec_c), unsafe_allow_html=True)
 
     if not _selected_signals.empty and "account_balance" in _selected_signals.columns:
-        # ── Đọc live_status.json để lấy open_positions realtime ──────────
-        _status_file = "live_status_acc2.json" if "Acc 2" in _sel_acc else "live_status_acc1.json"
-        _live_status = load_json(OUTPUTS / _status_file)
+        # Reuse _detail_status already loaded above (no duplicate file read)
+        _live_status = _detail_status
         try:
             bal = float(_live_status.get("account_balance") or _f("account_balance") or 0)
             opn = int(_live_status.get("open_positions", _f("open_positions")))
@@ -1056,7 +1066,7 @@ def _render_live_tab() -> None:
         if opn >= mx:
             st.warning(f"⚠️ Đầy lệnh: {opn}/{mx} — Bot sẽ không mở thêm")
 
-    if model_meta:
+    if _sel_meta:
         st.divider()
         st.markdown(
             '<div style="font-size:1.1rem;font-weight:700;color:#e2e8f0;margin:4px 0 8px">'
@@ -1065,11 +1075,11 @@ def _render_live_tab() -> None:
         )
         mm1, mm2, mm3, mm4 = st.columns(4)
         mm1.metric("Threshold", f"{_sel_thr:.2f}")
-        mm2.metric("Precision", _pct(model_meta.get("precision")))
-        mm3.metric("Recall",    _pct(model_meta.get("recall")))
-        mm4.metric("F1 Score",  _pct(model_meta.get("f1")))
-        # Walk-Forward aggregate stats
-        _wf_agg = load_json(OUTPUTS / "walkforward_report_ict_wyckoff.json").get("aggregate", {})
+        mm2.metric("Precision", _pct(_sel_meta.get("precision")))
+        mm3.metric("Recall",    _pct(_sel_meta.get("recall")))
+        mm4.metric("F1 Score",  _pct(_sel_meta.get("f1")))
+        # Walk-Forward aggregate stats (for the selected account)
+        _wf_agg = load_json(OUTPUTS / _sel_wf_file).get("aggregate", {})
         if _wf_agg:
             st.caption("📊 Walk-Forward (19 folds, 2022–2026)")
             wm1, wm2, wm3, wm4 = st.columns(4)
