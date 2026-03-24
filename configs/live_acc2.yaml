@@ -156,7 +156,7 @@ training:
   label_tp_rr: 2.0                   # Label dùng RR 2.0 (dễ dự đoán hơn 3.5)
   label_horizon: 36                  # M5: 3h = 36 bars
   min_return_threshold: 0.0010       # Tăng positive rate
-  retrain_on_startup: true           # Force retrain với data hiện tại
+  retrain_on_startup: false          # Đã có model, không cần retrain khi restart
   live_learning_enabled: true
   live_learning_interval_minutes: 30
   live_learning_min_new_bars: 0

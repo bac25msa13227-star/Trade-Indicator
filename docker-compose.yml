@@ -1,7 +1,246 @@
 services:
 
+  # ════════════════════════════════════════════════════════════════════════════
+  # INFRASTRUCTURE SERVICES
+  # ════════════════════════════════════════════════════════════════════════════
+
+  # ── PostgreSQL: trade/signal/status persistence ───────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: xauusd-postgres
+    env_file: .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-trader}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trader_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-tradedb}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-trader}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── MinIO: object storage (model artifacts, datasets, reports) ────────────
+  minio:
+    image: minio/minio:latest
+    container_name: xauusd-minio
+    env_file: .env
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"    # S3 API
+      - "9001:9001"    # MinIO Console UI
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # ── MLflow: experiment tracking + model registry ──────────────────────────
+  mlflow:
+    build:
+      context: .
+      dockerfile: Dockerfile.mlflow
+    image: xauusd-mlflow:latest
+    container_name: xauusd-mlflow
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+    command: >
+      mlflow server
+      --backend-store-uri postgresql://${POSTGRES_USER:-trader}:${POSTGRES_PASSWORD:-trader_secret}@postgres:5432/${POSTGRES_DB:-tradedb}
+      --default-artifact-root s3://mlflow/
+      --host 0.0.0.0
+      --port 5000
+    ports:
+      - "5000:5000"
+    restart: unless-stopped
+
+  # ── Prometheus: metrics scraping ──────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.51.2
+    container_name: xauusd-prometheus
+    volumes:
+      - ./configs/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.enable-lifecycle"
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  # ── Grafana: dashboards ───────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: xauusd-grafana
+    depends_on:
+      - prometheus
+      - postgres
+    env_file: .env
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_SERVER_ROOT_URL: http://localhost:3000
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./configs/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./configs/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # AIRFLOW (workflow orchestration)
+  # ════════════════════════════════════════════════════════════════════════════
+
+  airflow-init:
+    image: apache/airflow:2.9.1-python3.11
+    container_name: xauusd-airflow-init
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-trader}:${POSTGRES_PASSWORD:-trader_secret}@postgres:5432/airflow
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-}
+      AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY:-changeme}
+      _AIRFLOW_DB_MIGRATE: "true"
+      _AIRFLOW_WWW_USER_CREATE: "true"
+      _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_USER:-airflow}
+      _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_PASSWORD:-airflow}
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./src:/opt/airflow/src
+      - ./configs:/opt/airflow/configs
+      - ./outputs:/opt/airflow/outputs
+      - airflow_logs:/opt/airflow/logs
+    command: version
+    restart: "no"
+
+  airflow-webserver:
+    image: apache/airflow:2.9.1-python3.11
+    container_name: xauusd-airflow-webserver
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    env_file: .env
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-trader}:${POSTGRES_PASSWORD:-trader_secret}@postgres:5432/airflow
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-}
+      AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY:-changeme}
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-trader}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trader_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-tradedb}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      TRADING_ACCOUNT: ${TRADING_ACCOUNT:-acc2}
+      SETTINGS_PATH: configs/live_acc2.yaml
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./src:/opt/airflow/src
+      - ./configs:/opt/airflow/configs
+      - ./outputs:/opt/airflow/outputs
+      - airflow_logs:/opt/airflow/logs
+    ports:
+      - "8080:8080"
+    command: webserver
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  airflow-scheduler:
+    image: apache/airflow:2.9.1-python3.11
+    container_name: xauusd-airflow-scheduler
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-trader}:${POSTGRES_PASSWORD:-trader_secret}@postgres:5432/airflow
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-}
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-trader}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trader_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-tradedb}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      TRADING_ACCOUNT: ${TRADING_ACCOUNT:-acc2}
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./src:/opt/airflow/src
+      - ./configs:/opt/airflow/configs
+      - ./outputs:/opt/airflow/outputs
+      - airflow_logs:/opt/airflow/logs
+    command: scheduler
+    restart: unless-stopped
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # APPLICATION SERVICES
+  # ════════════════════════════════════════════════════════════════════════════
+
+  # ── FastAPI: REST API + Prometheus /metrics ───────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    image: xauusd-api:latest
+    container_name: xauusd-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-trader}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trader_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-tradedb}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    volumes:
+      - ./configs:/app/configs
+      - ./outputs:/app/outputs
+      - ./src:/app/src
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    command: ["python", "-m", "uvicorn", "xauusd_ai.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
   # ── BACKEND: Training (default config) ───────────────────────────────────
-  # Chạy 1 lần để train model, sau đó thoát
   # Lệnh: docker compose up train --build
   train:
     build:
@@ -9,14 +248,22 @@ services:
       dockerfile: Dockerfile.backend
     image: xauusd-backend:latest
     env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-trader}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trader_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-tradedb}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MLFLOW_TRACKING_URI: http://mlflow:5000
     volumes:
-      - ./configs:/app/configs        # mount config (sửa không cần rebuild)
-      - ./outputs:/app/outputs        # model.pkl, reports lưu ra đây
-      - ./src:/app/src                # hot-reload code khi dev
+      - ./configs:/app/configs
+      - ./outputs:/app/outputs
+      - ./src:/app/src
     command: ["python", "src/xauusd_ai/main.py", "train", "--config", "configs/settings.yaml"]
 
-  # ── BACKEND: Training ICT+Wyckoff (2022-2025 train / 2026 test) ──────────
-  # GradientBoosting + 26 features: RSI, MACD, Momentum + ICT + Wyckoff
+  # ── BACKEND: Training ICT+Wyckoff ─────────────────────────────────────────
   # Lệnh: docker compose up train-ict --build
   train-ict:
     build:
@@ -24,6 +271,15 @@ services:
       dockerfile: Dockerfile.backend
     image: xauusd-backend:latest
     env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-trader}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trader_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-tradedb}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MLFLOW_TRACKING_URI: http://mlflow:5000
     volumes:
       - ./configs:/app/configs
       - ./outputs:/app/outputs
@@ -31,15 +287,26 @@ services:
     command: ["python", "src/xauusd_ai/main.py", "train", "--config", "configs/train_ict_wyckoff_2022_2026.yaml"]
 
   # ── BACKEND: Live Trading ─────────────────────────────────────────────────
-  # Chạy liên tục, scan mỗi poll_seconds
   # Lệnh: docker compose up live -d
-  # LƯU Ý: MetaTrader5 chỉ chạy trên Windows native — container Linux sẽ skip MT5
   live:
     build:
       context: .
       dockerfile: Dockerfile.backend
-    image: xauusd-backend:latest      # dùng lại image đã build của train
+    image: xauusd-backend:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
     env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-trader}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trader_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-tradedb}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      TRADING_ACCOUNT: acc2
     volumes:
       - ./configs:/app/configs
       - ./outputs:/app/outputs
@@ -55,25 +322,49 @@ services:
       dockerfile: Dockerfile.backend
     image: xauusd-backend:latest
     env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-trader}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trader_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-tradedb}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MLFLOW_TRACKING_URI: http://mlflow:5000
     volumes:
       - ./configs:/app/configs
       - ./outputs:/app/outputs
       - ./src:/app/src
     command: ["python", "src/xauusd_ai/main.py", "backtest", "--config", "configs/settings.yaml"]
 
-  # ── FRONTEND: Dashboard ───────────────────────────────────────────────────
-  # Build và restart độc lập với backend
+  # ── FRONTEND: Streamlit Dashboard ────────────────────────────────────────
   # Lệnh: docker compose up frontend --build -d
   frontend:
     build:
       context: .
       dockerfile: Dockerfile.frontend
     image: xauusd-frontend:latest
+    depends_on:
+      - api
+      - postgres
     env_file: .env
+    environment:
+      FASTAPI_URL: http://api:8000
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-trader}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trader_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-tradedb}
     volumes:
       - ./configs:/app/configs
-      - ./outputs:/app/outputs        # đọc CSV/JSON từ backend để hiển thị
+      - ./outputs:/app/outputs
       - ./src:/app/src
     ports:
       - "8501:8501"
     restart: unless-stopped
+
+volumes:
+  postgres_data:
+  minio_data:
+  prometheus_data:
+  grafana_data:
+  airflow_logs:

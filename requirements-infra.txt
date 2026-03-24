@@ -1,0 +1,27 @@
+# Infrastructure dependencies for the enhanced stack
+# Install with: pip install -r requirements-infra.txt
+
+# PostgreSQL
+psycopg2-binary>=2.9.9
+SQLAlchemy>=2.0.35
+
+# MinIO / S3
+minio>=7.2.9
+boto3>=1.34.0        # used by MLflow artifact store
+
+# MLflow — skinny client only (server runs in separate xauusd-mlflow container)
+mlflow-skinny>=2.13.0
+
+# FastAPI + server
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+httpx>=0.27.0        # async HTTP for internal calls
+
+# Prometheus
+prometheus-client>=0.20.0
+
+# Evidently (pinned to 0.4.x — avoids heavyweight litestar dep introduced in 0.6+)
+evidently==0.4.30
+
+# Airflow (install separately in Airflow containers via image)
+# apache-airflow>=2.9.1

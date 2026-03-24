@@ -3,6 +3,7 @@
 # Train: Dec 2021 → Dec 2024 (3 năm)  |  Test: Jan 2025 → Mar 2026 (15 tháng)
 # ─────────────────────────────────────────────────────────────────
 app:
+  poll_seconds: 300                   # Check mỗi 5 phút (M15 candle)
   model_path: outputs/model_ict_wyckoff.pkl
   scaler_path: outputs/scaler_ict_wyckoff.pkl
   model_meta_path: outputs/model_meta_ict_wyckoff.json
@@ -16,6 +17,7 @@ app:
   walkforward_trades_path: outputs/walkforward_trades_ict_wyckoff.csv
   paper_trade_log_path: outputs/paper_trade_signals.csv
   live_learning_log_path: outputs/live_learning_log.jsonl
+  live_closed_trades_path: outputs/live_closed_trades_acc1.csv
   dashboard_host: 0.0.0.0
   dashboard_port: 8501
   log_level: INFO
@@ -108,12 +110,37 @@ risk:
   partial_tp_pct: 0.5               # Chốt 50% position
 
 execution:
-  auto_trade: false
+  auto_trade: true                    # ← BẬT GIAO DỊCH THẬT
   deviation: 20
   magic_number: 20260309
   comment: xauusd-ai-ict-wyckoff
 
+  trailing_sl:
+    enabled: true                     # Bật Trailing SL
+    breakeven_at_rr: 0.5              # Chuyển SL về hoà vốn sau 0.5R
+    activation_rr: 1.0               # Bắt đầu trail sau 1R lời
+    trail_atr_multiple: 1.0          # Trail cách 1 × ATR
+
+  dca:
+    enabled: false                    # TẮT DCA — an toàn hơn
+    max_dca_count: 2
+    trigger_atr_multiple: 1.5
+    lot_multiplier: 1.5
+    max_total_risk_pct: 0.03
+
+  exit_model:
+    enabled: false
+    exit_model_path: "outputs/exit_model.pkl"
+    exit_scaler_path: "outputs/exit_scaler.pkl"
+    exit_model_meta_path: "outputs/exit_model_meta.json"
+    exit_threshold: 0.60
+    min_unrealized_rr: 0.30
+    exit_min_hold_bars: 2
+    also_cut_losses: false
+    min_loss_rr: -0.50
+
 training:
+  retrain_on_startup: false          # Đã có model, không cần retrain khi restart
   # ── DATE-BASED SPLIT: train 2023-2026/03/08, test 09/03/2026 → nay ──────────
   train_start_date: "2023-01-01"   # 3 năm gần nhất — bao gồm toàn bộ bull run 2025
   train_end_date:   "2026-03-08"   # Train đến ngày trước test (thay vì chỉ đến 2024)
@@ -140,14 +167,19 @@ training:
   backtest_max_balance_multiplier: 200.0  # cap 200× = $40k
 
 notifications:
-  telegram_enabled: false
+  telegram_enabled: true
+  verbose_message: true
 
 integrations:
   mt5:
-    enabled: false
+    enabled: true                     # ← BẬT kết nối MT5
+    login_env: MT5_LOGIN
+    password_env: MT5_PASSWORD
+    server_env: MT5_SERVER
+    terminal_path: "C:\\Program Files\\MetaTrader 5\\terminal64.exe"
   telegram:
-    token_env: TELEGRAM_BOT_TOKEN
-    chat_id_env: TELEGRAM_CHAT_ID
+    token_env: TELEGRAM_BOT_TOKEN_ACC1
+    chat_id_env: TELEGRAM_CHAT_ID_ACC1
   news:
     enabled: false
     provider: stub

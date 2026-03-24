@@ -1,0 +1,151 @@
+{
+  "__inputs": [],
+  "__requires": [],
+  "annotations": {"list": []},
+  "description": "XAUUSD AI Trading — Live Performance Dashboard",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "title": "Account Balance",
+      "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "yellow", "value": 10000},
+              {"color": "green", "value": 11000}
+            ]
+          },
+          "unit": "currencyUSD"
+        }
+      },
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "orientation": "auto", "textMode": "auto"},
+      "targets": [{"expr": "trading_account_balance", "legendFormat": "{{account}}", "refId": "A"}],
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0}
+    },
+    {
+      "id": 2,
+      "title": "Open Positions",
+      "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]},
+          "unit": "short"
+        }
+      },
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}},
+      "targets": [{"expr": "trading_open_positions", "legendFormat": "{{account}}", "refId": "A"}],
+      "gridPos": {"h": 4, "w": 3, "x": 6, "y": 0}
+    },
+    {
+      "id": 3,
+      "title": "Win Rate",
+      "type": "gauge",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "red", "value": null},
+            {"color": "yellow", "value": 0.45},
+            {"color": "green", "value": 0.55}
+          ]},
+          "unit": "percentunit",
+          "min": 0, "max": 1
+        }
+      },
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}},
+      "targets": [{"expr": "trading_win_rate", "legendFormat": "{{account}}", "refId": "A"}],
+      "gridPos": {"h": 4, "w": 3, "x": 9, "y": 0}
+    },
+    {
+      "id": 4,
+      "title": "Drawdown %",
+      "type": "gauge",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "green", "value": null},
+            {"color": "yellow", "value": 0.05},
+            {"color": "red", "value": 0.10}
+          ]},
+          "unit": "percentunit",
+          "min": 0, "max": 0.3
+        }
+      },
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}},
+      "targets": [{"expr": "trading_drawdown_pct", "legendFormat": "{{account}}", "refId": "A"}],
+      "gridPos": {"h": 4, "w": 3, "x": 12, "y": 0}
+    },
+    {
+      "id": 5,
+      "title": "Drift Score",
+      "type": "gauge",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "green", "value": null},
+            {"color": "yellow", "value": 0.20},
+            {"color": "red", "value": 0.35}
+          ]},
+          "unit": "percentunit",
+          "min": 0, "max": 1
+        }
+      },
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}},
+      "targets": [{"expr": "model_drift_score", "legendFormat": "{{account}} {{feature_set}}", "refId": "A"}],
+      "gridPos": {"h": 4, "w": 3, "x": 15, "y": 0}
+    },
+    {
+      "id": 6,
+      "title": "Signals per Hour",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short"}},
+      "targets": [{"expr": "rate(trading_signals_total[1h])*3600", "legendFormat": "{{account}} {{decision}}", "refId": "A"}],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4}
+    },
+    {
+      "id": 7,
+      "title": "Model Confidence Distribution",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short"}},
+      "targets": [{"expr": "rate(model_prediction_confidence_bucket[5m])", "legendFormat": "{{le}}", "refId": "A"}],
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4}
+    },
+    {
+      "id": 8,
+      "title": "Trade History (PostgreSQL)",
+      "type": "table",
+      "datasource": {"type": "postgres", "uid": "postgres"},
+      "targets": [{
+        "rawSql": "SELECT time, ticket, side, pnl, is_win, close_type FROM trades WHERE account = 'acc2' ORDER BY time DESC LIMIT 50",
+        "format": "table",
+        "refId": "A"
+      }],
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 12}
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["trading", "xauusd"],
+  "title": "XAUUSD Trading Dashboard",
+  "uid": "xauusd-trading-v1",
+  "version": 1
+}

@@ -1,0 +1,132 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Check Docker Status",
+			"type": "shell",
+			"command": "docker image ls && docker ps -a",
+			"isBackground": false
+		},
+		{
+			"label": "Check Docker Status2",
+			"type": "shell",
+			"command": "docker image ls; docker ps -a",
+			"isBackground": false
+		},
+		{
+			"label": "DockerCheck3",
+			"type": "shell",
+			"command": "docker image ls | Out-File C:\\Temp\\imgs.txt -Encoding utf8 -Force; docker ps -a | Out-File C:\\Temp\\containers.txt -Encoding utf8 -Force; Write-Host 'DONE'",
+			"isBackground": false
+		},
+		{
+			"label": "Start Prometheus MLflow",
+			"type": "shell",
+			"command": "Set-Location 'C:\\Users\\Administrator\\Documents\\Trade-Indicator'; docker compose up -d prometheus; Write-Host '--- prometheus started ---'; docker compose up -d mlflow; Write-Host '--- mlflow started ---'; docker ps --format 'table {{.Names}}`t{{.Status}}`t{{.Ports}}'",
+			"isBackground": false
+		},
+		{
+			"label": "DockerStatus4",
+			"type": "shell",
+			"command": "docker ps --format 'table {{.Names}}`t{{.Status}}`t{{.Ports}}' | Out-File C:\\Temp\\status.txt -Encoding utf8 -Force; Write-Host 'written'; Get-Content C:\\Temp\\status.txt",
+			"isBackground": false
+		},
+		{
+			"label": "CheckImages5",
+			"type": "shell",
+			"command": "docker image inspect grafana/grafana:10.4.2 --format '{{.Id}}' 2>&1; docker image inspect ghcr.io/mlflow/mlflow:v2.13.0 --format '{{.Id}}' 2>&1; docker ps --format 'table {{.Names}}`t{{.Status}}' | Out-File C:\\Temp\\status2.txt -Force -Encoding utf8; Write-Host 'DONE'; Get-Content C:\\Temp\\status2.txt",
+			"isBackground": false
+		},
+		{
+			"label": "BuildMLflowStartPrometheus",
+			"type": "shell",
+			"command": "Set-Location 'C:\\Users\\Administrator\\Documents\\Trade-Indicator'; Write-Host '=== Starting Prometheus ==='; docker compose up -d prometheus; $exit1 = $LASTEXITCODE; Write-Host \"prometheus exit: $exit1\"; Write-Host '=== Building MLflow image (pip install) ==='; docker compose build mlflow; $exit2 = $LASTEXITCODE; Write-Host \"mlflow build exit: $exit2\"; Write-Host '=== Done ==='",
+			"isBackground": false
+		},
+		{
+			"label": "BuildMLflow2",
+			"type": "shell",
+			"command": "Set-Location 'C:\\Users\\Administrator\\Documents\\Trade-Indicator'; docker compose build mlflow 2>&1 | Tee-Object -FilePath 'C:\\Temp\\mlflow_build.txt' -Append; Write-Host \"EXIT: $LASTEXITCODE\"; Get-Content 'C:\\Temp\\mlflow_build.txt' | Select-Object -Last 10",
+			"isBackground": false
+		},
+		{
+			"label": "RebuildBackendStartApi",
+			"type": "shell",
+			"command": "Set-Location 'C:\\Users\\Administrator\\Documents\\Trade-Indicator'; Write-Host '=== Rebuilding xauusd-backend with infra packages ==='; docker compose build api 2>&1 | Tee-Object -FilePath 'outputs\\build_backend.log' -Append; $e=$LASTEXITCODE; Write-Host \"Build exit: $e\"; if ($e -eq 0) { Write-Host '=== Starting api service ==='; docker compose up -d api; } else { Write-Host 'BUILD FAILED - check outputs\\build_backend.log' }",
+			"isBackground": false
+		},
+		{
+			"label": "BuildApi",
+			"type": "shell",
+			"command": "Set-Location 'C:\\Users\\Administrator\\Documents\\Trade-Indicator'; $env:DOCKER_BUILDKIT='1'; Write-Host '=== Building xauusd-api (from local xauusd-backend:latest) ==='; docker build -f Dockerfile.api -t xauusd-api:latest . 2>&1 | Tee-Object -FilePath 'outputs\\build_api.log' -Append; $e=$LASTEXITCODE; Write-Host \"Build exit: $e\"; if ($e -eq 0) { Write-Host 'SUCCESS - starting api...'; docker compose up -d api; Write-Host 'API started!'; docker ps --format 'table {{.Names}}`t{{.Status}}`t{{.Ports}}' } else { Write-Host 'FAILED'; Get-Content 'outputs\\build_api.log' | Select-Object -Last 20 }",
+			"isBackground": false
+		},
+		{
+			"label": "ApiImageBuild2026",
+			"type": "shell",
+			"command": "Set-Location 'C:\\Users\\Administrator\\Documents\\Trade-Indicator'; Write-Host 'BUILD API START'; docker build -f Dockerfile.api -t xauusd-api:latest . 2>&1; Write-Host \"EXIT $LASTEXITCODE\"",
+			"isBackground": false
+		},
+		{
+			"label": "CheckBuildStatus",
+			"type": "shell",
+			"command": "docker images --format '{{.Repository}}:{{.Tag}}\\t{{.Size}}\\t{{.CreatedAt}}' | Sort-Object; Write-Host '---CONTAINERS---'; docker ps -a --format '{{.Names}}\\t{{.Status}}\\t{{.Ports}}'",
+			"isBackground": false
+		},
+		{
+			"label": "StartGrafana",
+			"type": "shell",
+			"command": "docker compose up -d grafana; Write-Host '---STATUS---'; docker ps --format '{{.Names}}\\t{{.Status}}\\t{{.Ports}}'",
+			"isBackground": false
+		},
+		{
+			"label": "CheckStatus2026",
+			"type": "shell",
+			"command": "docker images --format 'table {{.Repository}}\\t{{.Tag}}\\t{{.Size}}'; Write-Host '---CONTAINERS---'; docker ps --format 'table {{.Names}}\\t{{.Status}}\\t{{.Ports}}'",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "BuildApi2026b",
+			"type": "shell",
+			"command": "Set-Location 'C:\\Users\\Administrator\\Documents\\Trade-Indicator'; Write-Host 'BUILD API START'; docker build -f Dockerfile.api -t xauusd-api:latest . 2>&1; Write-Host \"EXIT $LASTEXITCODE\"",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "CheckNewImages",
+			"type": "shell",
+			"command": "docker images xauusd-api; docker images xauusd-mlflow",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "StartApi2026",
+			"type": "shell",
+			"command": "Set-Location 'C:\\Users\\Administrator\\Documents\\Trade-Indicator'; Write-Host 'STARTING API'; docker compose up -d api; Write-Host \"EXIT $LASTEXITCODE\"",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "BuildMlflow2026b",
+			"type": "shell",
+			"command": "Set-Location 'C:\\Users\\Administrator\\Documents\\Trade-Indicator'; Write-Host 'BUILD MLFLOW START'; docker build -f Dockerfile.mlflow -t xauusd-mlflow:latest . 2>&1; Write-Host \"EXIT $LASTEXITCODE\"",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "CheckApiStatus",
+			"type": "shell",
+			"command": "docker ps --format 'table {{.Names}}\\t{{.Status}}\\t{{.Ports}}' ; Write-Host '---'; docker inspect xauusd-api --format '{{.State.Status}} {{.State.Error}}'",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "StartMlflow2026",
+			"type": "shell",
+			"command": "Set-Location 'C:\\Users\\Administrator\\Documents\\Trade-Indicator'; Write-Host 'STARTING MLFLOW'; docker compose up -d mlflow 2>&1; Write-Host \"--- COMPOSE EXIT $LASTEXITCODE ---\"; Start-Sleep 5; docker ps --format 'table {{.Names}}\\t{{.Status}}\\t{{.Ports}}'",
+			"isBackground": false,
+			"problemMatcher": []
+		}
+	]
+}

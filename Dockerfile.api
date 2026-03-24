@@ -1,0 +1,9 @@
+# FastAPI service — built on top of the existing backend image
+# Avoids re-pulling python:3.11-slim; only pip-installs infra packages
+FROM xauusd-backend:latest
+
+COPY requirements-infra.txt ./
+RUN pip install --no-cache-dir -r requirements-infra.txt
+
+EXPOSE 8000
+CMD ["python", "-m", "uvicorn", "xauusd_ai.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
