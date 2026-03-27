@@ -47,6 +47,55 @@ AMBER  = "#ffa726"
 BLUE   = "#42a5f5"
 GREY   = "#90a4ae"
 PURPLE = "#ab47bc"
+PINK   = "#ff7aa2"
+
+THEME_PRESETS = {
+    "Peach Soda": {
+        "bg_primary": "#fff8ef",
+        "bg_secondary": "#fff1de",
+        "surface": "#fffdf8",
+        "card": "#ffffff",
+        "card_soft": "#fff5ea",
+        "border": "rgba(255, 170, 132, 0.35)",
+        "text_primary": "#45312d",
+        "text_secondary": "#7d6358",
+        "text_muted": "#b59688",
+        "accent": "#ff8f6b",
+        "accent_two": "#ffcf7d",
+        "accent_three": "#7bd7c4",
+        "shadow": "0 18px 40px rgba(255, 166, 117, 0.18)",
+    },
+    "Mint Jelly": {
+        "bg_primary": "#f4fff8",
+        "bg_secondary": "#e7fff2",
+        "surface": "#fcfffd",
+        "card": "#ffffff",
+        "card_soft": "#effff6",
+        "border": "rgba(120, 214, 176, 0.35)",
+        "text_primary": "#23443d",
+        "text_secondary": "#4d746b",
+        "text_muted": "#8ab0a5",
+        "accent": "#53c7a1",
+        "accent_two": "#8fd8ff",
+        "accent_three": "#ffc978",
+        "shadow": "0 18px 40px rgba(83, 199, 161, 0.17)",
+    },
+    "Sky Candy": {
+        "bg_primary": "#f4fbff",
+        "bg_secondary": "#eaf4ff",
+        "surface": "#fbfdff",
+        "card": "#ffffff",
+        "card_soft": "#eef7ff",
+        "border": "rgba(120, 173, 255, 0.30)",
+        "text_primary": "#294268",
+        "text_secondary": "#5c7598",
+        "text_muted": "#94a8c3",
+        "accent": "#6ba8ff",
+        "accent_two": "#ff93b3",
+        "accent_three": "#7bd7c4",
+        "shadow": "0 18px 40px rgba(107, 168, 255, 0.16)",
+    },
+}
 
 _LIVE_COLS = [
     "time", "should_trade", "side", "confidence", "reason",
@@ -141,6 +190,16 @@ def _pct(val, dec: int = 1) -> str:
         return "n/a"
 
 
+def _hex_to_rgba(hex_colour: str, alpha: float) -> str:
+    hex_colour = str(hex_colour).strip().lstrip("#")
+    if len(hex_colour) != 6:
+        return f"rgba(0,0,0,{alpha})"
+    r = int(hex_colour[0:2], 16)
+    g = int(hex_colour[2:4], 16)
+    b = int(hex_colour[4:6], 16)
+    return f"rgba({r}, {g}, {b}, {alpha})"
+
+
 def _round(val, dec: int = 4):
     try:
         return round(float(val), dec)
@@ -149,16 +208,19 @@ def _round(val, dec: int = 4):
 
 
 def _card(title: str, value: str, subtitle: str = "", colour: str = BLUE) -> str:
+    tint = _hex_to_rgba(colour, 0.14)
+    tint_soft = _hex_to_rgba(colour, 0.05)
+    border = _hex_to_rgba(colour, 0.26)
     return (
-        f'<div style="background:linear-gradient(135deg,{colour}0a,{colour}14);'
-        f'border:1px solid {colour}30;border-left:3px solid {colour};'
-        f'padding:14px 18px;border-radius:12px;margin-bottom:6px;'
-        f'box-shadow:0 2px 8px {colour}10;transition:all 0.2s ease">'
+        f'<div class="cute-data-card" style="background:linear-gradient(145deg,{tint_soft},#ffffff 55%,{tint});'
+        f'border:1px solid {border};border-left:4px solid {colour};'
+        f'padding:16px 18px;border-radius:18px;margin-bottom:8px;'
+        f'box-shadow:var(--shadow-card);transition:all 0.2s ease">'
         f'<div style="font-size:0.68rem;color:{colour};text-transform:uppercase;'
         f'letter-spacing:.08em;font-weight:600;margin-bottom:6px">{title}</div>'
-        f'<div style="font-size:1.7rem;font-weight:800;color:#f1f5f9;'
+        f'<div style="font-size:1.7rem;font-weight:800;color:var(--text-primary);'
         f'line-height:1.1">{value}</div>'
-        f'<div style="font-size:0.72rem;color:#94a3b8;margin-top:4px">{subtitle}</div>'
+        f'<div style="font-size:0.74rem;color:var(--text-secondary);margin-top:4px">{subtitle}</div>'
         f'</div>'
     )
 
@@ -168,19 +230,20 @@ def _threshold_bar(label: str, value: float, threshold: float, reverse: bool = F
     passed = (value >= threshold) if not reverse else (value <= threshold)
     colour = GREEN if passed else RED
     icon   = "✓" if passed else "✗"
-    bg     = f"{colour}10"
+    bg = _hex_to_rgba(colour, 0.10)
+    bar_bg = _hex_to_rgba(colour, 0.20)
     st.markdown(
         f'<div style="margin-bottom:10px;background:{bg};padding:10px 14px;'
-        f'border-radius:10px;border:1px solid {colour}20">'
+        f'border-radius:14px;border:1px solid {_hex_to_rgba(colour, 0.22)}">'
         f'<div style="display:flex;justify-content:space-between;font-size:0.82rem;'
         f'margin-bottom:6px;align-items:center">'
-        f'<span style="font-weight:600;color:#e2e8f0">{icon} {label}</span>'
+        f'<span style="font-weight:700;color:var(--text-primary)">{icon} {label}</span>'
         f'<span style="color:{colour};font-weight:700;font-family:monospace">{value:.4f}'
-        f'<span style="color:#64748b;font-weight:400"> / {threshold:.4f}</span></span>'
+        f'<span style="color:var(--text-muted);font-weight:400"> / {threshold:.4f}</span></span>'
         f'</div>'
-        f'<div style="background:#0f172a;border-radius:6px;height:6px;overflow:hidden">'
+        f'<div style="background:{bar_bg};border-radius:999px;height:8px;overflow:hidden">'
         f'<div style="width:{pct*100:.1f}%;background:linear-gradient(90deg,{colour},{colour}cc);'
-        f'height:6px;border-radius:6px;transition:width 0.5s ease"></div>'
+        f'height:8px;border-radius:999px;transition:width 0.5s ease"></div>'
         f'</div></div>',
         unsafe_allow_html=True,
     )
@@ -189,19 +252,19 @@ def _threshold_bar(label: str, value: float, threshold: float, reverse: bool = F
 def _step_ok(step: int, label: str, passed: bool | None, detail: str = "") -> None:
     colour = GREEN if passed is True else (RED if passed is False else GREY)
     icon   = "✅" if passed is True else ("❌" if passed is False else "ℹ️")
-    badge_bg = f"{colour}22"
-    badge_border = f"{colour}44"
+    badge_bg = _hex_to_rgba(colour, 0.14)
+    badge_border = _hex_to_rgba(colour, 0.26)
     st.markdown(
         f'<div style="display:flex;align-items:center;gap:14px;margin-bottom:8px;'
-        f'padding:12px 16px;background:linear-gradient(135deg,{colour}08,{colour}04);'
-        f'border:1px solid {colour}18;border-left:3px solid {colour};border-radius:10px;'
+        f'padding:12px 16px;background:linear-gradient(135deg,{_hex_to_rgba(colour, 0.08)},rgba(255,255,255,0.7));'
+        f'border:1px solid {_hex_to_rgba(colour, 0.20)};border-left:3px solid {colour};border-radius:16px;'
         f'transition:all 0.2s ease">'
         f'<div style="min-width:36px;height:36px;border-radius:10px;background:{badge_bg};'
         f'border:1px solid {badge_border};display:flex;align-items:center;justify-content:center;'
         f'font-size:0.85rem;font-weight:800;color:{colour}">{step}</div>'
         f'<div style="flex:1">'
-        f'<div style="font-size:0.92rem;color:#f1f5f9;font-weight:600">{label}</div>'
-        f'<div style="font-size:0.78rem;color:#94a3b8;margin-top:2px">{detail}</div>'
+        f'<div style="font-size:0.92rem;color:var(--text-primary);font-weight:700">{label}</div>'
+        f'<div style="font-size:0.78rem;color:var(--text-secondary);margin-top:2px">{detail}</div>'
         f'</div>'
         f'<div style="font-size:1.1rem">{icon}</div>'
         f'</div>',
@@ -480,8 +543,10 @@ def load_wf_txt_log(log_path: Path) -> dict:
 
 
 def load_feature_importance() -> pd.DataFrame | None:
-    # Try ICT+Wyckoff model first, fall back to legacy model
-    mp = OUTPUTS / "model_ict_wyckoff.pkl"
+    # Prefer the current ACC1 live artifact, then fall back to older names.
+    mp = OUTPUTS / "acc1_live_model.pkl"
+    if not mp.exists():
+        mp = OUTPUTS / "model_ict_wyckoff.pkl"
     if not mp.exists():
         mp = OUTPUTS / "model.pkl"
     if not mp.exists():
@@ -562,188 +627,358 @@ def summarize_daily(trades: pd.DataFrame):
 # PAGE CONFIG
 # =============================================================================
 st.set_page_config(
-    page_title="XAUUSD AI — Trading Dashboard",
-    page_icon="⚡",
+    page_title="XAUUSD AI — Sunny Dashboard",
+    page_icon="🌼",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
 
-# ── Modern CSS theme ────────────────────────────────────────────────────────
-st.markdown("""
+# ── Bright cute theme ───────────────────────────────────────────────────────
+st.session_state.setdefault("cute_theme", "Peach Soda")
+st.session_state.setdefault("cute_focus_account", "Acc 2")
+st.session_state.setdefault("signal_table_limit", 60)
+st.session_state.setdefault("cute_companion_question", "Tài khoản nào đang khỏe hơn lúc này?")
+st.session_state.setdefault("cute_show_sparkles", True)
+st.session_state.setdefault("cute_story_mode", True)
+_theme = THEME_PRESETS.get(st.session_state["cute_theme"], THEME_PRESETS["Peach Soda"])
+
+st.markdown(f"""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 
-:root {
-    --bg-primary: #0a0e17;
-    --bg-card: #111827;
-    --bg-card-hover: #1a2332;
-    --bg-surface: #151d2b;
-    --border-subtle: rgba(255,255,255,0.06);
-    --border-accent: rgba(99,102,241,0.3);
-    --text-primary: #f1f5f9;
-    --text-secondary: #94a3b8;
-    --text-muted: #64748b;
-    --green: #10b981;
-    --green-bg: rgba(16,185,129,0.08);
-    --red: #ef4444;
-    --red-bg: rgba(239,68,68,0.08);
-    --blue: #6366f1;
-    --blue-bg: rgba(99,102,241,0.08);
-    --amber: #f59e0b;
-    --amber-bg: rgba(245,158,11,0.08);
-    --purple: #a855f7;
-    --radius-sm: 8px;
-    --radius-md: 12px;
-    --radius-lg: 16px;
-    --shadow-card: 0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
-    --shadow-glow: 0 0 20px rgba(99,102,241,0.1);
+:root {{
+    --bg-primary: {_theme["bg_primary"]};
+    --bg-secondary: {_theme["bg_secondary"]};
+    --bg-card: {_theme["card"]};
+    --bg-card-hover: {_theme["card_soft"]};
+    --bg-surface: {_theme["surface"]};
+    --border-subtle: {_theme["border"]};
+    --border-accent: {_hex_to_rgba(_theme["accent"], 0.38)};
+    --text-primary: {_theme["text_primary"]};
+    --text-secondary: {_theme["text_secondary"]};
+    --text-muted: {_theme["text_muted"]};
+    --green: {GREEN};
+    --red: {RED};
+    --blue: {_theme["accent"]};
+    --amber: {AMBER};
+    --pink: {PINK};
+    --mint: {_theme["accent_three"]};
+    --radius-sm: 12px;
+    --radius-md: 18px;
+    --radius-lg: 28px;
+    --shadow-card: {_theme["shadow"]};
+    --shadow-soft: 0 12px 28px rgba(255,255,255,0.55);
+    --shadow-glow: 0 14px 36px {_hex_to_rgba(_theme["accent"], 0.24)};
     --transition: all 0.2s ease;
-}
+}}
 
-.block-container {
-    padding-top: 1.2rem !important;
-    max-width: 1400px;
-}
+html, body, [class*="css"] {{
+    font-family: 'Plus Jakarta Sans', sans-serif;
+}}
+
+.stApp {{
+    background:
+      radial-gradient(circle at top left, {_hex_to_rgba(_theme["accent"], 0.18)} 0, transparent 24%),
+      radial-gradient(circle at 85% 12%, {_hex_to_rgba(_theme["accent_two"], 0.24)} 0, transparent 20%),
+      radial-gradient(circle at 75% 80%, {_hex_to_rgba(_theme["accent_three"], 0.18)} 0, transparent 24%),
+      linear-gradient(180deg, {_theme["bg_primary"]} 0%, {_theme["bg_secondary"]} 100%);
+    color: var(--text-primary);
+}}
+
+[data-testid="stHeader"] {{
+    background: rgba(255,255,255,0.45);
+    backdrop-filter: blur(16px);
+}}
+
+.block-container {{
+    padding-top: 1.1rem !important;
+    max-width: 1440px;
+}}
+
+h1, h2, h3, h4, h5, .cute-heading {{
+    font-family: 'Fredoka', cursive !important;
+    color: var(--text-primary);
+    letter-spacing: 0.01em;
+}}
+
+p, span, label, li, div {{
+    color: inherit;
+}}
 
 /* ── Metric containers ── */
-div[data-testid="metric-container"] {
+div[data-testid="metric-container"] {{
     background: var(--bg-card);
-    border-radius: var(--radius-md);
-    padding: 14px 18px;
+    border-radius: 20px;
+    padding: 16px 18px;
     border: 1px solid var(--border-subtle);
-    border-left: 3px solid var(--blue);
+    border-left: 4px solid var(--blue);
     box-shadow: var(--shadow-card);
     transition: var(--transition);
-}
-div[data-testid="metric-container"]:hover {
+}}
+div[data-testid="metric-container"]:hover {{
     border-color: var(--border-accent);
     box-shadow: var(--shadow-glow);
-    transform: translateY(-1px);
-}
-div[data-testid="metric-container"] label {
+    transform: translateY(-2px) scale(1.01);
+}}
+div[data-testid="metric-container"] label {{
     color: var(--text-secondary) !important;
-    font-weight: 500 !important;
+    font-weight: 700 !important;
     font-size: 0.78rem !important;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
-}
-div[data-testid="metric-container"] [data-testid="stMetricValue"] {
+    letter-spacing: 0.06em;
+}}
+div[data-testid="metric-container"] [data-testid="stMetricValue"] {{
     font-weight: 700 !important;
-}
+    color: var(--text-primary);
+}}
 
 /* ── Tabs ── */
-.stTabs [data-baseweb="tab-list"] {
-    gap: 2px;
-    background: var(--bg-card);
-    border-radius: var(--radius-md);
-    padding: 4px;
+.stTabs [data-baseweb="tab-list"] {{
+    gap: 6px;
+    background: rgba(255,255,255,0.66);
+    border-radius: 999px;
+    padding: 6px;
     border: 1px solid var(--border-subtle);
-}
-.stTabs [data-baseweb="tab"] {
-    border-radius: var(--radius-sm);
-    padding: 10px 16px;
+    box-shadow: var(--shadow-soft);
+}}
+.stTabs [data-baseweb="tab"] {{
+    border-radius: 999px;
+    padding: 10px 18px;
     font-weight: 600;
-    font-size: 0.82rem;
+    font-size: 0.85rem;
     color: var(--text-secondary);
     transition: var(--transition);
-}
-.stTabs [aria-selected="true"] {
-    background: var(--blue) !important;
+}}
+.stTabs [aria-selected="true"] {{
+    background: linear-gradient(135deg, {_theme["accent"]}, {_theme["accent_two"]}) !important;
     color: #fff !important;
-    box-shadow: 0 2px 8px rgba(99,102,241,0.3);
-}
-.stTabs [data-baseweb="tab"]:hover {
+    box-shadow: 0 10px 20px {_hex_to_rgba(_theme["accent"], 0.24)};
+}}
+.stTabs [data-baseweb="tab"]:hover {{
     color: var(--text-primary);
     background: var(--bg-card-hover);
-}
+}}
 
 /* ── DataFrames ── */
-.stDataFrame {
-    border-radius: var(--radius-md) !important;
+.stDataFrame {{
+    border-radius: 20px !important;
     border: 1px solid var(--border-subtle) !important;
-}
+    overflow: hidden;
+}}
 
 /* ── Expanders ── */
-.streamlit-expanderHeader {
-    background: var(--bg-card) !important;
-    border-radius: var(--radius-sm) !important;
+.streamlit-expanderHeader {{
+    background: rgba(255,255,255,0.8) !important;
+    border-radius: 16px !important;
     border: 1px solid var(--border-subtle) !important;
     font-weight: 600 !important;
-}
+}}
 
 /* ── Progress bars ── */
-.stProgress > div > div > div > div {
-    background: linear-gradient(90deg, var(--blue), var(--purple)) !important;
-    border-radius: 6px;
-}
+.stProgress > div > div > div > div {{
+    background: linear-gradient(90deg, {_theme["accent"]}, {_theme["accent_two"]}, {_theme["accent_three"]}) !important;
+    border-radius: 999px;
+}}
 
 /* ── Dividers ── */
-hr {
+hr {{
     border-color: var(--border-subtle) !important;
-    opacity: 0.5;
-}
+    opacity: 0.8;
+}}
 
 /* ── Glass card base ── */
-.glass-card {
-    background: linear-gradient(135deg, rgba(17,24,39,0.9), rgba(15,23,42,0.95));
+.glass-card {{
+    background: linear-gradient(145deg, rgba(255,255,255,0.90), rgba(255,255,255,0.68));
     backdrop-filter: blur(12px);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-lg);
     padding: 20px 24px;
     box-shadow: var(--shadow-card);
     transition: var(--transition);
-}
-.glass-card:hover {
+}}
+.glass-card:hover {{
     border-color: var(--border-accent);
     box-shadow: var(--shadow-glow);
-}
+}}
 
 /* ── Pulse animation for live dot ── */
-@keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.4; }
-}
-.live-pulse {
+@keyframes pulse {{
+    0%, 100% {{ opacity: 1; }}
+    50% {{ opacity: 0.4; }}
+}}
+.live-pulse {{
     animation: pulse 2s ease-in-out infinite;
-}
+}}
 
 /* ── Glow animation ── */
-@keyframes glow {
-    0%, 100% { box-shadow: 0 0 5px rgba(99,102,241,0.2); }
-    50% { box-shadow: 0 0 15px rgba(99,102,241,0.4); }
-}
+@keyframes glow {{
+    0%, 100% {{ box-shadow: 0 0 8px {_hex_to_rgba(_theme["accent"], 0.20)}; }}
+    50% {{ box-shadow: 0 0 18px {_hex_to_rgba(_theme["accent_two"], 0.35)}; }}
+}}
 
 /* ── Buttons ── */
-.stButton > button {
-    border-radius: var(--radius-sm) !important;
+.stButton > button {{
+    border-radius: 999px !important;
     font-weight: 600 !important;
     border: 1px solid var(--border-accent) !important;
     transition: var(--transition) !important;
-}
-.stButton > button:hover {
+    background: linear-gradient(135deg, rgba(255,255,255,0.92), rgba(255,255,255,0.75)) !important;
+    color: var(--text-primary) !important;
+    box-shadow: var(--shadow-soft) !important;
+}}
+.stButton > button:hover {{
     box-shadow: var(--shadow-glow) !important;
     transform: translateY(-1px) !important;
-}
+}}
 
-/* ── Selectbox / Radio ── */
-.stSelectbox > div, .stRadio > div {
-    font-size: 0.85rem;
-}
+/* ── Inputs ── */
+div[data-baseweb="select"] > div,
+.stSelectbox > div,
+.stRadio > div,
+.stSlider > div,
+.stNumberInput input,
+.stTextInput input {{
+    background: rgba(255,255,255,0.82) !important;
+    border-radius: 16px !important;
+    color: var(--text-primary) !important;
+}}
+
+.stRadio label p, .stMarkdown, .stCaption, .stAlert p {{
+    color: var(--text-primary);
+}}
+
+/* ── Cute shell ── */
+.cute-shell {{
+    position: relative;
+    overflow: hidden;
+    background:
+        linear-gradient(135deg, {_hex_to_rgba(_theme["accent"], 0.18)}, rgba(255,255,255,0.92) 45%),
+        linear-gradient(180deg, rgba(255,255,255,0.92), rgba(255,255,255,0.72));
+    border: 1px solid var(--border-subtle);
+    border-radius: 30px;
+    padding: 28px 30px;
+    margin-bottom: 18px;
+    box-shadow: var(--shadow-card);
+}}
+
+.cute-shell::before,
+.cute-shell::after {{
+    content: "";
+    position: absolute;
+    border-radius: 999px;
+    filter: blur(4px);
+}}
+
+.cute-shell::before {{
+    width: 180px;
+    height: 180px;
+    top: -52px;
+    right: -22px;
+    background: {_hex_to_rgba(_theme["accent_two"], 0.24)};
+}}
+
+.cute-shell::after {{
+    width: 140px;
+    height: 140px;
+    bottom: -46px;
+    left: -26px;
+    background: {_hex_to_rgba(_theme["accent_three"], 0.22)};
+}}
+
+.cute-pill {{
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 14px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.74);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    margin-right: 8px;
+}}
+
+.cute-title {{
+    font-family: 'Fredoka', cursive;
+    font-size: 3rem;
+    line-height: 1;
+    color: var(--text-primary);
+    margin-bottom: 10px;
+}}
+
+.cute-subtitle {{
+    font-size: 1rem;
+    color: var(--text-secondary);
+    max-width: 760px;
+}}
+
+.cute-mini-card {{
+    background: linear-gradient(145deg, rgba(255,255,255,0.94), rgba(255,255,255,0.75));
+    border: 1px solid var(--border-subtle);
+    border-radius: 22px;
+    padding: 18px;
+    box-shadow: var(--shadow-soft);
+    min-height: 100%;
+}}
+
+.assistant-bubble {{
+    background: linear-gradient(145deg, rgba(255,255,255,0.94), {_hex_to_rgba(_theme["accent_three"], 0.11)});
+    border: 1px solid var(--border-subtle);
+    border-radius: 22px;
+    padding: 18px 20px;
+    box-shadow: var(--shadow-soft);
+    color: var(--text-primary);
+}}
+
+.soft-kicker {{
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.10em;
+    font-size: 0.72rem;
+    font-weight: 800;
+}}
+
+.sparkline-dot {{
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, {_theme["accent"]}, {_theme["accent_two"]});
+    box-shadow: 0 0 0 6px {_hex_to_rgba(_theme["accent"], 0.10)};
+}}
+
+.cute-data-card:hover {{
+    transform: translateY(-2px) rotate(-0.2deg);
+}}
+
+.stAlert {{
+    border-radius: 18px !important;
+    border: 1px solid var(--border-subtle) !important;
+}}
+
+.st-emotion-cache-1629p8f blockquote,
+blockquote {{
+    border-left: 4px solid var(--blue) !important;
+    background: rgba(255,255,255,0.55);
+    border-radius: 16px;
+    padding: 10px 14px;
+}}
 </style>
 """, unsafe_allow_html=True)
 
 # ── Header with branding ────────────────────────────────────────────────────
 st.markdown(
-    '<div style="display:flex;align-items:center;gap:16px;margin-bottom:8px">'
-    '<div style="font-size:2.2rem;font-weight:900;background:linear-gradient(135deg,#6366f1,#a855f7);'
-    '-webkit-background-clip:text;-webkit-text-fill-color:transparent">'
-    '⚡ XAUUSD AI</div>'
-    '<div style="background:#6366f122;border:1px solid #6366f144;border-radius:6px;'
-    'padding:3px 10px;font-size:0.72rem;font-weight:700;color:#a5b4fc;letter-spacing:0.06em">'
-    'ICT + WYCKOFF v5.0</div>'
+    '<div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">'
+    '<div style="width:52px;height:52px;border-radius:18px;display:flex;align-items:center;justify-content:center;'
+    'background:linear-gradient(135deg,var(--blue),var(--pink));font-size:1.55rem;box-shadow:var(--shadow-card)">🌼</div>'
+    '<div>'
+    '<div style="font-family:Fredoka,cursive;font-size:2.05rem;line-height:1;color:var(--text-primary)">XAUUSD Sunny Room</div>'
+    '<div style="color:var(--text-secondary);font-size:0.92rem;margin-top:4px">Cute, bright, realtime workspace for live trading, learning and review</div>'
+    '</div>'
     '<div style="margin-left:auto;display:flex;align-items:center;gap:8px">'
-    '<div class="live-pulse" style="width:8px;height:8px;border-radius:50%;background:#10b981"></div>'
-    '<span style="color:#94a3b8;font-size:0.78rem;font-weight:500">LIVE</span>'
+    '<span class="cute-pill"><span class="sparkline-dot live-pulse"></span> live pulse</span>'
     '</div></div>',
     unsafe_allow_html=True,
 )
@@ -816,13 +1051,17 @@ if _HAS_WATCHDOG:
 ])
 
 # --- Shared data -------------------------------------------------------
-model_meta      = load_json(OUTPUTS / "model_meta_ict_wyckoff.json")
+model_meta      = load_json(OUTPUTS / "acc1_live_model_meta.json")
+if not model_meta:
+    model_meta  = load_json(OUTPUTS / "model_meta_ict_wyckoff.json")
 if not model_meta:
     model_meta  = load_json(OUTPUTS / "model_meta.json")  # fallback
-model_path      = OUTPUTS / "model_ict_wyckoff.pkl"
+model_path      = OUTPUTS / "acc1_live_model.pkl"
+if not model_path.exists():
+    model_path  = OUTPUTS / "model_ict_wyckoff.pkl"
 if not model_path.exists():
     model_path  = OUTPUTS / "model.pkl"  # fallback
-live_signals    = load_signals()
+live_signals    = load_signals("paper_trade_signals_acc1.csv")
 live_signals_acc2 = load_signals("paper_trade_signals_acc2.csv")
 learn_events    = load_learning_events()
 learn_events_acc2 = load_learning_events("live_learning_log_acc2.jsonl")
@@ -859,12 +1098,222 @@ threshold_val = float(
     or model_meta.get("selected_threshold")
     or 0.5
 )
-model_meta_acc2  = load_json(OUTPUTS / "model_meta2_weekly500.json")
+model_meta_acc2  = load_json(OUTPUTS / "acc2_live_model_meta.json")
 threshold_val_acc2 = float(
     model_meta_acc2.get("decision_threshold")
     or model_meta_acc2.get("selected_threshold")
     or 0.55
 )
+
+
+def _latest_signal_snapshot(signals: pd.DataFrame) -> dict[str, object]:
+    if signals.empty:
+        return {
+            "side": "flat",
+            "confidence": 0.0,
+            "should_trade": False,
+            "reason": "Chưa có dữ liệu tín hiệu",
+            "time": "n/a",
+            "balance": 0.0,
+        }
+    latest = signals.iloc[0].to_dict()
+    return {
+        "side": str(latest.get("side", "flat")),
+        "confidence": float(latest.get("confidence", 0.0) or 0.0),
+        "should_trade": bool(latest.get("should_trade", False)),
+        "reason": str(latest.get("reason", "") or ""),
+        "time": str(latest.get("time", ""))[:16] or "n/a",
+        "balance": float(latest.get("account_balance", 0.0) or 0.0),
+    }
+
+
+def _latest_learning_snapshot(events: list[dict]) -> dict[str, object]:
+    learn_events = [e for e in events if e.get("event") in {"self_learn", "loss_retrain"}]
+    if not learn_events:
+        return {
+            "accepted": False,
+            "kind": "none",
+            "summary": "Chưa có vòng tự học mới",
+            "roc_auc": None,
+            "delta": None,
+        }
+    latest = learn_events[-1]
+    return {
+        "accepted": bool(latest.get("accepted")),
+        "kind": str(latest.get("event", "self_learn")),
+        "summary": str(latest.get("learning_summary", latest.get("status", "Không có mô tả"))),
+        "roc_auc": latest.get("roc_auc"),
+        "delta": latest.get("roc_auc_delta"),
+    }
+
+
+def _recent_live_feel(trades_df: pd.DataFrame) -> dict[str, object]:
+    if trades_df.empty or "pnl" not in trades_df.columns:
+        return {"net": 0.0, "win_rate": 0.0, "trades": 0}
+    recent = trades_df.tail(12).copy()
+    recent["pnl"] = pd.to_numeric(recent["pnl"], errors="coerce").fillna(0.0)
+    wins = float((recent["pnl"] > 0).mean()) if not recent.empty else 0.0
+    return {
+        "net": float(recent["pnl"].sum()),
+        "win_rate": wins,
+        "trades": int(len(recent)),
+    }
+
+
+def _companion_reply(
+    question: str,
+    focus_account: str,
+    acc1_signal: dict[str, object],
+    acc2_signal: dict[str, object],
+    acc1_learning: dict[str, object],
+    acc2_learning: dict[str, object],
+    acc1_recent: dict[str, object],
+    acc2_recent: dict[str, object],
+) -> str:
+    if question == "Tài khoản nào đang khỏe hơn lúc này?":
+        acc1_score = float(acc1_signal["confidence"]) + max(float(acc1_recent["net"]), 0) / 200
+        acc2_score = float(acc2_signal["confidence"]) + max(float(acc2_recent["net"]), 0) / 200
+        winner = "ACC1" if acc1_score > acc2_score else "ACC2"
+        winner_sig = acc1_signal if winner == "ACC1" else acc2_signal
+        return (
+            f"<b>{winner}</b> đang sáng hơn một chút. "
+            f"Tín hiệu gần nhất là <b>{str(winner_sig['side']).upper()}</b> với confidence "
+            f"<b>{float(winner_sig['confidence']):.1%}</b>, "
+            f"và nhịp 12 lệnh gần đây chưa xấu đi rõ rệt."
+        )
+    if question == "Live bây giờ cần chú ý gì nhất?":
+        focus_sig = acc1_signal if focus_account == "Acc 1" else acc2_signal
+        if not bool(focus_sig["should_trade"]):
+            return (
+                f"Hiện dashboard đang nghiêng về trạng thái <b>đứng ngoài</b>. "
+                f"Lý do chính là: <b>{focus_sig['reason'] or 'bot chưa thấy setup đủ đẹp'}</b>. "
+                f"Nếu bạn đang theo dõi live, nên nhìn thêm tab <b>Phân tích</b> và <b>Rủi ro</b> trước khi ép trade."
+            )
+        return (
+            f"Điểm cần nhìn ngay là lệnh <b>{str(focus_sig['side']).upper()}</b> mới nhất. "
+            f"Confidence đang ở <b>{float(focus_sig['confidence']):.1%}</b>, "
+            f"nên hãy đối chiếu thêm phần <b>Strategy Score</b> và số <b>open/max positions</b> bên dưới."
+        )
+    if question == "Model vừa học được gì?":
+        learn = acc1_learning if focus_account == "Acc 1" else acc2_learning
+        if learn["kind"] == "none":
+            return "Chưa có sự kiện tự học mới trong log hiện tại. Khi bot học xong, phần này sẽ tóm tắt luôn bài học và verdict đạt/không đạt."
+        verdict = "được chấp nhận" if learn["accepted"] else "bị từ chối"
+        return (
+            f"Vòng học gần nhất <b>{verdict}</b>. "
+            f"Bot ghi nhận: <b>{learn['summary']}</b>. "
+            f"ROC-AUC hiện tại là <b>{_format_learning_metric(learn['roc_auc'])}</b> "
+            f"({ _format_learning_delta(learn['delta']) })."
+        )
+    return (
+        "Nếu mới mở dashboard, hãy xem theo thứ tự: "
+        "<b>Live</b> để bắt nhịp hiện tại, "
+        "<b>Phân tích</b> để hiểu vì sao bot quyết định như vậy, "
+        "và <b>Tự học</b> để xem model có đang tiến bộ thật hay không."
+    )
+
+
+def _render_dashboard_command_center() -> None:
+    acc1_signal = _latest_signal_snapshot(live_signals)
+    acc2_signal = _latest_signal_snapshot(live_signals_acc2)
+    acc1_learning = _latest_learning_snapshot(learn_events)
+    acc2_learning = _latest_learning_snapshot(learn_events_acc2)
+    acc1_recent = _recent_live_feel(live_trades)
+    acc2_recent = _recent_live_feel(live_trades_acc2)
+
+    st.markdown(
+        '<section class="cute-shell">'
+        '<div class="soft-kicker">Sunny Command Center</div>'
+        '<div class="cute-title">Dashboard không chỉ đẹp hơn, mà còn biết trò chuyện với bạn.</div>'
+        '<div class="cute-subtitle">Chọn mood, khóa focus vào tài khoản bạn muốn theo dõi, '
+        'và để Sunny Assistant tóm tắt nhanh trạng thái live thay vì bắt bạn tự đọc cả rừng số liệu.</div>'
+        '<div style="margin-top:14px">'
+        '<span class="cute-pill">🌤 Bright mode only</span>'
+        '<span class="cute-pill">🫧 Cute interaction</span>'
+        '<span class="cute-pill">💬 Guided monitoring</span>'
+        '</div></section>',
+        unsafe_allow_html=True,
+    )
+
+    ctl1, ctl2, ctl3 = st.columns([1.1, 1.15, 1.35])
+    with ctl1:
+        st.markdown('<div class="cute-mini-card">', unsafe_allow_html=True)
+        st.markdown("**Mood Board**")
+        st.selectbox(
+            "Chọn concept màu",
+            list(THEME_PRESETS.keys()),
+            key="cute_theme",
+            label_visibility="collapsed",
+        )
+        st.radio(
+            "Focus tài khoản",
+            ["Acc 1", "Acc 2", "Cả hai"],
+            horizontal=True,
+            key="cute_focus_account",
+        )
+        st.slider(
+            "Số tín hiệu hiển thị",
+            min_value=20,
+            max_value=140,
+            step=20,
+            key="signal_table_limit",
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    with ctl2:
+        st.markdown('<div class="cute-mini-card">', unsafe_allow_html=True)
+        st.markdown("**Quick Pulse**")
+        q1, q2 = st.columns(2)
+        q1.markdown(_card("ACC1 Vibe", str(acc1_signal["side"]).upper(), f"{float(acc1_signal['confidence']):.0%} confidence", BLUE), unsafe_allow_html=True)
+        q2.markdown(_card("ACC2 Vibe", str(acc2_signal["side"]).upper(), f"{float(acc2_signal['confidence']):.0%} confidence", PINK), unsafe_allow_html=True)
+        q3, q4 = st.columns(2)
+        q3.markdown(_card("ACC1 Recent", f"${float(acc1_recent['net']):+.2f}", f"{int(acc1_recent['trades'])} trades gần nhất", GREEN if float(acc1_recent['net']) >= 0 else RED), unsafe_allow_html=True)
+        q4.markdown(_card("ACC2 Recent", f"${float(acc2_recent['net']):+.2f}", f"{int(acc2_recent['trades'])} trades gần nhất", GREEN if float(acc2_recent['net']) >= 0 else RED), unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    with ctl3:
+        focus = st.session_state.get("cute_focus_account", "Acc 2")
+        question = st.selectbox(
+            "Hỏi Sunny Assistant",
+            [
+                "Tài khoản nào đang khỏe hơn lúc này?",
+                "Live bây giờ cần chú ý gì nhất?",
+                "Model vừa học được gì?",
+                "Nếu mới mở dashboard thì nên xem gì trước?",
+            ],
+            key="cute_companion_question",
+        )
+        reply = _companion_reply(
+            question,
+            "Acc 1" if focus == "Acc 1" else "Acc 2",
+            acc1_signal,
+            acc2_signal,
+            acc1_learning,
+            acc2_learning,
+            acc1_recent,
+            acc2_recent,
+        )
+        st.markdown(
+            '<div class="assistant-bubble">'
+            '<div class="soft-kicker">Sunny Assistant</div>'
+            '<div style="font-family:Fredoka,cursive;font-size:1.25rem;margin:6px 0 10px;color:var(--text-primary)">'
+            'Mình đang đọc dashboard cùng bạn nè.</div>'
+            f'<div style="font-size:0.95rem;line-height:1.75;color:var(--text-primary)">{reply}</div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+    focus_to_selector = {
+        "Acc 1": "Acc 1 — 270832477 (Exness-MT5Trial17)",
+        "Acc 2": "Acc 2 — 433326057 (Exness-MT5Trial7)",
+    }
+    current_focus = st.session_state.get("cute_focus_account", "Acc 2")
+    if current_focus in focus_to_selector:
+        st.session_state["acc_selector"] = focus_to_selector[current_focus]
+
+
+_render_dashboard_command_center()
+
 
 # =============================================================================
 # TAB 1 — LIVE MONITOR  (watchdog push + @st.fragment 30s fallback)
@@ -893,8 +1342,8 @@ def _render_live_tab() -> None:
 
     st.markdown(
         '<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px">'
-        '<div style="font-size:1.6rem;font-weight:800;color:#f1f5f9">📡 Live Monitor</div>'
-        '<div class="live-pulse" style="width:8px;height:8px;border-radius:50%;background:#10b981"></div>'
+        '<div style="font-family:Fredoka,cursive;font-size:1.7rem;font-weight:700;color:var(--text-primary)">📡 Live Monitor</div>'
+        '<span class="cute-pill"><span class="sparkline-dot live-pulse"></span> realtime</span>'
         '</div>',
         unsafe_allow_html=True,
     )
@@ -904,13 +1353,14 @@ def _render_live_tab() -> None:
         if model_path.exists():
             mtime = dt.datetime.fromtimestamp(model_path.stat().st_mtime)
             st.markdown(
-                f'<div style="display:flex;align-items:center;gap:8px;padding:8px 14px;'
-                f'background:#10b98110;border:1px solid #10b98130;border-radius:10px;font-size:0.82rem">'
-                f'<span style="color:#10b981;font-weight:700">●</span>'
-                f'<span style="color:#d1fae5">Model hoạt động</span>'
-                f'<span style="color:#6ee7b7;font-weight:600">HistGBC 28 features</span>'
-                f'<span style="color:#64748b">|</span>'
-                f'<span style="color:#94a3b8">Trained: {mtime.strftime("%Y-%m-%d %H:%M")}</span>'
+                f'<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;'
+                f'background:linear-gradient(145deg,{_hex_to_rgba(GREEN, 0.10)},rgba(255,255,255,0.82));'
+                f'border:1px solid {_hex_to_rgba(GREEN, 0.18)};border-radius:16px;font-size:0.82rem">'
+                f'<span style="color:{GREEN};font-weight:700">●</span>'
+                f'<span style="color:var(--text-primary);font-weight:700">Model đang hoạt động</span>'
+                f'<span style="color:var(--text-secondary)">HistGBC 59 features</span>'
+                f'<span style="color:var(--text-muted)">|</span>'
+                f'<span style="color:var(--text-secondary)">Trained: {mtime.strftime("%Y-%m-%d %H:%M")}</span>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
@@ -932,9 +1382,9 @@ def _render_live_tab() -> None:
         _st_json = load_json(OUTPUTS / status_file) if status_file else {}
         if signals.empty and not _st_json:
             st.markdown(
-                f'<div style="background:#1e1e2e;border-left:4px solid #555;padding:12px 16px;border-radius:8px">'
-                f'<div style="color:#aaa;font-size:0.8rem">{label} ({acc_id})</div>'
-                f'<div style="color:#555;font-size:1.1rem">Chưa có dữ liệu</div>'
+                f'<div style="background:rgba(255,255,255,0.72);border-left:4px solid {GREY};padding:14px 16px;border-radius:18px;border:1px solid var(--border-subtle)">'
+                f'<div style="color:var(--text-secondary);font-size:0.8rem">{label} ({acc_id})</div>'
+                f'<div style="color:var(--text-muted);font-size:1.05rem">Chưa có dữ liệu</div>'
                 f'</div>', unsafe_allow_html=True)
             return
         latest: dict = signals.iloc[0].to_dict() if not signals.empty else {}
@@ -949,20 +1399,20 @@ def _render_live_tab() -> None:
         side_emoji = {"buy": "📈", "sell": "📉"}.get(side, "➖")
         dec_c = GREEN if traded else "#888"
         st.markdown(
-            f'<div style="background:#1e1e2e;border-left:4px solid {bal_c};padding:12px 16px;border-radius:8px">'
-            f'<div style="color:#aaa;font-size:0.8rem">{label} <code>{acc_id}</code></div>'
+            f'<div style="background:linear-gradient(145deg,rgba(255,255,255,0.90),rgba(255,255,255,0.70));border-left:4px solid {bal_c};padding:14px 16px;border-radius:20px;border:1px solid var(--border-subtle);box-shadow:var(--shadow-soft)">'
+            f'<div style="color:var(--text-secondary);font-size:0.8rem">{label} <code>{acc_id}</code></div>'
             f'<div style="display:flex;gap:20px;align-items:center;margin-top:6px">'
             f'<span style="font-size:1.3rem;font-weight:700;color:{bal_c}">${bal:,.2f}</span>'
-            f'<span style="color:#aaa">{opn}/{mx} lệnh</span>'
+            f'<span style="color:var(--text-secondary)">{opn}/{mx} lệnh</span>'
             f'<span style="color:{dec_c}">{side_emoji} {side.upper()} {conf:.0%}</span>'
-            f'<span style="color:#666;font-size:0.75rem">{_ts}</span>'
+            f'<span style="color:var(--text-muted);font-size:0.75rem">{_ts}</span>'
             f'</div>'
             f'</div>', unsafe_allow_html=True)
 
     both_have_data = not _live_sigs.empty or not _live_sigs_acc2.empty
     if both_have_data:
         st.markdown(
-            '<div style="font-size:1.1rem;font-weight:700;color:#e2e8f0;margin:12px 0 8px">'
+            '<div style="font-family:Fredoka,cursive;font-size:1.2rem;font-weight:700;color:var(--text-primary);margin:12px 0 8px">'
             '🏦 Tổng quan Tài khoản</div>',
             unsafe_allow_html=True,
         )
@@ -1015,7 +1465,7 @@ def _render_live_tab() -> None:
         dec_c   = GREEN if traded else RED
 
         st.markdown(
-            '<div style="font-size:1.1rem;font-weight:700;color:#e2e8f0;margin:4px 0 8px">'
+            '<div style="font-family:Fredoka,cursive;font-size:1.2rem;font-weight:700;color:var(--text-primary);margin:4px 0 8px">'
             '📡 Tín hiệu Mới nhất</div>',
             unsafe_allow_html=True,
         )
@@ -1042,7 +1492,7 @@ def _render_live_tab() -> None:
             bal, opn, mx, vol = 0.0, 0, 1, 0.0
 
         st.markdown(
-            '<div style="font-size:1.1rem;font-weight:700;color:#e2e8f0;margin:4px 0 8px">'
+            '<div style="font-family:Fredoka,cursive;font-size:1.2rem;font-weight:700;color:var(--text-primary);margin:4px 0 8px">'
             '💰 Trạng thái Tài khoản</div>',
             unsafe_allow_html=True,
         )
@@ -1073,7 +1523,7 @@ def _render_live_tab() -> None:
     if _sel_meta:
         st.divider()
         st.markdown(
-            '<div style="font-size:1.1rem;font-weight:700;color:#e2e8f0;margin:4px 0 8px">'
+            '<div style="font-family:Fredoka,cursive;font-size:1.2rem;font-weight:700;color:var(--text-primary);margin:4px 0 8px">'
             '🧠 Hiệu suất Model</div>',
             unsafe_allow_html=True,
         )
@@ -1110,12 +1560,12 @@ def _render_live_tab() -> None:
 
     st.divider()
     st.markdown(
-        '<div style="font-size:1.1rem;font-weight:700;color:#e2e8f0;margin:4px 0 8px">'
-        '📋 Tín hiệu gần nhất (100 mục)</div>',
+            f'<div style="font-family:Fredoka,cursive;font-size:1.2rem;font-weight:700;color:var(--text-primary);margin:4px 0 8px">'
+            f'📋 Tín hiệu gần nhất ({int(st.session_state.get("signal_table_limit", 60))} mục)</div>',
         unsafe_allow_html=True,
     )
     if not _selected_signals.empty:
-        _sig_disp = _selected_signals.copy().head(100)
+        _sig_disp = _selected_signals.copy().head(int(st.session_state.get("signal_table_limit", 60)))
 
         # ── Mô phỏng kết quả nếu vào lệnh (kể cả lệnh bị lọc) ──────────
         with st.spinner("Đang tính kết quả mô phỏng..."):
@@ -1626,7 +2076,7 @@ with tab_analysis:
             st.dataframe(fi_df[["feature", "importance", "abs_importance"]].round(6),
                          use_container_width=True)
         else:
-            st.info("Chưa load được model_ict_wyckoff.pkl — cần có model trained. Chạy: python -m xauusd_ai.main train --config configs/train_ict_wyckoff_2022_2026.yaml")
+            st.info("Chưa load được acc1_live_model.pkl — cần có model live hợp lệ hoặc retrain ACC1.")
 
 
 # =============================================================================
@@ -3263,10 +3713,10 @@ print("Xong!")
         ("walkforward_report_acc2.json",        "Báo cáo walk-forward ACC2"),
         ("live_learning_log.jsonl",             "Log học liên tục ACC1"),
         ("live_learning_log_acc2.jsonl",        "Log học liên tục ACC2"),
-        ("model_ict_wyckoff.pkl",               "Model ACC1 đang dùng"),
-        ("model2_weekly500.pkl",                "Model ACC2 đang dùng"),
-        ("model_meta_ict_wyckoff.json",         "Metadata model ACC1"),
-        ("model_meta2_weekly500.json",          "Metadata model ACC2"),
+        ("acc1_live_model.pkl",                 "Model ACC1 đang dùng"),
+        ("acc2_live_model.pkl",                 "Model ACC2 đang dùng"),
+        ("acc1_live_model_meta.json",           "Metadata model ACC1"),
+        ("acc2_live_model_meta.json",           "Metadata model ACC2"),
         ("training_report_ict_wyckoff.json",    "Kết quả training ACC1"),
     ]
 

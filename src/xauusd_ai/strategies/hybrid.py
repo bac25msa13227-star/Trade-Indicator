@@ -27,6 +27,15 @@ class HybridStrategy:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
+    @staticmethod
+    def _as_float(value: object) -> float | None:
+        try:
+            if value is None:
+                return None
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
     def _blocked_by_time(self, timestamp: object) -> tuple[bool, str]:
         if timestamp is None:
             return False, "ok"
@@ -56,6 +65,79 @@ class HybridStrategy:
             return True, "blocked_weekday"
         if int(resolved.hour) in blocked_weekday_hours.get(weekday_name, set()):
             return True, "blocked_weekday_hour"
+        return False, "ok"
+
+    def _regime_shutdown(self, row: pd.Series | object, probability: float, side: str | None = None) -> tuple[bool, str]:
+        rules = getattr(self.settings.strategy, "regime_shutdown_rules", [])
+        if not rules:
+            return False, "ok"
+
+        timestamp = getattr(row, "time", None)
+        resolved = timestamp
+        if timestamp is not None and not isinstance(timestamp, (pd.Timestamp, datetime)):
+            resolved = pd.to_datetime(timestamp, utc=True, errors="coerce")
+
+        weekday_name = resolved.day_name().lower() if isinstance(resolved, (pd.Timestamp, datetime)) and not pd.isna(resolved) else ""
+        hour = int(resolved.hour) if isinstance(resolved, (pd.Timestamp, datetime)) and not pd.isna(resolved) else None
+        row_side = (side or str(getattr(row, "trade_side", ""))).strip().lower()
+
+        for rule in rules:
+            if not getattr(rule, "enabled", True):
+                continue
+            if rule.weekdays_utc and weekday_name not in {value.strip().lower() for value in rule.weekdays_utc}:
+                continue
+            if rule.hours_utc and hour not in {int(value) for value in rule.hours_utc}:
+                continue
+            if rule.sides and row_side not in {value.strip().lower() for value in rule.sides}:
+                continue
+
+            volatility_regime = int(getattr(row, "volatility_regime", 1))
+            if rule.volatility_regimes and volatility_regime not in {int(value) for value in rule.volatility_regimes}:
+                continue
+
+            trend_alignment = int(getattr(row, "trend_alignment", 1))
+            if rule.trend_alignment_values and trend_alignment not in {int(value) for value in rule.trend_alignment_values}:
+                continue
+
+            if rule.probability_min is not None and probability < float(rule.probability_min):
+                continue
+            if rule.probability_max is not None and probability > float(rule.probability_max):
+                continue
+
+            adx_value = self._as_float(getattr(row, "adx", None))
+            if rule.adx_min is not None and (adx_value is None or adx_value < float(rule.adx_min)):
+                continue
+            if rule.adx_max is not None and (adx_value is None or adx_value > float(rule.adx_max)):
+                continue
+
+            trend_strength = self._as_float(getattr(row, "trend_strength_score", None))
+            if rule.trend_strength_min is not None and (trend_strength is None or trend_strength < float(rule.trend_strength_min)):
+                continue
+            if rule.trend_strength_max is not None and (trend_strength is None or trend_strength > float(rule.trend_strength_max)):
+                continue
+
+            pullback_quality = self._as_float(getattr(row, "pullback_quality", None))
+            if rule.pullback_quality_min is not None and (pullback_quality is None or pullback_quality < float(rule.pullback_quality_min)):
+                continue
+            if rule.pullback_quality_max is not None and (pullback_quality is None or pullback_quality > float(rule.pullback_quality_max)):
+                continue
+
+            execution_quality = self._as_float(getattr(row, "execution_quality", None))
+            if rule.execution_quality_min is not None and (execution_quality is None or execution_quality < float(rule.execution_quality_min)):
+                continue
+            if rule.execution_quality_max is not None and (execution_quality is None or execution_quality > float(rule.execution_quality_max)):
+                continue
+
+            strategy_score = self._as_float(getattr(row, "strategy_score", None))
+            strategy_abs = abs(strategy_score) if strategy_score is not None else None
+            if rule.strategy_score_min is not None and (strategy_abs is None or strategy_abs < float(rule.strategy_score_min)):
+                continue
+            if rule.strategy_score_max is not None and (strategy_abs is None or strategy_abs > float(rule.strategy_score_max)):
+                continue
+
+            name = rule.name.strip() or "regime_shutdown"
+            return True, name
+
         return False, "ok"
 
     def required_strategy_score(self, volatility_regime: int | float) -> float:
@@ -95,6 +177,10 @@ class HybridStrategy:
                         if len(window) == 2 and window[0] <= hour <= window[1]:
                             effective_prob += self.settings.strategy.silver_bullet_confidence_boost
                             break
+
+        shutdown, shutdown_reason = self._regime_shutdown(row, effective_prob)
+        if shutdown:
+            return False, f"regime_shutdown ({shutdown_reason})"
 
         if effective_prob < min_conf:
             return False, f"confidence_below_floor ({effective_prob:.3f} < {min_conf:.3f})"
@@ -199,6 +285,9 @@ class HybridStrategy:
 
         if not signal_on:
             return TradeDecision(False, hyp_side, confidence, "Model confidence below threshold", entry, hyp_sl, hyp_tp)
+        shutdown, shutdown_reason = self._regime_shutdown(live_row, confidence, hyp_side)
+        if shutdown:
+            return TradeDecision(False, hyp_side, confidence, f"Regime shutdown: {shutdown_reason}", entry, hyp_sl, hyp_tp)
         if abs(strategy_score) < self.required_strategy_score(int(live_row["volatility_regime"])):
             return TradeDecision(False, hyp_side, confidence, "Strategy consensus is weak", entry, hyp_sl, hyp_tp)
         if self.settings.strategy.require_trend_alignment and int(live_row["trend_alignment"]) != 1:

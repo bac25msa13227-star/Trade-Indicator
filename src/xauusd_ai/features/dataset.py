@@ -86,6 +86,10 @@ FEATURE_COLUMNS = [
     "vol_delta_momentum",   # Bookmap-inspired volume delta momentum
     "inst_candle_score",    # Institutional candle detection score -1..+1
     "swing_failure",        # ICT Swing Failure Pattern +1=bullish -1=bearish
+    # --- v5: Meta-features for cleaner execution timing (3) ---
+    "trend_strength_score", # Trend quality from consensus + ADX + H4 premium/discount
+    "pullback_quality",     # Pullback entry quality around 50% retracement + rejection
+    "execution_quality",    # Breakout/continuation quality from candle structure + flow
 ]
 
 
@@ -269,7 +273,80 @@ def _merge_context(settings: Settings, frames: dict[str, pd.DataFrame]) -> pd.Da
     merged["multi_tf_consensus"] = (_d1_dir + _h4_dir + _h1_dir).fillna(0)  # -3 to +3
     merged["h4_h1_bias_agree"] = ((_h4_dir == _h1_dir) & (_h4_dir != 0)).astype(int)
 
+    # Meta-features that summarize whether the current bar is worth trading.
+    direction_hint = np.sign(
+        merged["multi_tf_consensus"]
+        + np.sign(merged["macd_hist"])
+        + np.sign(merged["rsi"] - 50.0)
+        + np.sign(merged["h4_market_structure_bias"])
+    )
+    direction_hint = direction_hint.where(
+        direction_hint != 0,
+        np.sign(merged["hourly_bias"] + merged["daily_bias"]),
+    ).fillna(0)
+    direction_hint = direction_hint.replace(0, 1)
+
+    trend_component = np.tanh((merged["adx"] - 18.0) / 10.0).clip(-1.0, 1.0)
+    consensus_component = (merged["multi_tf_consensus"] / 3.0).clip(-1.0, 1.0)
+    pd_component = (-merged["h4_premium_discount"] * direction_hint).clip(-1.0, 1.0)
+    merged["trend_strength_score"] = (
+        0.55 * consensus_component
+        + 0.35 * trend_component * direction_hint
+        + 0.10 * pd_component
+    ).clip(-1.0, 1.0)
+
+    ideal_pullback = 1.0 - (merged["pullback_depth"] - 0.5).abs().clip(0, 0.75) / 0.75
+    rejection_component = (merged["wick_rejection"] * direction_hint).clip(-1.0, 1.0)
+    structure_component = (merged["swing_failure"] * direction_hint).clip(-1.0, 1.0)
+    merged["pullback_quality"] = (
+        ideal_pullback * 0.55
+        + rejection_component * 0.30
+        + structure_component * 0.15
+    ).clip(-1.0, 1.0)
+
+    close_pressure = ((merged["close_in_range"] - 0.5) * 2.0 * direction_hint).clip(-1.0, 1.0)
+    flow_component = np.tanh(merged["vol_delta_momentum"] / 1.5).clip(-1.0, 1.0) * direction_hint
+    inst_component = merged["inst_candle_score"].clip(-1.0, 1.0) * direction_hint
+    volume_component = ((merged["volume_surge"] - 1.0) / 1.5).clip(-1.0, 1.0)
+    merged["execution_quality"] = (
+        0.30 * close_pressure
+        + 0.25 * flow_component
+        + 0.25 * inst_component
+        + 0.20 * volume_component
+    ).clip(-1.0, 1.0)
+
     return merged
+
+
+def _expected_direction_from_context(dataset: pd.DataFrame) -> pd.Series:
+    """Infer trade direction from current market state without using future data.
+
+    The previous EMA50/EMA200-only rule was too coarse for XAUUSD intraday trading.
+    This version blends higher-timeframe consensus with execution momentum so the
+    model sees labels and trade_side closer to the setups we actually want to trade.
+    """
+    ema_fast = dataset["close"].ewm(span=50, adjust=False).mean()
+    ema_slow = dataset["close"].ewm(span=200, adjust=False).mean()
+    ema_bias = np.sign(ema_fast - ema_slow).replace(0, 1)
+
+    context_votes = (
+        dataset["daily_bias"]
+        + dataset["hourly_bias"]
+        + np.sign(dataset["h4_market_structure_bias"])
+        + np.sign(dataset["h4_ict_confluence"])
+    )
+    execution_votes = (
+        np.sign(dataset["strategy_score"])
+        + np.sign(dataset["macd_hist"])
+        + np.sign(dataset["rsi"] - 50.0)
+        + np.sign(dataset["rsi_slope"])
+        + np.sign(dataset["execution_quality"])
+    )
+
+    raw_bias = 0.65 * context_votes + 0.35 * execution_votes
+    expected = np.sign(raw_bias)
+    expected = expected.where(expected != 0, ema_bias).fillna(ema_bias).astype(int)
+    return expected.replace(0, 1)
 
 
 def _build_sltp_label(dataset: pd.DataFrame, settings: "Settings") -> pd.Series:
@@ -422,10 +499,7 @@ def prepare_training_dataset(settings: Settings, frames: dict[str, pd.DataFrame]
     future_close = dataset["close"].shift(-settings.training.label_horizon)
     future_return = (future_close - dataset["close"]) / dataset["close"]
 
-    # P3: Decouple direction from features — use EMA cross instead of strategy_score
-    _ema_fast = dataset["close"].ewm(span=50, adjust=False).mean()
-    _ema_slow = dataset["close"].ewm(span=200, adjust=False).mean()
-    dataset["expected_direction"] = np.sign(_ema_fast - _ema_slow).replace(0, 1).astype(int)
+    dataset["expected_direction"] = _expected_direction_from_context(dataset)
 
     directional_return = future_return * dataset["expected_direction"]
     stop_loss_return = (dataset["atr_ratio"] * settings.risk.stop_loss_atr_multiple).clip(lower=1e-6)

@@ -168,9 +168,15 @@ class ModelTrainer:
         best_score = -float("inf")
         safe_thr = float(self.settings.training.threshold_max)
         safe_prec = -1.0
+        base_friction = (
+            float(getattr(self.settings.risk, "spread_cost_rr", 0.10))
+            + float(getattr(self.settings.risk, "slippage_rr", 0.05))
+            + float(getattr(self.settings.risk, "commission_rr", 0.02))
+        )
         for candidate in candidates:
             preds = (probabilities >= candidate).astype(int)
-            if int(preds.sum()) < 5:
+            trade_count = int(preds.sum())
+            if trade_count < 8:
                 continue
             precision = precision_score(y_val, preds, zero_division=0)
             recall = recall_score(y_val, preds, zero_division=0)
@@ -179,9 +185,27 @@ class ModelTrainer:
             if precision > safe_prec:
                 safe_prec = precision
                 safe_thr = float(candidate)
-            if precision < prec_floor:
+            selected = val_df.loc[preds == 1]
+            if selected.empty:
                 continue
-            score = precision * np.sqrt(recall)
+            session_mult = pd.to_numeric(selected.get("session_spread_mult", 1.0), errors="coerce").fillna(1.0)
+            realized_rr = pd.to_numeric(selected.get("realized_rr", 0.0), errors="coerce").fillna(0.0)
+            net_rr = realized_rr - (base_friction + (session_mult - 1.0) * float(getattr(self.settings.risk, "spread_cost_rr", 0.10)))
+            gross_profit = float(net_rr[net_rr > 0].sum())
+            gross_loss = float(-net_rr[net_rr < 0].sum())
+            profit_factor = gross_profit / gross_loss if gross_loss > 0 else (2.0 if gross_profit > 0 else 0.0)
+            avg_net_rr = float(net_rr.mean())
+            positive_rr_rate = float((net_rr > 0).mean())
+            trade_density = trade_count / max(len(val_df), 1)
+            if precision < prec_floor and (avg_net_rr <= 0 or profit_factor < 1.05):
+                continue
+            score = (
+                avg_net_rr * np.sqrt(trade_count)
+                + max(profit_factor - 1.0, -1.0) * 0.35
+                + precision * 0.20
+                + positive_rr_rate * 0.15
+                - max(0.0, 0.015 - trade_density) * 4.0
+            )
             if score > best_score:
                 best_score = score
                 best_thr = float(candidate)
@@ -329,7 +353,8 @@ class ModelTrainer:
         else:
             probability = float(self.model.predict_proba(x_sel)[:, 1][0])
         prediction = int(probability >= self.decision_threshold)
-        return {"probability": probability, "prediction": prediction}
+        margin = probability - self.decision_threshold
+        return {"probability": probability, "prediction": prediction, "margin": margin}
 
     def train_with_loss_weights(
         self,

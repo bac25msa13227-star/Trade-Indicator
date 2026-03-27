@@ -1,5 +1,5 @@
 {
-  "decision_threshold": 0.7300000000000003,
+  "decision_threshold": 0.7800000000000004,
   "feature_columns": [
     "daily_bias",
     "h4_bos",
@@ -56,15 +56,23 @@
     "macd_accel",
     "vol_delta_momentum",
     "inst_candle_score",
-    "swing_failure"
+    "swing_failure",
+    "trend_strength_score",
+    "pullback_quality",
+    "execution_quality"
   ],
-  "roc_auc": 0.584951,
-  "precision": 0.6132596685082873,
-  "recall": 0.18515429524603835,
-  "f1": 0.28443305573350414,
-  "accuracy": 0.5997850232891436,
-  "train_rows": 97099.0,
-  "test_rows": 2791.0,
-  "positive_rate_train": 0.43481395276985346,
-  "positive_rate_test": 0.42959512719455395
+  "roc_auc": 0.596704,
+  "precision": 0.7221526908635795,
+  "recall": 0.08749052312357847,
+  "f1": 0.15607249120908845,
+  "accuracy": 0.5807015186130896,
+  "train_rows": 84757.0,
+  "test_rows": 14882.0,
+  "positive_rate_train": 0.4445060584966433,
+  "positive_rate_test": 0.4431528020427362,
+  "frozen_on": "2026-03-27T16:12:43.926416+00:00",
+  "frozen_from": "outputs/codex_model_meta_acc2_h15_weekday_guard.json",
+  "freeze_profile": "acc2_live_freeze",
+  "canonical_artifact_name": "acc2_live_model",
+  "artifact_role": "acc2_live_production_model"
 }

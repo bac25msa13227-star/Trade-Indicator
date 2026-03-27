@@ -1,14 +1,14 @@
 # ─────────────────────────────────────────────────────────────────
-# LIVE TRADING CONFIG — Account 1 (ACC1 — Aggressive growth)
-# Model:  outputs/model_acc1.pkl  (cloned from model2_weekly500, retrain-ready)
-# Symbol: XAUUSDm  |  Threshold: 0.50  |  Risk: 5% dynamic
-# Target: high-frequency, ~$200 profit/2 days from $200 capital
+# LIVE TRADING CONFIG — Account 1 (ACC1 freeze profile)
+# Model:  outputs/acc1_live_model.pkl  (frozen snapshot from acc2 live-freeze)
+# Symbol: XAUUSDm  |  Threshold: 0.60  |  Risk: 5% dynamic
+# Target: frozen paper/deploy profile with stricter gate than the previous 0.50 setup
 # ─────────────────────────────────────────────────────────────────
 app:
   poll_seconds: 60
-  model_path:          outputs/model_acc1.pkl
-  scaler_path:         outputs/scaler_acc1.pkl
-  model_meta_path:     outputs/model_meta_acc1.json
+  model_path:          outputs/acc1_live_model.pkl
+  scaler_path:         outputs/acc1_live_scaler.pkl
+  model_meta_path:     outputs/acc1_live_model_meta.json
   training_report_path: outputs/training_report_acc1.json
   training_plot_path:  outputs/training_metrics_acc1.png
   backtest_report_path: outputs/backtest_report_acc1.json
@@ -50,7 +50,7 @@ strategy:
   liquidity_lookback: 15
   swing_lookback: 20
   volatility_window: 20
-  signal_threshold: 0.50             # ACC1: lower than acc2 (0.55) → more signals
+  signal_threshold: 0.60             # Freeze threshold requested for acc1
   sideways_volatility_threshold: 0.003
   strong_volatility_threshold: 0.016
   news_block_minutes: 0              # Tắt blackout ML feature (dùng news override thay thế)
@@ -64,10 +64,33 @@ strategy:
   strong_volatility_min_strategy_score: 0.08
   require_trend_alignment: false
   force_trade: false
-  blocked_hours_utc: [22, 23]        # Only block rollover
+  blocked_hours_utc: [15, 22, 23]    # Block rollover + validated weak hour cluster
   blocked_weekdays_utc: []
   blocked_weekday_hours_utc:
-    Friday: [20, 21, 22, 23]
+    Monday: [4, 5, 16, 17, 18, 19, 20, 21]
+    Tuesday: [3, 17, 18]
+    Thursday: [5, 13]
+  regime_shutdown_rules:
+    - name: monday_early_sell_flow_conflict
+      weekdays_utc: [Monday]
+      hours_utc: [1, 2]
+      sides: [sell]
+      volatility_regimes: [1]
+      trend_alignment_values: [0]
+      trend_strength_max: -0.24
+      execution_quality_min: 0.0
+    - name: thursday_pm_sell_flow_conflict
+      weekdays_utc: [Thursday]
+      hours_utc: [16, 17, 18]
+      sides: [sell]
+      volatility_regimes: [1]
+      execution_quality_min: 0.0
+    - name: wed_thu_early_buy_trap
+      weekdays_utc: [Wednesday, Thursday]
+      hours_utc: [3, 4, 5]
+      sides: [buy]
+      trend_strength_max: -0.4
+      execution_quality_max: 0.3
   # Silver Bullet ICT windows
   silver_bullet_enabled: true
   silver_bullet_windows_utc: [[3, 4], [10, 11], [14, 15]]
@@ -76,8 +99,8 @@ strategy:
   adx_gate_enabled: true
   adx_min_trend: 15.0               # More relaxed than acc2 (18.0)
   # Regime-specific confidence thresholds — all lower than acc2
-  sideway_min_confidence: 0.52       # acc2=0.60 → more entries in ranging
-  volatile_min_confidence: 0.50      # acc2=0.55
+  sideway_min_confidence: 0.60       # Freeze acc1 at a single 0.60 gate across regimes
+  volatile_min_confidence: 0.60
 
 risk:
   mode: fixed_fractional
@@ -88,7 +111,7 @@ risk:
   take_profit_rr: 3.5
   volatile_take_profit_rr: 5.0     # ACC2 logic: Volatile regime RR 1:5
   sideway_take_profit_rr: 2.5      # Sideways regime RR 1:2.5
-  min_confidence: 0.50             # Lower threshold (acc2=0.55)
+  min_confidence: 0.60             # Freeze threshold requested for acc1
   fixed_lot: 0.01
   max_risk_fraction: 0.05           # 5% cap per trade (same as acc2)
   sideway_risk_multiplier: 0.4      # ACC2 logic: giảm risk trong sideway
@@ -111,7 +134,9 @@ execution:
   auto_trade: true
   deviation: 20
   magic_number: 20260325            # Unique for acc1
-  comment: xauusd-ai-live-acc1
+  comment: xauusd-ai-live-acc1-freeze
+  paper_trade_max_loops: 0          # 0 = run continuously until manually stopped
+  paper_data_source: yfinance       # Paper test should follow live feed, not static CSV
   close_opposite_on_signal: true
 
   trailing_sl:
@@ -154,8 +179,13 @@ training:
   label_tp_rr: 1.5                   # ACC1: lower RR label → more positive samples
   label_horizon: 24                  # 2h horizon for signal validity
   min_return_threshold: 0.0008       # Lower → even more positive labels
-  retrain_on_startup: false
-  live_learning_enabled: true
+  retrain_on_startup: false          # Dùng model freeze hiện tại ngay khi bot khởi động
+  live_learning_enabled: true        # Bật tự học sau startup
+  live_learning_interval_minutes: 60
+  live_learning_min_new_bars: 12
+  live_learning_min_rows: 500
+  min_self_learning_roc_auc: 0.53
+  optimize_threshold: false          # Giữ threshold 0.60 cố định cho acc1 live
 
 notifications:
   telegram_enabled: true

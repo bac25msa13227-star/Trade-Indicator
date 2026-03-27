@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
 <title>XAU/USD — Trade Monitor</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <style>
 /* ═══ DESIGN TOKENS ═══ */
@@ -284,6 +284,466 @@ body{background:var(--bg);color:var(--text);font-family:var(--f);font-size:14px;
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--card3);border-radius:99px}
 ::-webkit-scrollbar-thumb:hover{background:var(--card2)}
+
+/* ═══ SPRING REFRESH LAYER ═══ */
+:root{
+  --bg:#fff8f4;
+  --surface:rgba(255,255,255,.72);
+  --card:rgba(255,255,255,.8);
+  --card2:rgba(255,247,239,.92);
+  --card3:rgba(255,236,222,.92);
+  --bdr:rgba(187,141,118,.18);
+  --bdr2:rgba(187,141,118,.28);
+  --accent:#ff8c6b;
+  --green:#24b47e;
+  --red:#ef5b6a;
+  --yellow:#f4b43a;
+  --purple:#ff7da8;
+  --orange:#ff9d4d;
+  --cyan:#53c8e6;
+  --text:#5b4154;
+  --text2:#7a6173;
+  --text3:#aa8a95;
+  --chart-grid:#f3d9d1;
+  --hero-grad:linear-gradient(135deg,#fff9f5 0%,#fff1eb 48%,#fff7d9 100%);
+  --hero-grad-2:linear-gradient(150deg,#ffecd9 0%,#fef7ff 50%,#e6fbff 100%);
+  --sw:246px;
+  --r:22px;
+  --rs:16px;
+  --f:'Plus Jakarta Sans',system-ui,sans-serif;
+  --m:'JetBrains Mono',monospace;
+  --display:'Fredoka',system-ui,sans-serif;
+  --sh:0 16px 44px rgba(255,149,109,.14);
+  --shg:0 28px 70px rgba(255,149,109,.18);
+  --gg:0 0 0 1px rgba(36,180,126,.18),0 18px 42px rgba(36,180,126,.12);
+  --gr:0 0 0 1px rgba(239,91,106,.18),0 18px 42px rgba(239,91,106,.12);
+  --gb:0 0 0 1px rgba(255,140,107,.18),0 18px 42px rgba(255,140,107,.14);
+  --gy:0 0 0 1px rgba(244,180,58,.18),0 18px 42px rgba(244,180,58,.12);
+}
+:root[data-mood="mint"]{
+  --accent:#41c7b9;
+  --green:#1fa66d;
+  --purple:#68b7ff;
+  --orange:#80d96d;
+  --cyan:#6ecae6;
+  --hero-grad:linear-gradient(140deg,#f4fffb 0%,#eefdf7 48%,#f7fff2 100%);
+  --hero-grad-2:linear-gradient(150deg,#e6fff8 0%,#f8fff7 52%,#eefcff 100%);
+  --chart-grid:#d4efe8;
+  --sh:0 16px 44px rgba(65,199,185,.14);
+}
+:root[data-mood="berry"]{
+  --accent:#ff7a9b;
+  --green:#2ea38a;
+  --purple:#8ca7ff;
+  --orange:#ffb253;
+  --cyan:#6fcbe8;
+  --hero-grad:linear-gradient(140deg,#fff5fb 0%,#fff0f4 48%,#fff7e8 100%);
+  --hero-grad-2:linear-gradient(150deg,#ffe5ee 0%,#fff6fa 52%,#eef7ff 100%);
+  --chart-grid:#f0d7e1;
+  --sh:0 16px 44px rgba(255,122,155,.16);
+}
+body{
+  position:relative;
+  background:
+    radial-gradient(circle at top left,rgba(255,208,167,.55),transparent 28%),
+    radial-gradient(circle at top right,rgba(116,224,255,.38),transparent 24%),
+    linear-gradient(180deg,#fffaf6 0%,#fff6f1 40%,#fffaf8 100%);
+  color:var(--text);
+}
+body::before,
+body::after{
+  content:'';
+  position:fixed;
+  inset:auto;
+  width:340px;
+  height:340px;
+  border-radius:50%;
+  pointer-events:none;
+  filter:blur(16px);
+  opacity:.42;
+  z-index:0;
+}
+body::before{
+  top:-130px;
+  right:-80px;
+  background:radial-gradient(circle,rgba(255,204,136,.85) 0%,rgba(255,204,136,0) 70%);
+}
+body::after{
+  bottom:-140px;
+  left:-120px;
+  background:radial-gradient(circle,rgba(124,226,255,.78) 0%,rgba(124,226,255,0) 70%);
+}
+.shell,.sidebar,.content,.mob-hdr,.mob-acct-bar,.mob-nav,.mob-ts-bar,.card,.sb,.news-ev,.news-next-card,.live-bar,.strat-p,.model-c,.step-c,.conn-pill{position:relative;z-index:1}
+.sidebar{
+  background:rgba(255,255,255,.55);
+  backdrop-filter:blur(24px);
+  border-right:1px solid rgba(255,255,255,.72);
+  box-shadow:18px 0 55px rgba(255,170,125,.08);
+}
+.sb-logo,.sb-foot,.mob-hdr,.mob-acct-bar,.mob-ts-bar,.mob-nav{background:rgba(255,255,255,.42);backdrop-filter:blur(20px)}
+.logo-ic{
+  background:linear-gradient(145deg,var(--accent),#ffcc73);
+  box-shadow:0 16px 30px rgba(255,140,107,.28);
+}
+.logo-t,.mob-logo,.sunny-title,.assistant-face,.card-ttl,.slbl,.lb-lbl,.step-t,.strat-pt,.logo-s,.sb-lbl{font-family:var(--display)}
+.gold-t{
+  background:linear-gradient(100deg,#ff8c6b,#ffb648,#53c8e6);
+  -webkit-background-clip:text;
+  -webkit-text-fill-color:transparent;
+  background-clip:text;
+}
+.acct-btn,.nav-item,.mac,.mni{
+  color:var(--text2);
+}
+.acct-btn:hover,.nav-item:hover,.mac:hover{
+  background:rgba(255,255,255,.68);
+  color:var(--text);
+}
+.acct-btn.active{
+  background:linear-gradient(135deg,rgba(255,255,255,.95),rgba(255,241,234,.96));
+  border-color:rgba(255,140,107,.22);
+  box-shadow:0 14px 28px rgba(255,149,109,.16);
+}
+.nav-item{
+  border-radius:14px;
+}
+.nav-item.active{
+  background:linear-gradient(135deg,rgba(255,255,255,.98),rgba(255,237,229,.96));
+  border-left:0;
+  box-shadow:0 14px 28px rgba(255,149,109,.14);
+  color:var(--text);
+  padding-left:9px;
+}
+.nav-item.active .ni,.mni.active{color:var(--accent)}
+.conn-pill,
+.card,
+.sb,
+.news-ev,
+.news-next-card,
+.live-bar,
+.strat-p,
+.model-c,
+.step-c{
+  background:rgba(255,255,255,.72);
+  backdrop-filter:blur(18px);
+  border:1px solid rgba(255,255,255,.78);
+  box-shadow:var(--sh);
+}
+.card:hover,.sb:hover,.model-c:hover,.strat-p:hover{
+  border-color:rgba(255,140,107,.22);
+}
+.sb{
+  background:linear-gradient(145deg,rgba(255,255,255,.9),rgba(255,244,236,.96));
+}
+.card-ttl,.slbl,.lb-lbl,.step-t,.strat-pt,.news-val-lbl,.news-val-num,.news-time,.news-cd{letter-spacing:.08em}
+.tbl th{
+  color:var(--text3);
+  border-bottom:1px solid rgba(214,166,140,.18);
+}
+.tbl td{
+  border-bottom:1px solid rgba(214,166,140,.12);
+}
+.tbl tbody tr:hover td{
+  background:rgba(255,247,240,.82);
+}
+.prog-track{
+  background:rgba(255,219,198,.42);
+}
+.prog-mark{
+  background:var(--yellow);
+  box-shadow:0 0 0 4px rgba(244,180,58,.12);
+}
+.live-bar{
+  background:linear-gradient(135deg,rgba(255,255,255,.84),rgba(255,245,238,.94));
+}
+.model-c{background:rgba(255,250,247,.8)}
+.step-c.pass{background:linear-gradient(145deg,rgba(236,255,246,.96),rgba(245,255,251,.96))}
+.step-c.fail{background:linear-gradient(145deg,rgba(255,240,242,.96),rgba(255,247,248,.96))}
+.step-c.warn{background:linear-gradient(145deg,rgba(255,250,232,.96),rgba(255,247,240,.96))}
+.news-ev.low{opacity:.9}
+.news-next-card{
+  background:linear-gradient(145deg,rgba(255,243,245,.95),rgba(255,249,238,.98));
+}
+.chart,.chart-lg{border-radius:18px}
+.ci{
+  padding:0 14px 18px;
+}
+.sp{
+  padding:18px 4px 0;
+}
+
+.sunny-deck{
+  display:grid;
+  grid-template-columns:minmax(0,1.2fr) minmax(320px,.9fr);
+  gap:16px;
+  padding:16px 4px 6px;
+}
+.sunny-stack{
+  display:flex;
+  flex-direction:column;
+  gap:16px;
+  align-self:start;
+}
+.sunny-main,
+.sunny-tools,
+.assistant-card{
+  background:var(--hero-grad);
+  border:1px solid rgba(255,255,255,.82);
+  border-radius:28px;
+  box-shadow:var(--shg);
+  position:relative;
+  overflow:hidden;
+}
+.sunny-main::before,
+.sunny-tools::before,
+.assistant-card::before{
+  content:'';
+  position:absolute;
+  inset:auto auto -40px -40px;
+  width:180px;
+  height:180px;
+  border-radius:50%;
+  background:radial-gradient(circle,rgba(255,255,255,.78) 0%,rgba(255,255,255,0) 70%);
+  pointer-events:none;
+}
+.sunny-main{
+  padding:24px 24px 22px;
+}
+.sunny-topline{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  margin-bottom:14px;
+}
+.sunny-chip{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  padding:7px 14px;
+  border-radius:999px;
+  background:rgba(255,255,255,.82);
+  border:1px solid rgba(255,255,255,.9);
+  font-size:.72rem;
+  font-weight:700;
+  color:var(--text2);
+  box-shadow:0 10px 20px rgba(255,149,109,.08);
+}
+.sunny-orb{
+  width:10px;
+  height:10px;
+  border-radius:50%;
+  background:var(--red);
+  box-shadow:0 0 0 5px rgba(239,91,106,.12);
+}
+.sunny-orb.live{
+  background:var(--green);
+  box-shadow:0 0 0 5px rgba(36,180,126,.16);
+}
+.sunny-title{
+  font-size:2.1rem;
+  line-height:1.06;
+  letter-spacing:-.03em;
+  max-width:12ch;
+  margin-bottom:10px;
+}
+.sunny-blurb{
+  font-size:.98rem;
+  line-height:1.65;
+  color:var(--text2);
+  max-width:62ch;
+}
+.sunny-mini-grid{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:12px;
+  margin-top:18px;
+}
+.sunny-mini{
+  background:rgba(255,255,255,.72);
+  border:1px solid rgba(255,255,255,.86);
+  border-radius:20px;
+  padding:14px 14px 13px;
+  box-shadow:0 12px 22px rgba(255,149,109,.08);
+}
+.sunny-mini span{
+  display:block;
+  font-size:.66rem;
+  text-transform:uppercase;
+  letter-spacing:.12em;
+  color:var(--text3);
+  font-weight:700;
+  margin-bottom:6px;
+}
+.sunny-mini strong{
+  display:block;
+  font-size:.92rem;
+  color:var(--text);
+  line-height:1.35;
+}
+.sunny-tools{
+  padding:20px;
+  background:var(--hero-grad-2);
+  align-self:start;
+}
+.tools-grid{
+  display:grid;
+  gap:14px;
+}
+.tool-card{
+  background:rgba(255,255,255,.72);
+  border:1px solid rgba(255,255,255,.86);
+  border-radius:22px;
+  padding:15px 16px;
+  box-shadow:0 12px 24px rgba(255,149,109,.08);
+}
+.tool-subttl{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  font-size:.74rem;
+  font-weight:800;
+  color:var(--text2);
+  margin-bottom:12px;
+  text-transform:uppercase;
+  letter-spacing:.12em;
+}
+.mood-row,
+.quick-grid{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+}
+.mood-chip,
+.quick-btn{
+  border:none;
+  outline:none;
+  cursor:pointer;
+  border-radius:999px;
+  padding:10px 13px;
+  font-family:var(--f);
+  font-size:.78rem;
+  font-weight:700;
+  color:var(--text2);
+  background:rgba(255,255,255,.84);
+  box-shadow:0 8px 18px rgba(255,149,109,.1);
+  transition:transform .18s ease,box-shadow .18s ease,background .18s ease,color .18s ease;
+}
+.mood-chip:hover,
+.quick-btn:hover{
+  transform:translateY(-1px);
+  box-shadow:0 12px 22px rgba(255,149,109,.14);
+  color:var(--text);
+}
+.mood-chip.active,
+.quick-btn.active{
+  background:linear-gradient(135deg,var(--accent),#ffb872);
+  color:#fffdfb;
+}
+.quick-btn[data-action="compact"].active{
+  background:linear-gradient(135deg,var(--cyan),#9bdfff);
+}
+.signal-slider-wrap{
+  display:flex;
+  align-items:center;
+  gap:12px;
+}
+.signal-slider{
+  flex:1;
+  accent-color:var(--accent);
+  cursor:pointer;
+}
+.slider-bubble{
+  min-width:72px;
+  text-align:center;
+  padding:8px 10px;
+  border-radius:14px;
+  background:rgba(255,255,255,.88);
+  color:var(--text2);
+  font-size:.74rem;
+  font-weight:800;
+}
+.assistant-card{
+  margin-top:16px;
+  padding:18px 20px;
+  display:flex;
+  align-items:flex-start;
+  gap:16px;
+  background:linear-gradient(140deg,rgba(255,255,255,.82),rgba(255,247,236,.96));
+}
+.assistant-face{
+  width:58px;
+  height:58px;
+  border-radius:20px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background:linear-gradient(135deg,var(--accent),#ffd06a);
+  color:#fffaf6;
+  font-size:1.4rem;
+  box-shadow:0 16px 26px rgba(255,149,109,.2);
+  flex-shrink:0;
+}
+.assistant-tag{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  padding:5px 10px;
+  border-radius:999px;
+  background:rgba(255,255,255,.8);
+  color:var(--text2);
+  font-size:.7rem;
+  font-weight:800;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  margin-bottom:10px;
+}
+.assistant-summary{
+  font-size:1.02rem;
+  font-weight:800;
+  line-height:1.55;
+  color:var(--text);
+  margin-bottom:6px;
+}
+.assistant-detail{
+  color:var(--text2);
+  line-height:1.7;
+  font-size:.84rem;
+}
+.pulse-card{
+  animation:softPop .9s ease;
+}
+@keyframes softPop{
+  0%{transform:scale(.985);box-shadow:0 10px 20px rgba(255,149,109,.06)}
+  50%{transform:scale(1.01);box-shadow:0 22px 44px rgba(255,149,109,.14)}
+  100%{transform:scale(1);box-shadow:var(--sh)}
+}
+.compact .sp{padding-top:12px}
+.compact .card,.compact .sunny-main,.compact .sunny-tools,.compact .assistant-card{padding-top:14px;padding-bottom:14px}
+.compact .sb{padding:8px 10px}
+.compact .news-ev{padding:9px 11px}
+.compact .sunny-mini{padding:12px}
+.compact .tool-card{padding:12px 13px}
+
+@media(max-width:1120px){
+  .sunny-deck{grid-template-columns:1fr}
+  .sunny-title{max-width:none}
+}
+@media(max-width:900px){
+  .ci{padding:0 10px 12px}
+  .sunny-deck{padding:12px 2px 4px}
+  .sunny-mini-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:560px){
+  .sunny-title{font-size:1.66rem}
+  .sunny-main,.sunny-tools,.assistant-card{border-radius:24px}
+  .sunny-mini-grid{grid-template-columns:1fr 1fr;gap:10px}
+  .assistant-card{flex-direction:column}
+  .signal-slider-wrap{flex-direction:column;align-items:stretch}
+}
+@media(max-width:420px){
+  .sunny-mini-grid{grid-template-columns:1fr}
+}
 </style>
 </head>
 <body>
@@ -359,6 +819,91 @@ body{background:var(--bg);color:var(--text);font-family:var(--f);font-size:14px;
       <button class="mac" data-acct="acc2">ACC2 &middot; Model v2</button>
     </div>
 
+    <section class="sunny-deck" id="sunny-deck">
+      <div class="sunny-stack">
+        <div class="sunny-main">
+          <div class="sunny-topline">
+            <span class="sunny-chip">
+              <span class="sunny-orb" id="sunny-live-dot"></span>
+              <span id="sunny-live-status">Connecting</span>
+            </span>
+            <span class="sunny-chip" id="sunny-live-updated">Realtime cockpit</span>
+          </div>
+          <h1 class="sunny-title" id="sunny-title">Realtime dashboard is waking up.</h1>
+          <p class="sunny-blurb" id="sunny-blurb">Waiting for the first live snapshot before we brighten up the story for ACC1 and ACC2.</p>
+          <div class="sunny-mini-grid">
+            <div class="sunny-mini">
+              <span>Focus</span>
+              <strong id="sunny-focus">ACC1 / Overview</strong>
+            </div>
+            <div class="sunny-mini">
+              <span>Signal Pulse</span>
+              <strong id="sunny-signal-pulse">Hold until data arrives</strong>
+            </div>
+            <div class="sunny-mini">
+              <span>Risk Mood</span>
+              <strong id="sunny-risk-mood">Guard rails waiting</strong>
+            </div>
+            <div class="sunny-mini">
+              <span>Live PnL</span>
+              <strong id="sunny-live-pnl">&#8212;</strong>
+            </div>
+          </div>
+        </div>
+
+        <div class="assistant-card" id="assistant-card">
+          <div class="assistant-face">&#10047;</div>
+          <div style="min-width:0">
+            <div class="assistant-tag">Sunny Assistant</div>
+            <div class="assistant-summary" id="assistant-summary">No story yet, but the feed is ready to narrate as soon as websocket data arrives.</div>
+            <div class="assistant-detail" id="assistant-detail">Use the quick actions on the right to jump between live sections, change the dashboard mood, or tighten the signal feed density.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sunny-tools">
+        <div class="tools-grid">
+          <div class="tool-card">
+            <div class="tool-subttl">
+              <span>Mood Studio</span>
+              <span id="mood-label">Peach Glow</span>
+            </div>
+            <div class="mood-row">
+              <button class="mood-chip active" data-mood="peach">Peach Glow</button>
+              <button class="mood-chip" data-mood="mint">Mint Pop</button>
+              <button class="mood-chip" data-mood="berry">Berry Soda</button>
+            </div>
+          </div>
+
+          <div class="tool-card">
+            <div class="tool-subttl">
+              <span>Quick Focus</span>
+              <span id="quick-focus-label">Jump sections</span>
+            </div>
+            <div class="quick-grid">
+              <button class="quick-btn active" data-jump="overview">Overview</button>
+              <button class="quick-btn" data-jump="trading">Live</button>
+              <button class="quick-btn" data-jump="pnl">P&amp;L</button>
+              <button class="quick-btn" data-jump="news">News</button>
+              <button class="quick-btn" data-action="compact">Compact</button>
+              <button class="quick-btn" data-action="spotlight">Spotlight</button>
+            </div>
+          </div>
+
+          <div class="tool-card">
+            <div class="tool-subttl">
+              <span>Feed Density</span>
+              <span id="signal-limit-text">10 rows</span>
+            </div>
+            <div class="signal-slider-wrap">
+              <input class="signal-slider" id="signal-limit" type="range" min="4" max="20" step="1" value="10"/>
+              <span class="slider-bubble" id="signal-limit-bubble">10 rows</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- SCROLLABLE CONTENT -->
     <div class="ci" id="ci">
       <div id="ap-acc1" class="ap active">
@@ -430,36 +975,138 @@ function statBox(lbl,val,cls='',sub=''){
   return `<div class="sb"><div class="slbl">${lbl}</div><div class="sval-sm ${cls}">${val}</div>${sub?`<div class="ssub">${sub}</div>`:''}</div>`;
 }
 
+const chartVar = (name, fallback='') => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+function syncChartTheme(){
+  Chart.defaults.color = chartVar('--text3','#aa8a95');
+}
+function liveLabel(acct){
+  return acct==='acc2' ? 'ACC2 / ML guard' : 'ACC1 / ICT stack';
+}
+function sentenceSide(side){
+  if(!side) return 'hold';
+  const s=String(side).toUpperCase();
+  if(s==='BUY'||s==='LONG') return 'buy bias';
+  if(s==='SELL'||s==='SHORT') return 'sell bias';
+  return s.toLowerCase();
+}
+function assistantNarrative(acct,d){
+  const s=d?.status||{};
+  const mod=d?.model||{};
+  const day=d?.daily||{};
+  const trades=d?.recent_trades||[];
+  const conf=s.confidence!=null?+s.confidence:null;
+  const thr=mod.threshold!=null?+mod.threshold:null;
+  const blocked=!(s.should_trade);
+  const pnl=+(d?.total_pnl||0);
+  const dd=d?.drawdown_pct!=null?+d.drawdown_pct:null;
+  const side=sentenceSide(s.side);
+  const confLine=conf!=null&&thr!=null
+    ? `Confidence ${fmt(conf,3)} vs threshold ${fmt(thr,3)}.`
+    : 'Waiting for enough score data to compare confidence and threshold.';
+  let summary=`${liveLabel(acct)} is in ${blocked?'careful':'go'} mode with a ${side} signal.`;
+  let detail=confLine;
+  if(day.killed){
+    summary=`${liveLabel(acct)} hit the kill switch, so the dashboard is protecting capital first.`;
+    detail=`${confLine} Consecutive losses: ${day.consecutive_losses||0}. Review the most recent trades before re-arming live execution.`;
+  }else if(day.cooldown_bars>0){
+    summary=`${liveLabel(acct)} is cooling down for ${day.cooldown_bars} more bars.`;
+    detail=`${confLine} The model still sees ${side}, but the risk guard is pausing new entries.`;
+  }else if(blocked){
+    detail=`${confLine} Reason: ${q(s.reason||'No execution reason was provided.')}`;
+  }else{
+    detail=`${confLine} Live PnL is ${dol(pnl)} across ${trades.length} closed trades, and drawdown is ${dd!=null?dd.toFixed(1)+'%':'unknown'}.`;
+  }
+  return {summary,detail};
+}
+function refreshQuickButtons(){
+  document.querySelectorAll('.quick-btn[data-jump]').forEach(btn=>{
+    btn.classList.toggle('active',btn.dataset.jump===State.sec[State.acct]);
+  });
+  document.querySelectorAll('.quick-btn[data-action="compact"]').forEach(btn=>{
+    btn.classList.toggle('active',!!State.compact);
+  });
+}
+function renderSunnyDeck(){
+  const data=State.data;
+  const acct=State.acct;
+  const d=data?.accounts?.[acct];
+  if(!d)return;
+  const s=d.status||{};
+  const day=d.daily||{};
+  const live=(State.liveConnected===true);
+  const conf=s.confidence!=null?+s.confidence:null;
+  const thr=(d.model||{}).threshold!=null?+(d.model||{}).threshold:null;
+  const note=assistantNarrative(acct,d);
+  const riskMood=day.killed?'Kill switch':day.cooldown_bars>0?`Cooldown ${day.cooldown_bars}b`:s.should_trade?'Ready to execute':'Guarded';
+  const signalPulse=`${sentenceSide(s.side)}${conf!=null?` / ${fmt(conf,3)}`:''}${thr!=null?` vs ${fmt(thr,3)}`:''}`;
+  const secLabel=(State.sec[acct]||'overview').replace('walkforward','walk forward');
+  el('sunny-title').textContent = `${liveLabel(acct)} feels ${s.should_trade?'ready':'careful'} right now.`;
+  el('sunny-blurb').textContent = q(s.reason||'The assistant is waiting for the next live bar to explain what the model is seeing.');
+  el('sunny-focus').textContent = `${acct.toUpperCase()} / ${secLabel}`;
+  el('sunny-signal-pulse').textContent = signalPulse;
+  el('sunny-risk-mood').textContent = riskMood;
+  el('sunny-live-pnl').innerHTML = `<span class="${(d.total_pnl||0)>=0?'win':'loss'}">${dol(d.total_pnl)}</span>`;
+  el('assistant-summary').textContent = note.summary;
+  el('assistant-detail').textContent = note.detail;
+  el('sunny-live-status').textContent = live ? 'Realtime websocket live' : 'Fallback mode';
+  el('sunny-live-updated').textContent = data?.ts ? `Updated ${String(data.ts).replace('T',' ').slice(5,16)} UTC` : 'Realtime cockpit';
+  const dot=el('sunny-live-dot');
+  if(dot) dot.classList.toggle('live',live);
+  const assistantCard=el('assistant-card');
+  if(assistantCard && State.assistantKey!==note.summary){
+    assistantCard.classList.remove('pulse-card');
+    void assistantCard.offsetWidth;
+    assistantCard.classList.add('pulse-card');
+  }
+  State.assistantKey=note.summary;
+  const focusLabel=el('quick-focus-label');
+  if(focusLabel) focusLabel.textContent = `Viewing ${secLabel}`;
+  refreshQuickButtons();
+}
+function spotlightActiveSection(){
+  const sec=el(`sb-${State.acct}-${State.sec[State.acct]}`);
+  if(!sec)return;
+  sec.classList.remove('pulse-card');
+  void sec.offsetWidth;
+  sec.classList.add('pulse-card');
+}
+
 /* ─── Chart.js ─── */
 const charts={};
-Chart.defaults.color='#5d6680';
+syncChartTheme();
 
 function renderLine(id,labels,values,lbl,color){
   const c=el(id); if(!c)return;
   if(charts[id]){charts[id].destroy();delete charts[id];}
+  syncChartTheme();
+  const tickColor=chartVar('--text3','#aa8a95');
+  const gridColor=chartVar('--chart-grid','#f3d9d1');
   const n=labels.length;
   charts[id]=new Chart(c.getContext('2d'),{
     type:'line',
     data:{labels,datasets:[{label:lbl,data:values,borderColor:color,backgroundColor:color+'22',fill:true,tension:0.35,pointRadius:n>80?0:n>30?1:2,borderWidth:2}]},
     options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
-      plugins:{legend:{labels:{color:'#9ba3bf',boxWidth:10,font:{size:10}}}},
-      scales:{x:{ticks:{color:'#5d6680',maxTicksLimit:8,font:{size:9.5},maxRotation:0},grid:{color:'#181c27'}},
-              y:{ticks:{color:'#5d6680',font:{size:9.5}},grid:{color:'#181c27'}}}}
+      plugins:{legend:{labels:{color:tickColor,boxWidth:10,font:{size:10}}}},
+      scales:{x:{ticks:{color:tickColor,maxTicksLimit:8,font:{size:9.5},maxRotation:0},grid:{color:gridColor}},
+              y:{ticks:{color:tickColor,font:{size:9.5}},grid:{color:gridColor}}}}
   });
 }
 
 function renderBars(id,labels,values){
   const c=el(id); if(!c)return;
   if(charts[id]){charts[id].destroy();delete charts[id];}
+  syncChartTheme();
+  const tickColor=chartVar('--text3','#aa8a95');
+  const gridColor=chartVar('--chart-grid','#f3d9d1');
   charts[id]=new Chart(c.getContext('2d'),{
     type:'bar',
     data:{labels,datasets:[{label:'PnL',data:values,
-      backgroundColor:values.map(v=>v>=0?'rgba(34,197,94,.45)':'rgba(239,68,68,.45)'),
-      borderColor:values.map(v=>v>=0?'#22c55e':'#ef4444'),borderWidth:1}]},
+      backgroundColor:values.map(v=>v>=0?'rgba(36,180,126,.45)':'rgba(239,91,106,.45)'),
+      borderColor:values.map(v=>v>=0?chartVar('--green','#24b47e'):chartVar('--red','#ef5b6a')),borderWidth:1}]},
     options:{responsive:true,maintainAspectRatio:false,
       plugins:{legend:{display:false}},
-      scales:{x:{ticks:{color:'#5d6680',maxTicksLimit:8,font:{size:9},maxRotation:0},grid:{color:'#181c27'}},
-              y:{ticks:{color:'#5d6680',font:{size:9.5}},grid:{color:'#181c27'}}}}
+      scales:{x:{ticks:{color:tickColor,maxTicksLimit:8,font:{size:9},maxRotation:0},grid:{color:gridColor}},
+              y:{ticks:{color:tickColor,font:{size:9.5}},grid:{color:gridColor}}}}
   });
 }
 
@@ -668,7 +1315,7 @@ function renderTrading(acct,d){
 
   const flowHTML=steps.map(([pass,card],i)=>`<div class="step-w">${card}${i<steps.length-1?stepArr(pass):''}</div>`).join('');
 
-  const trRows=trades.slice().reverse().map(t=>{
+  const trRows=trades.slice(-State.signalLimit).reverse().map(t=>{
     const pnl=t.pnl??t.profit??null;
     return `<tr>
       <td class="dim">${String(t.time||t.close_time||t.ts||'').slice(0,16)}</td>
@@ -680,7 +1327,7 @@ function renderTrading(acct,d){
     </tr>`;
   }).join('');
 
-  const sgRows=signals.slice().reverse().map(sg=>{
+  const sgRows=signals.slice(-State.signalLimit).reverse().map(sg=>{
     const c=sg.confidence??sg.conf??null;
     const over=c!=null&&thr!=null?+c>=+thr:null;
     const vrSig=sg.volatility_regime!=null?+sg.volatility_regime:-1;
@@ -776,14 +1423,14 @@ function renderTrading(acct,d){
 
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
     <div class="card">
-      <div class="card-ttl">&#128267; Recent Signals (${signals.length})</div>
+      <div class="card-ttl">&#128267; Recent Signals (${Math.min(signals.length,State.signalLimit)} shown / ${signals.length})</div>
       <div class="scroll-y"><table class="tbl">
         <thead><tr><th>Time</th><th>Side</th><th>Conf</th><th>Vol</th><th>Score</th><th>Reason</th></tr></thead>
         <tbody>${sgRows||'<tr><td colspan="6" class="dim" style="text-align:center;padding:16px">No signals</td></tr>'}</tbody>
       </table></div>
     </div>
     <div class="card">
-      <div class="card-ttl">&#128200; Live Trades (${trades.length})</div>
+      <div class="card-ttl">&#128200; Live Trades (${Math.min(trades.length,State.signalLimit)} shown / ${trades.length})</div>
       <div class="scroll-y"><table class="tbl">
         <thead><tr><th>Time</th><th>Side</th><th>Entry</th><th>Exit</th><th>PnL</th><th>Type</th></tr></thead>
         <tbody>${trRows||'<tr><td colspan="6" class="dim" style="text-align:center;padding:16px">No trades</td></tr>'}</tbody>
@@ -837,7 +1484,7 @@ function renderPnl(acct,d){
     </table></div>
   </div>`;
   requestAnimationFrame(()=>{
-    renderLine(`ch-${acct}-pnl`,series.labels,series.values,'Cumulative PnL','#5b8dee');
+    renderLine(`ch-${acct}-pnl`,series.labels,series.values,'Cumulative PnL',chartVar('--accent','#ff8c6b'));
     renderBars(`ch-${acct}-ptrade`,series.labels,series.individual);
   });
 }
@@ -889,7 +1536,7 @@ function renderBacktest(acct,d){
     <div class="chart"><canvas id="ch-${acct}-btbar"></canvas></div>
   </div>`;
   requestAnimationFrame(()=>{
-    renderLine(`ch-${acct}-bteq`,eq.labels,eq.values,'Equity','#f59e0b');
+    renderLine(`ch-${acct}-bteq`,eq.labels,eq.values,'Equity',chartVar('--yellow','#f4b43a'));
     renderBars(`ch-${acct}-btbar`,eq.labels,eq.individual);
   });
 }
@@ -951,9 +1598,19 @@ function renderWalkforward(acct,d){
 }
 
 /* ═══════════════════════════════ STATE & ROUTING ═══════════════════════════════ */
-const State={data:null,acct:'acc1',sec:{acc1:'overview',acc2:'overview'}};
+const State={
+  data:null,
+  acct:'acc1',
+  sec:{acc1:'overview',acc2:'overview'},
+  signalLimit:10,
+  mood:'peach',
+  compact:false,
+  liveConnected:false,
+  assistantKey:'',
+};
 
 function setConn(live){
+  State.liveConnected=!!live;
   ['pc-dot','mob-dot'].forEach(id=>{
     const d=el(id); if(!d)return;
     d.className='pdot '+(live?'live':'dead');
@@ -961,6 +1618,11 @@ function setConn(live){
   const txt=live?'LIVE':'Connecting…';
   const clr=live?'var(--green)':'var(--text3)';
   ['pc-lbl','mob-lbl'].forEach(id=>{ const e=el(id); if(!e)return; e.textContent=txt; e.style.color=clr; });
+  const sDot=el('sunny-live-dot');
+  if(sDot) sDot.classList.toggle('live',!!live);
+  const sLbl=el('sunny-live-status');
+  if(sLbl) sLbl.textContent=live?'Realtime websocket live':'Fallback mode';
+  renderSunnyDeck();
 }
 
 function switchSection(acct,sec){
@@ -980,6 +1642,7 @@ function switchSection(acct,sec){
   if(sec==='backtest')    renderBacktest(acct,d);
   if(sec==='walkforward') renderWalkforward(acct,d);
   if(sec==='news'){ if(_newsData) renderNews(acct,_newsData); else{ _fetchNews(); el(`sb-${acct}-news`).innerHTML='<div style="text-align:center;padding:48px;color:var(--text3)">&#8987; Đang tải tin tức&#8230;</div>'; } }
+  renderSunnyDeck();
 }
 
 function switchAcct(acct){
@@ -990,6 +1653,7 @@ function switchAcct(acct){
   const sec=State.sec[acct];
   document.querySelectorAll('#sb-nav .nav-item').forEach(b=>b.classList.toggle('active',b.dataset.sec===sec));
   document.querySelectorAll('.mob-nav .mni').forEach(b=>b.classList.toggle('active',b.dataset.sec===sec));
+  renderSunnyDeck();
 }
 
 function updateUI(data){
@@ -998,6 +1662,33 @@ function updateUI(data){
   ['pc-ts','mob-ts'].forEach(id=>{ const e=el(id); if(e) e.textContent=ts; });
   _checkAlerts(data);
   ['acc1','acc2'].forEach(a=>{ if((data.accounts||{})[a]) switchSection(a,State.sec[a]); });
+  renderSunnyDeck();
+}
+
+function applyMood(mood){
+  State.mood=mood;
+  if(mood==='peach'){
+    document.documentElement.removeAttribute('data-mood');
+  }else{
+    document.documentElement.setAttribute('data-mood',mood);
+  }
+  const moodNames={peach:'Peach Glow',mint:'Mint Pop',berry:'Berry Soda'};
+  const moodLabel=el('mood-label');
+  if(moodLabel) moodLabel.textContent=moodNames[mood]||mood;
+  document.querySelectorAll('.mood-chip').forEach(btn=>{
+    btn.classList.toggle('active',btn.dataset.mood===mood);
+  });
+  if(State.data?.accounts?.[State.acct]){
+    switchSection(State.acct,State.sec[State.acct]);
+  }else{
+    renderSunnyDeck();
+  }
+}
+
+function toggleCompact(){
+  State.compact=!State.compact;
+  document.body.classList.toggle('compact',State.compact);
+  refreshQuickButtons();
 }
 
 /* account switch */
@@ -1013,6 +1704,38 @@ document.addEventListener('click',e=>{
   if(!btn)return;
   if(btn.classList.contains('nav-item')||btn.classList.contains('mni')){
     switchSection(State.acct,btn.dataset.sec);
+  }
+});
+
+document.addEventListener('click',e=>{
+  const moodBtn=e.target.closest('[data-mood]');
+  if(moodBtn){
+    applyMood(moodBtn.dataset.mood);
+    return;
+  }
+  const quickBtn=e.target.closest('.quick-btn');
+  if(!quickBtn) return;
+  if(quickBtn.dataset.jump){
+    switchSection(State.acct,quickBtn.dataset.jump);
+    return;
+  }
+  if(quickBtn.dataset.action==='compact'){
+    toggleCompact();
+    return;
+  }
+  if(quickBtn.dataset.action==='spotlight'){
+    spotlightActiveSection();
+  }
+});
+
+el('signal-limit')?.addEventListener('input',e=>{
+  const v=parseInt(e.target.value||'10',10);
+  State.signalLimit=v;
+  const txt=`${v} rows`;
+  if(el('signal-limit-text')) el('signal-limit-text').textContent=txt;
+  if(el('signal-limit-bubble')) el('signal-limit-bubble').textContent=txt;
+  if(State.data?.accounts?.[State.acct]){
+    switchSection(State.acct,State.sec[State.acct]);
   }
 });
 
@@ -1161,6 +1884,12 @@ function renderNews(acct,d){
   ${today.length===0?`<div class="card" style="margin-bottom:12px"><div style="text-align:center;padding:28px;color:var(--text3)">&#128197; Kh&#244;ng c&#243; tin h&#244;m nay</div></div>`:''}
   ${weekFutureHM.length+weekFutureLow.length>0?`<div class="card"><div class="card-ttl">&#128198; Tu&#7847;n n&#224;y &#8212; S&#7855;p t&#7899;i (${weekFutureHM.length+weekFutureLow.length})</div>${weekRows}</div>`:''}`;
 }
+
+applyMood(State.mood);
+refreshQuickButtons();
+document.body.classList.toggle('compact',State.compact);
+if(el('signal-limit-text')) el('signal-limit-text').textContent=`${State.signalLimit} rows`;
+if(el('signal-limit-bubble')) el('signal-limit-bubble').textContent=`${State.signalLimit} rows`;
 
 /* ═══ DATA TRANSPORT: WebSocket with HTTP polling fallback ═══ */
 let _pollTimer=null;

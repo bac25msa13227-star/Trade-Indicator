@@ -50,6 +50,23 @@ class RiskManager:
         self._killed: bool = False  # max drawdown kill switch
         self._load_daily_state()
 
+    @staticmethod
+    def _as_float(value: object) -> float | None:
+        try:
+            if value is None:
+                return None
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _row_value(row: object, field: str, default: object = None) -> object:
+        if isinstance(row, dict):
+            return row.get(field, default)
+        if isinstance(row, pd.Series):
+            return row.get(field, default)
+        return getattr(row, field, default)
+
     # ------------------------------------------------------------------
     # Peak balance persistence
     # ------------------------------------------------------------------
@@ -335,6 +352,8 @@ class RiskManager:
         volatility_regime: int | None = None,
         strategy_score: float | None = None,
         current_balance: float | None = None,
+        market_row: object | None = None,
+        side: str | None = None,
     ) -> float:
         # Dynamic risk tier: scale between floor and ceiling based on drawdown.
         rf_base  = self.settings.risk.risk_per_trade
@@ -375,7 +394,112 @@ class RiskManager:
         # Anti-martingale: reduce risk after consecutive losses
         anti_mart = self.get_anti_martingale_factor()
 
-        return min(base_fraction * regime_multiplier * score_multiplier * anti_mart, self.settings.risk.max_risk_fraction)
+        raw_fraction = base_fraction * regime_multiplier * score_multiplier * anti_mart
+        throttled_fraction, _, _ = self.apply_risk_throttle(
+            raw_fraction,
+            market_row,
+            side=side,
+            probability=confidence,
+        )
+        return min(throttled_fraction, self.settings.risk.max_risk_fraction)
+
+    def risk_throttle_multiplier(
+        self,
+        row: object | None,
+        side: str | None = None,
+        probability: float | None = None,
+    ) -> tuple[float, str]:
+        rules = getattr(self.settings.risk, "risk_throttle_rules", [])
+        if row is None or not rules:
+            return 1.0, "ok"
+
+        timestamp = self._row_value(row, "time", None)
+        resolved = timestamp
+        if timestamp is not None and not isinstance(timestamp, pd.Timestamp):
+            resolved = pd.to_datetime(timestamp, utc=True, errors="coerce")
+
+        weekday_name = resolved.day_name().lower() if isinstance(resolved, pd.Timestamp) and not pd.isna(resolved) else ""
+        hour = int(resolved.hour) if isinstance(resolved, pd.Timestamp) and not pd.isna(resolved) else None
+        row_side = (side or str(self._row_value(row, "trade_side", self._row_value(row, "side", "")))).strip().lower()
+
+        matched_names: list[str] = []
+        min_multiplier = 1.0
+        for rule in rules:
+            if not getattr(rule, "enabled", True):
+                continue
+            rule_multiplier = float(getattr(rule, "risk_multiplier", 1.0))
+            if rule_multiplier >= 1.0:
+                continue
+
+            if rule.weekdays_utc and weekday_name not in {value.strip().lower() for value in rule.weekdays_utc}:
+                continue
+            if rule.hours_utc and hour not in {int(value) for value in rule.hours_utc}:
+                continue
+            if rule.sides and row_side not in {value.strip().lower() for value in rule.sides}:
+                continue
+
+            volatility_regime = int(self._row_value(row, "volatility_regime", 1))
+            if rule.volatility_regimes and volatility_regime not in {int(value) for value in rule.volatility_regimes}:
+                continue
+
+            trend_alignment = int(self._row_value(row, "trend_alignment", 1))
+            if rule.trend_alignment_values and trend_alignment not in {int(value) for value in rule.trend_alignment_values}:
+                continue
+
+            if probability is not None:
+                if rule.probability_min is not None and float(probability) < float(rule.probability_min):
+                    continue
+                if rule.probability_max is not None and float(probability) > float(rule.probability_max):
+                    continue
+
+            adx_value = self._as_float(self._row_value(row, "adx", None))
+            if rule.adx_min is not None and (adx_value is None or adx_value < float(rule.adx_min)):
+                continue
+            if rule.adx_max is not None and (adx_value is None or adx_value > float(rule.adx_max)):
+                continue
+
+            trend_strength = self._as_float(self._row_value(row, "trend_strength_score", None))
+            if rule.trend_strength_min is not None and (trend_strength is None or trend_strength < float(rule.trend_strength_min)):
+                continue
+            if rule.trend_strength_max is not None and (trend_strength is None or trend_strength > float(rule.trend_strength_max)):
+                continue
+
+            pullback_quality = self._as_float(self._row_value(row, "pullback_quality", None))
+            if rule.pullback_quality_min is not None and (pullback_quality is None or pullback_quality < float(rule.pullback_quality_min)):
+                continue
+            if rule.pullback_quality_max is not None and (pullback_quality is None or pullback_quality > float(rule.pullback_quality_max)):
+                continue
+
+            execution_quality = self._as_float(self._row_value(row, "execution_quality", None))
+            if rule.execution_quality_min is not None and (execution_quality is None or execution_quality < float(rule.execution_quality_min)):
+                continue
+            if rule.execution_quality_max is not None and (execution_quality is None or execution_quality > float(rule.execution_quality_max)):
+                continue
+
+            strategy_score = self._as_float(self._row_value(row, "strategy_score", None))
+            strategy_abs = abs(strategy_score) if strategy_score is not None else None
+            if rule.strategy_score_min is not None and (strategy_abs is None or strategy_abs < float(rule.strategy_score_min)):
+                continue
+            if rule.strategy_score_max is not None and (strategy_abs is None or strategy_abs > float(rule.strategy_score_max)):
+                continue
+
+            min_multiplier = min(min_multiplier, max(0.0, rule_multiplier))
+            matched_names.append(rule.name.strip() or "risk_throttle")
+
+        if min_multiplier >= 1.0:
+            return 1.0, "ok"
+        return min_multiplier, ",".join(matched_names)
+
+    def apply_risk_throttle(
+        self,
+        base_fraction: float,
+        row: object | None,
+        side: str | None = None,
+        probability: float | None = None,
+    ) -> tuple[float, float, str]:
+        multiplier, reason = self.risk_throttle_multiplier(row, side=side, probability=probability)
+        throttled_fraction = min(base_fraction * multiplier, self.settings.risk.max_risk_fraction)
+        return throttled_fraction, multiplier, reason
 
     # ------------------------------------------------------------------
     # Build order plan with dynamic sizing
@@ -396,10 +520,22 @@ class RiskManager:
         if account_balance is not None and account_balance > 0:
             stop_distance = abs(decision.entry_price - decision.stop_loss)
             rf = self.risk_fraction(decision.confidence, volatility_regime,
-                                    current_balance=account_balance)
+                                    strategy_score=float(getattr(latest_bar, "strategy_score", 0.0)),
+                                    current_balance=account_balance,
+                                    market_row=latest_bar,
+                                    side=decision.side)
             volume = self.calculate_dynamic_lot(account_balance, stop_distance, rf)
         else:
             volume = self.settings.risk.fixed_lot
+
+        throttle_mult, throttle_reason = self.risk_throttle_multiplier(
+            latest_bar,
+            side=decision.side,
+            probability=decision.confidence,
+        )
+        reason = decision.reason
+        if throttle_mult < 1.0:
+            reason = f"{reason} | risk_throttle({throttle_reason}) x{throttle_mult:.2f}"
 
         return OrderPlan(
             symbol=self.settings.market.symbol,
@@ -409,7 +545,7 @@ class RiskManager:
             stop_loss=decision.stop_loss,
             take_profit=decision.take_profit,
             confidence=decision.confidence,
-            reason=decision.reason,
+            reason=reason,
         )
 
     # ------------------------------------------------------------------

@@ -320,7 +320,7 @@ services:
       retries: 3
       start_period: 120s
 
-  # ── BACKEND: Live Trading — ACC1 (aggressive, model_acc1.pkl) ────────────
+  # ── BACKEND: Live Trading — ACC1 (aggressive, acc1_live_model.pkl) ───────
   # Lệnh: docker compose up live-acc1 -d
   live-acc1:
     init: true

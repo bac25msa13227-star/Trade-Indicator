@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -78,6 +79,83 @@ class SelfLearner:
         # Pre-load historical CSV để live-learning có đủ dataset ngay từ đầu
         self._preload_csv_cache()
 
+    @staticmethod
+    def _optional_float(value: object) -> float | None:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _load_saved_metrics(self) -> dict[str, float | None]:
+        meta_path = Path(self.settings.app.model_meta_path)
+        if not meta_path.exists():
+            return {}
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+        return {
+            "roc_auc": self._optional_float(meta.get("roc_auc")),
+            "precision": self._optional_float(meta.get("precision")),
+            "recall": self._optional_float(meta.get("recall")),
+            "f1": self._optional_float(meta.get("f1")),
+            "decision_threshold": self._optional_float(meta.get("decision_threshold")),
+        }
+
+    @staticmethod
+    def _metric_delta(current: float, baseline: float | None) -> float | None:
+        if baseline is None:
+            return None
+        return round(float(current) - float(baseline), 4)
+
+    def _recent_loss_focus(self, limit: int = 3) -> list[str]:
+        if not self._loss_log_path.exists():
+            return []
+        try:
+            lines = self._loss_log_path.read_text(encoding="utf-8").splitlines()[-50:]
+        except Exception:
+            return []
+        prefixes: list[str] = []
+        for line in lines:
+            try:
+                event = json.loads(line)
+            except Exception:
+                continue
+            for reason in event.get("reasons", []):
+                prefix = str(reason).split(":", 1)[0].strip()
+                if prefix:
+                    prefixes.append(prefix)
+        return [name for name, _ in Counter(prefixes).most_common(limit)]
+
+    def _describe_learning(
+        self,
+        *,
+        event_name: str,
+        accepted: bool,
+        roc_auc_delta: float | None,
+        precision_delta: float | None,
+        recall_delta: float | None,
+        focus_reasons: list[str] | None = None,
+    ) -> str:
+        notes: list[str] = []
+        if event_name == "loss_retrain" and focus_reasons:
+            notes.append("siết lại các mẫu lỗ: " + ", ".join(focus_reasons))
+        if roc_auc_delta is not None:
+            if roc_auc_delta >= 0.005:
+                notes.append("khả năng tách tín hiệu tốt/xấu tăng")
+            elif roc_auc_delta <= -0.005:
+                notes.append("ứng viên tổng quát hóa kém hơn model đang chạy")
+        if precision_delta is not None and precision_delta >= 0.01:
+            notes.append("lọc tín hiệu nhiễu tốt hơn")
+        if recall_delta is not None and recall_delta >= 0.01:
+            notes.append("bắt thêm được setup hợp lệ")
+        if not notes:
+            if accepted:
+                notes.append("cải thiện nhỏ nhưng đủ vượt ngưỡng chấp nhận")
+            else:
+                notes.append("ứng viên chưa vượt model hiện tại nên bị từ chối")
+        return "; ".join(notes)
+
     # ------------------------------------------------------------------
     # Public entry point
     # ------------------------------------------------------------------
@@ -106,12 +184,15 @@ class SelfLearner:
                 return None
 
             # Train (do NOT save inside trainer — we decide here based on improvement)
+            baseline_metrics = self._load_saved_metrics()
+            best_before = float(self._best_roc_auc)
             metrics = self.trainer.train(dataset, save_artifacts=False)
             self._retrain_count += 1
 
             roc_auc = float(metrics.get("roc_auc", 0.0))
             _min_floor = self.settings.training.min_self_learning_roc_auc
-            improved = roc_auc >= max(self._best_roc_auc, _min_floor)
+            acceptance_floor = max(best_before, _min_floor)
+            improved = roc_auc >= acceptance_floor
 
             if improved:
                 self._best_roc_auc = roc_auc
@@ -121,17 +202,46 @@ class SelfLearner:
             else:
                 status = "no_improvement"
 
+            precision = float(metrics.get("precision", 0.0))
+            recall = float(metrics.get("recall", 0.0))
+            f1 = float(metrics.get("f1", 0.0))
+            selected_threshold = float(metrics.get("selected_threshold", self.trainer.decision_threshold))
+            roc_auc_delta = self._metric_delta(roc_auc, baseline_metrics.get("roc_auc"))
+            precision_delta = self._metric_delta(precision, baseline_metrics.get("precision"))
+            recall_delta = self._metric_delta(recall, baseline_metrics.get("recall"))
+            f1_delta = self._metric_delta(f1, baseline_metrics.get("f1"))
+
             event = {
                 "event": "self_learn",
+                "learning_kind": "scheduled",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "retrain_count": self._retrain_count,
                 "dataset_rows": int(len(dataset)),
                 "roc_auc": round(roc_auc, 4),
-                "best_roc_auc": round(self._best_roc_auc, 4),
-                "precision": round(float(metrics.get("precision", 0)), 4),
-                "recall": round(float(metrics.get("recall", 0)), 4),
-                "f1": round(float(metrics.get("f1", 0)), 4),
+                "best_roc_auc_before": round(best_before, 4),
+                "best_roc_auc_after": round(self._best_roc_auc, 4),
+                "precision": round(precision, 4),
+                "recall": round(recall, 4),
+                "f1": round(f1, 4),
+                "selected_threshold": round(selected_threshold, 4),
+                "baseline_roc_auc": round(baseline_metrics["roc_auc"], 4) if baseline_metrics.get("roc_auc") is not None else None,
+                "baseline_precision": round(baseline_metrics["precision"], 4) if baseline_metrics.get("precision") is not None else None,
+                "baseline_recall": round(baseline_metrics["recall"], 4) if baseline_metrics.get("recall") is not None else None,
+                "baseline_f1": round(baseline_metrics["f1"], 4) if baseline_metrics.get("f1") is not None else None,
+                "roc_auc_delta": roc_auc_delta,
+                "precision_delta": precision_delta,
+                "recall_delta": recall_delta,
+                "f1_delta": f1_delta,
+                "acceptance_floor": round(acceptance_floor, 4),
+                "accepted": improved,
                 "status": status,
+                "learning_summary": self._describe_learning(
+                    event_name="self_learn",
+                    accepted=improved,
+                    roc_auc_delta=roc_auc_delta,
+                    precision_delta=precision_delta,
+                    recall_delta=recall_delta,
+                ),
             }
             self._log_event(event)
             LOGGER.info("SelfLearner: %s | roc_auc=%.4f | rows=%d", status, roc_auc, len(dataset))
@@ -474,8 +584,10 @@ class SelfLearner:
             )
             self._retrain_count += 1
 
+            baseline_metrics = self._load_saved_metrics()
+            best_before = float(self._best_roc_auc)
             roc_auc = float(metrics.get("roc_auc", 0.0))
-            if roc_auc >= self._best_roc_auc:
+            if roc_auc >= best_before:
                 self._best_roc_auc = roc_auc
                 self.trainer._last_roc_auc = roc_auc
                 self.trainer._save_artifacts()  # Only save when truly better
@@ -483,19 +595,51 @@ class SelfLearner:
             else:
                 status = "loss_retrain_no_improvement"
 
+            precision = float(metrics.get("precision", 0.0))
+            recall = float(metrics.get("recall", 0.0))
+            f1 = float(metrics.get("f1", 0.0))
+            selected_threshold = float(metrics.get("selected_threshold", self.trainer.decision_threshold))
+            roc_auc_delta = self._metric_delta(roc_auc, baseline_metrics.get("roc_auc"))
+            precision_delta = self._metric_delta(precision, baseline_metrics.get("precision"))
+            recall_delta = self._metric_delta(recall, baseline_metrics.get("recall"))
+            f1_delta = self._metric_delta(f1, baseline_metrics.get("f1"))
+            focus_reasons = self._recent_loss_focus()
+            accepted = status == "loss_retrain_improved"
+
             event = {
                 "event": "loss_retrain",
+                "learning_kind": "loss_driven",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "retrain_count": self._retrain_count,
                 "triggered_by_losses": loss_count,
                 "loss_patterns_used": len(self._loss_patterns),
                 "dataset_rows": int(len(dataset)),
                 "roc_auc": round(roc_auc, 4),
-                "best_roc_auc": round(self._best_roc_auc, 4),
-                "precision": round(float(metrics.get("precision", 0)), 4),
-                "recall": round(float(metrics.get("recall", 0)), 4),
-                "f1": round(float(metrics.get("f1", 0)), 4),
+                "best_roc_auc_before": round(best_before, 4),
+                "best_roc_auc_after": round(self._best_roc_auc, 4),
+                "precision": round(precision, 4),
+                "recall": round(recall, 4),
+                "f1": round(f1, 4),
+                "selected_threshold": round(selected_threshold, 4),
+                "baseline_roc_auc": round(baseline_metrics["roc_auc"], 4) if baseline_metrics.get("roc_auc") is not None else None,
+                "baseline_precision": round(baseline_metrics["precision"], 4) if baseline_metrics.get("precision") is not None else None,
+                "baseline_recall": round(baseline_metrics["recall"], 4) if baseline_metrics.get("recall") is not None else None,
+                "baseline_f1": round(baseline_metrics["f1"], 4) if baseline_metrics.get("f1") is not None else None,
+                "roc_auc_delta": roc_auc_delta,
+                "precision_delta": precision_delta,
+                "recall_delta": recall_delta,
+                "f1_delta": f1_delta,
+                "accepted": accepted,
+                "focus_reasons": focus_reasons,
                 "status": status,
+                "learning_summary": self._describe_learning(
+                    event_name="loss_retrain",
+                    accepted=accepted,
+                    roc_auc_delta=roc_auc_delta,
+                    precision_delta=precision_delta,
+                    recall_delta=recall_delta,
+                    focus_reasons=focus_reasons,
+                ),
             }
             self._log_event(event)
             LOGGER.info(

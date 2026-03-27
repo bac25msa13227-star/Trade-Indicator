@@ -54,8 +54,12 @@ def simulate_prediction_backtest(
         if not allowed:
             skipped_by_filters += 1
             continue
-        # Fixed fractional: use exact risk_per_trade (no regime/score scaling in backtest).
-        risk_fraction = settings.risk.risk_per_trade
+        risk_fraction, throttle_mult, throttle_reason = risk_manager.apply_risk_throttle(
+            settings.risk.risk_per_trade,
+            row,
+            side=str(getattr(row, "trade_side", "")),
+            probability=float(row.probability),
+        )
         effective_bal = balance if compound else start_bal
         if compound and compound_cap > 0 and effective_bal > max_balance:
             effective_bal = max_balance
@@ -91,6 +95,8 @@ def simulate_prediction_backtest(
                 "is_loss": bool(pnl < 0),
                 "is_draw": bool(pnl == 0),
                 "skip_filter_reason": reason,
+                "risk_throttle_multiplier": float(throttle_mult),
+                "risk_throttle_reason": throttle_reason,
             }
         )
 
@@ -304,6 +310,12 @@ def simulate_dynamic_concurrent_backtest(
         _row_friction = _spread_rr * _sess_mult + _slippage_rr + _commission_rr
         raw_rr = float(row.realized_rr)
         net_rr = raw_rr - _row_friction
+        rf, throttle_mult, throttle_reason = risk_manager.apply_risk_throttle(
+            rf,
+            row,
+            side=str(getattr(row, "trade_side", "")),
+            probability=float(row.probability),
+        )
         absolute_pnl = effective_bal * rf * net_rr
         open_count = len(pending)
         max_concurrent_seen = max(max_concurrent_seen, open_count + 1)
@@ -327,6 +339,8 @@ def simulate_dynamic_concurrent_backtest(
             "max_positions_allowed": max_pos,
             "open_positions_at_open": open_count,
             "volatility_regime": regime,
+            "risk_throttle_multiplier": float(throttle_mult),
+            "risk_throttle_reason": throttle_reason,
         }
         # P0: Use per-trade bars_held from SL/TP race (fallback to label_horizon)
         _hold = int(getattr(row, 'bars_held', label_horizon))

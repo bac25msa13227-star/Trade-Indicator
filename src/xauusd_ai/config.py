@@ -54,6 +54,51 @@ class StrategyEnabled(BaseModel):
     news_filter: bool = True
 
 
+class RegimeShutdownRuleSettings(BaseModel):
+    enabled: bool = True
+    name: str = ""
+    weekdays_utc: list[str] = Field(default_factory=list)
+    hours_utc: list[int] = Field(default_factory=list)
+    sides: list[str] = Field(default_factory=list)
+    volatility_regimes: list[int] = Field(default_factory=list)
+    trend_alignment_values: list[int] = Field(default_factory=list)
+    probability_min: float | None = None
+    probability_max: float | None = None
+    adx_min: float | None = None
+    adx_max: float | None = None
+    trend_strength_min: float | None = None
+    trend_strength_max: float | None = None
+    pullback_quality_min: float | None = None
+    pullback_quality_max: float | None = None
+    execution_quality_min: float | None = None
+    execution_quality_max: float | None = None
+    strategy_score_min: float | None = None
+    strategy_score_max: float | None = None
+
+
+class RiskThrottleRuleSettings(BaseModel):
+    enabled: bool = True
+    name: str = ""
+    risk_multiplier: float = 1.0
+    weekdays_utc: list[str] = Field(default_factory=list)
+    hours_utc: list[int] = Field(default_factory=list)
+    sides: list[str] = Field(default_factory=list)
+    volatility_regimes: list[int] = Field(default_factory=list)
+    trend_alignment_values: list[int] = Field(default_factory=list)
+    probability_min: float | None = None
+    probability_max: float | None = None
+    adx_min: float | None = None
+    adx_max: float | None = None
+    trend_strength_min: float | None = None
+    trend_strength_max: float | None = None
+    pullback_quality_min: float | None = None
+    pullback_quality_max: float | None = None
+    execution_quality_min: float | None = None
+    execution_quality_max: float | None = None
+    strategy_score_min: float | None = None
+    strategy_score_max: float | None = None
+
+
 class StrategySettings(BaseModel):
     enabled: StrategyEnabled = Field(default_factory=StrategyEnabled)
     rsi_period: int = 14
@@ -93,6 +138,7 @@ class StrategySettings(BaseModel):
     # Regime-specific confidence thresholds (override min_confidence per regime)
     sideway_min_confidence: float = 0.65    # Higher bar in choppy markets
     volatile_min_confidence: float = 0.60   # Moderate bar in volatile markets
+    regime_shutdown_rules: list[RegimeShutdownRuleSettings] = Field(default_factory=list)
 
 
 class RiskSettings(BaseModel):
@@ -149,6 +195,7 @@ class RiskSettings(BaseModel):
     partial_tp_enabled: bool = False
     partial_tp_rr: float = 1.0             # Close partial_tp_pct at 1R profit
     partial_tp_pct: float = 0.5            # Close 50% of position at partial_tp_rr
+    risk_throttle_rules: list[RiskThrottleRuleSettings] = Field(default_factory=list)
 
 
 class TrailingSlSettings(BaseModel):
@@ -232,8 +279,10 @@ class TrainingSettings(BaseModel):
     label_tp_rr: float = 0.0              # TP RR for labeling (0 = use risk.take_profit_rr)
     retrain_on_startup: bool = True
     live_learning_enabled: bool = True
+    live_learning_interval_minutes: int = 30
     live_learning_min_new_bars: int = 12
     live_learning_min_rows: int = 500
+    min_self_learning_roc_auc: float = 0.53
     save_dataset: bool = True
     dataset_path: str = "outputs/training_dataset.csv"
     optimize_threshold: bool = True

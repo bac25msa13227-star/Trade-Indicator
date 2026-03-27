@@ -52,6 +52,8 @@ class _LearnerThread(threading.Thread):
         self._frames_q: queue.Queue[dict[str, pd.DataFrame]] = queue.Queue(maxsize=1)
         # HÃ ng Ä‘á»£i loss-retrain (loss_count, frames)
         self._loss_q: queue.Queue[tuple[int, dict[str, pd.DataFrame]]] = queue.Queue(maxsize=5)
+        # Hàng đợi kết quả học gần nhất để main thread gửi Telegram / reload model.
+        self._results_q: queue.Queue[dict[str, object]] = queue.Queue(maxsize=10)
         self._stop_event = threading.Event()  # renamed to avoid conflict with Thread._stop() internal method
 
     # ------------------------------------------------------------------
@@ -82,6 +84,28 @@ class _LearnerThread(threading.Thread):
     def stop(self) -> None:
         self._stop_event.set()
 
+    def _publish_result(self, result: dict[str, object]) -> None:
+        try:
+            self._results_q.put_nowait(result)
+        except queue.Full:
+            try:
+                self._results_q.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                self._results_q.put_nowait(result)
+            except queue.Full:
+                pass
+
+    def drain_results(self) -> list[dict[str, object]]:
+        results: list[dict[str, object]] = []
+        while True:
+            try:
+                results.append(self._results_q.get_nowait())
+            except queue.Empty:
+                break
+        return results
+
     # ------------------------------------------------------------------
     # Thread body
     # ------------------------------------------------------------------
@@ -102,8 +126,12 @@ class _LearnerThread(threading.Thread):
                 result = self._self_learner.maybe_retrain_on_loss(frames, loss_count)
                 _last_loss_retrain_ts = time.time()
                 if result:
-                    self._reload_event.set()
-                    LOGGER.info("LearnerThread: loss-retrain done â†’ signal reload | %s", result.get("status"))
+                    self._publish_result(result)
+                    if bool(result.get("accepted")):
+                        self._reload_event.set()
+                        LOGGER.info("LearnerThread: loss-retrain done â†’ signal reload | %s", result.get("status"))
+                    else:
+                        LOGGER.info("LearnerThread: loss-retrain rejected | %s", result.get("status"))
                 continue  # kiá»ƒm tra loss_q láº¡i ngay
             except queue.Empty:
                 pass
@@ -114,8 +142,12 @@ class _LearnerThread(threading.Thread):
                 LOGGER.info("LearnerThread: regular retrain started")
                 result = self._self_learner.maybe_retrain(frames)
                 if result:
-                    self._reload_event.set()
-                    LOGGER.info("LearnerThread: retrain done â†’ signal reload | %s", result.get("status"))
+                    self._publish_result(result)
+                    if bool(result.get("accepted")):
+                        self._reload_event.set()
+                        LOGGER.info("LearnerThread: retrain done â†’ signal reload | %s", result.get("status"))
+                    else:
+                        LOGGER.info("LearnerThread: retrain rejected | %s", result.get("status"))
             except queue.Empty:
                 pass
 
@@ -191,6 +223,62 @@ def _log_live_learning_event(settings: Settings, event: dict[str, object]) -> No
         file_handle.write(json.dumps(event, default=str) + "\n")
 
 
+def _format_learning_metric(value: object, digits: int = 4) -> str:
+    try:
+        return f"{float(value):.{digits}f}"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+def _format_learning_delta(value: object, digits: int = 4) -> str:
+    try:
+        return f"{float(value):+.{digits}f}"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+def _format_learning_message(event: dict[str, object]) -> str:
+    accepted = bool(event.get("accepted"))
+    event_name = str(event.get("event", "self_learn"))
+    is_loss_driven = event_name == "loss_retrain"
+    title = "Học lại từ lệnh thua" if is_loss_driven else "Tự học định kỳ"
+    verdict = "ĐẠT — đã áp dụng model mới" if accepted else "KHÔNG ĐẠT — giữ model cũ"
+    icon = "🧠" if accepted else "📝"
+    focus_reasons = event.get("focus_reasons") or []
+    if not isinstance(focus_reasons, list):
+        focus_reasons = []
+    focus_text = ", ".join(html.escape(str(reason)) for reason in focus_reasons[:3])
+
+    lines = [
+        f"{icon} <b>{title}</b>",
+        f"├ Kết luận: <b>{verdict}</b>",
+    ]
+    if is_loss_driven:
+        lines.append(
+            f"├ Trigger: {int(event.get('triggered_by_losses') or 0)} lệnh thua | "
+            f"patterns={int(event.get('loss_patterns_used') or 0)}"
+        )
+    if focus_text:
+        lines.append(f"├ Trọng tâm học: {focus_text}")
+    lines.append(
+        f"├ Rows={int(event.get('dataset_rows') or 0)} | threshold={_format_learning_metric(event.get('selected_threshold'), 2)}"
+    )
+    lines.append(
+        f"├ ROC AUC={_format_learning_metric(event.get('roc_auc'))} "
+        f"({_format_learning_delta(event.get('roc_auc_delta'))}) | "
+        f"floor={_format_learning_metric(event.get('acceptance_floor') or event.get('best_roc_auc_before'))}"
+    )
+    lines.append(
+        f"├ P/R/F1={_format_learning_metric(event.get('precision'))} / "
+        f"{_format_learning_metric(event.get('recall'))} / "
+        f"{_format_learning_metric(event.get('f1'))}"
+    )
+    lines.append(
+        f"└ Bài học: {html.escape(str(event.get('learning_summary') or 'Khong co tom tat'))}"
+    )
+    return "\n".join(lines)
+
+
 def run_training(settings: Settings) -> None:
     data_service, trainer, strategy, _, _, _ = _bootstrap(settings)
     frames = data_service.fetch_multi_timeframe_data(source=settings.market.training_data_source, all_bars=True)
@@ -250,7 +338,13 @@ def run_backtest(settings: Settings) -> None:
 
 def run_walkforward(settings: Settings) -> None:
     data_service, _, _, _, _, risk_manager = _bootstrap(settings)
-    frames = data_service.fetch_multi_timeframe_data(source=settings.market.training_data_source)
+    # Walk-forward must use the full historical window, otherwise it silently
+    # evaluates only the small live bar cache from market.bars and produces
+    # invalid folds / date splits.
+    frames = data_service.fetch_multi_timeframe_data(
+        source=settings.market.training_data_source,
+        all_bars=True,
+    )
 
     # Build the expensive base merged frame once (includes news features fetch).
     # Only strategy_score and labels need to be recomputed per combination.
@@ -828,6 +922,7 @@ def run_live_loop(settings: Settings) -> None:
 
     last_seen_bar_time: pd.Timestamp | None = None
     last_learning_time: float = time.time()
+    last_learning_bar_time: pd.Timestamp | None = None
     # Pre-load last logged bar time so we skip re-logging same candle after restart
     _last_logged_bar_time: pd.Timestamp | None = None
     if _signals_path.exists() and _signals_path.stat().st_size > 0:
@@ -1060,6 +1155,7 @@ def run_live_loop(settings: Settings) -> None:
             f"🟢 <b>Bot khởi động</b> — {settings.market.symbol}\n"
             f"├ Risk: {settings.risk.risk_per_trade*100:.1f}%/lệnh | RR: {settings.risk.take_profit_rr}\n"
             f"├ Live learning: {'BẬT' if settings.training.live_learning_enabled else 'TẮT'}"
+            f" ({settings.training.live_learning_interval_minutes}m / min {settings.training.live_learning_min_new_bars} bars)"
             f"{_dashboard_line}"
         )
         while True:
@@ -1090,10 +1186,9 @@ def run_live_loop(settings: Settings) -> None:
                         trainer.load_artifacts()
                     _model_reload_event.clear()
                     LOGGER.info("Model reloaded from background LearnerThread")
-                    notifier.send_message(
-                        f"🧠 <b>Model cập nhật</b> từ live learning\n"
-                        f"Lần retrain #{self_learner._retrain_count}"
-                    )
+                if learner_thread is not None:
+                    for _learn_event in learner_thread.drain_results():
+                        notifier.send_message(_format_learning_message(_learn_event))
 
                 frames = data_service.fetch_multi_timeframe_data(source=settings.market.live_data_source)
                 execution_frame = frames[settings.market.execution_timeframe]
@@ -1118,12 +1213,27 @@ def run_live_loop(settings: Settings) -> None:
                     settings.training.live_learning_enabled
                     and learner_thread is not None
                 ):
-                    interval_sec = int(getattr(settings.training, "live_learning_interval_minutes", 30)) * 60
+                    interval_sec = int(settings.training.live_learning_interval_minutes) * 60
+                    min_new_bars = max(int(settings.training.live_learning_min_new_bars), 0)
                     now = time.time()
-                    if now - last_learning_time >= interval_sec:
+                    if last_learning_bar_time is None:
+                        new_bars_since_last_learning = len(execution_frame)
+                    else:
+                        _exec_times = pd.to_datetime(execution_frame["time"], utc=True, errors="coerce")
+                        new_bars_since_last_learning = int((_exec_times > last_learning_bar_time).sum())
+                    if (
+                        now - last_learning_time >= interval_sec
+                        and new_bars_since_last_learning >= min_new_bars
+                    ):
                         learner_thread.submit_frames(frames)
                         last_learning_time = now
-                        LOGGER.debug(f"Self-learning: submitted frames to background LearnerThread (interval {interval_sec//60} min)")
+                        last_learning_bar_time = latest_bar_time
+                        LOGGER.debug(
+                            "Self-learning: submitted frames to background LearnerThread "
+                            "(interval=%d min, new_bars=%d)",
+                            interval_sec // 60,
+                            new_bars_since_last_learning,
+                        )
 
                 # â”€â”€ Build live feature frame (cáº§n ATR cho Trailing SL + DCA) â”€â”€
                 live_frame = build_live_feature_frame(settings, frames, strategy)
