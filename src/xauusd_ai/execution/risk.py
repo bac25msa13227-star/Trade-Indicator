@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,11 +33,14 @@ class OrderPlan:
 
 
 class RiskManager:
-    _PEAK_FILE = Path("outputs/risk_peak_balance.json")
-    _DAILY_STATE_FILE = Path("outputs/risk_daily_state.json")
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        # Use account-specific state files to avoid acc1/acc2 sharing the same file
+        _acct = os.environ.get("TRADING_ACCOUNT", "")
+        _suffix = f"_{_acct}" if _acct else ""
+        self._PEAK_FILE = Path(f"outputs/risk_peak_balance{_suffix}.json")
+        self._DAILY_STATE_FILE = Path(f"outputs/risk_daily_state{_suffix}.json")
         self._peak_balance: float = self._load_peak_balance()
         # Circuit breaker state
         self._consecutive_losses: int = 0
@@ -149,6 +153,14 @@ class RiskManager:
         if self._killed:
             return True, "KILL_SWITCH: max drawdown exceeded — manual restart required"
 
+        # Reset daily loss at UTC midnight (in case no trade closed at day boundary)
+        import datetime as _dt
+        today = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d")
+        if today != self._daily_date:
+            self._daily_date = today
+            self._daily_loss = 0.0
+            self._save_daily_state()
+
         # Daily loss limit
         limit_pct = self.settings.risk.daily_loss_limit_pct
         if limit_pct > 0 and self._peak_balance > 0:
@@ -220,9 +232,10 @@ class RiskManager:
 
         base_max = min(config_ceiling, tier_max)
 
-        # Chỉ giảm theo regime khi base_max >= 3.
-        # Với tài khoản nhỏ (base_max <= 2), giảm thêm sẽ lock về 1 — không hợp lý.
-        if base_max >= 3:
+        # Chỉ giảm theo regime khi base_max > 3.
+        # Với tài khoản nhỏ (base_max <= 3), giảm thêm không hợp lý:
+        #   base_max=3 → sideways 0.67× → 2, mất đi vị trí đã config.
+        if base_max > 3:
             if volatility_regime == 0:      # sideways
                 adjusted = max(1, round(base_max * 0.67))
             elif volatility_regime == 2:    # strong volatility

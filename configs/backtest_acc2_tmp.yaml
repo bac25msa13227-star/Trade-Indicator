@@ -5,15 +5,15 @@
 # ─────────────────────────────────────────────────────────────────
 app:
   poll_seconds: 60
-  model_path:          outputs/model2_weekly500.pkl
-  scaler_path:         outputs/scaler2_weekly500.pkl
-  model_meta_path:     outputs/model_meta2_weekly500.json
+  model_path:          outputs/bt_model_acc2_tmp.pkl
+  scaler_path:         outputs/bt_scaler_acc2_tmp.pkl
+  model_meta_path:     outputs/bt_model_meta_acc2_tmp.json
   training_report_path: outputs/training_report_acc2.json
   training_plot_path:  outputs/training_metrics_acc2.png
-  backtest_report_path: outputs/backtest_report_acc2.json
-  backtest_trades_path: outputs/backtest_trades_acc2.csv
-  backtest_equity_plot_path: outputs/backtest_equity_acc2.png
-  backtest_trades_plot_path: outputs/backtest_trades_plot_acc2.png
+  backtest_report_path: outputs/bt_report_acc2_tmp.json
+  backtest_trades_path: outputs/bt_trades_acc2_tmp.csv
+  backtest_equity_plot_path: outputs/bt_equity_acc2_tmp.png
+  backtest_trades_plot_path: outputs/bt_trades_plot_acc2_tmp.png
   walkforward_report_path: outputs/walkforward_report_acc2.json
   walkforward_trades_path: outputs/walkforward_trades_acc2.csv
   paper_trade_log_path: outputs/paper_trade_signals_acc2.csv
@@ -162,7 +162,7 @@ training:
   live_learning_min_new_bars: 0
   live_learning_min_rows: 500
   save_dataset: true
-  dataset_path: outputs/training_dataset_acc2.csv
+  dataset_path: outputs/bt_dataset_acc2_tmp.csv
   optimize_threshold: true
   validation_split: 0.15
   threshold_min: 0.40                # Hạ xuống 0.40 — tăng recall signal

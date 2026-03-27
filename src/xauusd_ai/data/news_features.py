@@ -91,14 +91,9 @@ _EVENT_GOLD_DIRECTION: dict[str, int] = {
     "New Home Sales": -1, "Consumer Confidence": -1, "Consumer Sentiment": -1,
     "Michigan": -1, "FOMC": -1, "Federal Reserve": -1, "Fed Funds": -1,
     "Interest Rate": -1, "Powell": -1,
-    "Trade Balance": +1, "Current Account": +1,
+    # Better trade balance / current account = stronger USD = Gold DOWN
+    "Trade Balance": -1, "Current Account": -1,
 }
-
-_INVERTED_EVENTS = frozenset([
-    "jobless claims", "initial claims", "unemployment claims",
-    "unemployment rate", "trade balance", "current account",
-])
-
 
 def _direction_from_title(title: str) -> int:
     t = title.lower()
@@ -109,6 +104,12 @@ def _direction_from_title(title: str) -> int:
 
 
 def _direction_from_surprise(title: str, actual, estimate) -> int:
+    """Map (actual vs estimate) to gold direction.
+    Convention in _EVENT_GOLD_DIRECTION: positive (+1) = event surprises → gold UP,
+    negative (-1) = event surprises → gold DOWN.
+    If actual > estimate (positive surprise): return base.
+    If actual < estimate (negative surprise): return -base.
+    """
     try:
         a, e = float(actual), float(estimate)
     except (TypeError, ValueError):
@@ -118,9 +119,7 @@ def _direction_from_surprise(title: str, actual, estimate) -> int:
     base = _direction_from_title(title)
     if base == 0:
         return 0
-    is_inv = any(kw in title.lower() for kw in _INVERTED_EVENTS)
-    pos = a > e
-    return (base if pos else -base) if not is_inv else (base if pos else -base)
+    return base if (a > e) else -base
 
 
 def _first_friday(year: int, month: int, hour_utc: int = 13, minute_utc: int = 30) -> datetime:
@@ -195,7 +194,7 @@ def _save_finnhub_cache(year: int, events: list[dict]) -> None:
 
 
 def _fetch_finnhub_year(key: str, year: int) -> list[dict]:
-    global _finnhub_disabled
+    global _finnhub_disabled, _finnhub_disabled_at
     quarters = [
         (f"{year}-01-01", f"{year}-03-31"),
         (f"{year}-04-01", f"{year}-06-30"),
@@ -217,14 +216,13 @@ def _fetch_finnhub_year(key: str, year: int) -> list[dict]:
                 impact  = str(ev.get("impact", "") or "").lower()
                 if "US" in country and impact in ("high", "medium"):
                     all_events.append(ev)
-            LOGGER.info("Finnhub: fetched %s%s", from_d, to_d)
+            LOGGER.info("Finnhub: fetched %s – %s", from_d, to_d)
         except Exception as exc:
             status = getattr(getattr(exc, "response", None), "status_code", None)
             if status in (401, 403):
                 LOGGER.warning("Finnhub key invalid/quota exceeded (%s) — disabling for %ds", status, _FINNHUB_COOLDOWN_SEC)
                 _finnhub_disabled = True
                 import time as _t
-                global _finnhub_disabled_at
                 _finnhub_disabled_at = _t.time()
                 return all_events  # stop retrying remaining quarters
             LOGGER.warning("Finnhub fetch failed %s%s: %s", from_d, to_d, exc)
@@ -240,11 +238,11 @@ def _finnhub_to_df(events: list[dict]) -> pd.DataFrame:
             continue
         raw_time = str(ev.get("time", "") or "")
         try:
-            ev_time = (pd.Timestamp(raw_time + " 13:30:00", tz="UTC")
-                       if len(raw_time) == 10
-                       else pd.Timestamp(raw_time, tz="UTC"))
-            if ev_time.tzinfo is None:
-                ev_time = ev_time.tz_localize("UTC")
+            if len(raw_time) == 10:  # date-only, e.g. "2026-04-03" — default 13:30 UTC (US data release)
+                ev_time = pd.Timestamp(raw_time + " 13:30:00", tz="UTC")
+            else:
+                _ts = pd.Timestamp(raw_time)
+                ev_time = _ts.tz_convert("UTC") if _ts.tzinfo is not None else _ts.tz_localize("UTC")
         except Exception:
             continue
         actual, estimate = ev.get("actual"), ev.get("estimate")
@@ -339,12 +337,14 @@ def _fetch_forexfactory_live() -> pd.DataFrame:
                 ev_time = None
                 for k in ("date", "datetime", "time"):
                     raw = ev.get(k)
-                    if raw:
-                        try:
-                            ev_time = pd.Timestamp(raw, tz="UTC")
-                            break
-                        except Exception:
-                            pass
+                    if not raw:
+                        continue
+                    try:
+                        _ts = pd.Timestamp(raw)
+                        ev_time = _ts.tz_convert("UTC") if _ts.tzinfo is not None else _ts.tz_localize("UTC")
+                        break
+                    except Exception:
+                        pass
                 if ev_time is None:
                     continue
                 rows.append({
@@ -563,7 +563,19 @@ def attach_news_features(
     in_post      = valid_p & (diff_p <= s_2h)
     gold_post    = np.where(in_post, hi_gold[clamp_p], 0)
 
-    df["news_impact_ahead"]  = np.where(in_la, 2, 0).astype(int)
+    # ── Medium impact lookahead (news_impact_ahead = 1) ──────────────────────
+    med = nc[nc["impact"] == "Medium"].reset_index(drop=True)
+    med_in_la = np.zeros(len(df), dtype=bool)
+    if not med.empty:
+        med_s     = _to_epoch_s(med["datetime_utc"])
+        idx_n_m   = np.searchsorted(med_s, bar_s, side="right")
+        valid_n_m = idx_n_m < len(med_s)
+        clamp_n_m = np.minimum(idx_n_m, len(med_s) - 1)
+        diff_n_m  = np.where(valid_n_m, med_s[clamp_n_m] - bar_s, s_48 + SPH)
+        med_in_la = valid_n_m & (diff_n_m <= s_la)
+
+    # 2 = High impact ahead, 1 = Medium ahead (only if no High in window), 0 = clear
+    df["news_impact_ahead"]  = np.where(in_la, 2, np.where(med_in_la, 1, 0)).astype(int)
     df["news_hours_ahead"]   = hours_ahead.round(2)
     df["news_hours_since"]   = hours_since.round(2)
     df["news_surprise_gold"] = np.where(gold_post != 0, gold_post, gold_pre).astype(int)

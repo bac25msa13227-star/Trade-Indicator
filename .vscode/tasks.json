@@ -127,6 +127,81 @@
 			"command": "Set-Location 'C:\\Users\\Administrator\\Documents\\Trade-Indicator'; Write-Host 'STARTING MLFLOW'; docker compose up -d mlflow 2>&1; Write-Host \"--- COMPOSE EXIT $LASTEXITCODE ---\"; Start-Sleep 5; docker ps --format 'table {{.Names}}\\t{{.Status}}\\t{{.Ports}}'",
 			"isBackground": false,
 			"problemMatcher": []
+		},
+		{
+			"label": "GetTunnelURL",
+			"type": "shell",
+			"command": "python C:\\Users\\Administrator\\Documents\\Trade-Indicator\\scripts\\get_tunnel_url.py",
+			"isBackground": false
+		},
+		{
+			"label": "CheckSignalCols",
+			"type": "shell",
+			"command": "python -c \"import csv,json; r=list(csv.DictReader(open('outputs/paper_trade_signals_acc2.csv'))); print('COLS:',list(r[0].keys()) if r else []); print('LAST:',json.dumps(dict(list(r[-1].items())[:10])) if r else '')\"",
+			"isBackground": false
+		},
+		{
+			"label": "CheckDashboard2026",
+			"type": "shell",
+			"command": "docker exec xauusd-api python -c \"import urllib.request as u, json; r=u.urlopen('http://localhost:8000/api/v1/dashboard',timeout=15); d=json.loads(r.read()); m=d.get('model',{}); print('=== MODEL PERFORMANCE ==='); print('precision=', m.get('precision')); print('recall=', m.get('recall')); print('f1=', m.get('f1')); print('roc_auc=', m.get('roc_auc')); print('threshold=', m.get('threshold')); print('=== KEYS ==='); print(list(d.keys()))\" 2>&1",
+			"isBackground": false
+		},
+		{
+			"label": "CheckDashboard2026b",
+			"type": "shell",
+			"command": "docker exec xauusd-api python /app/outputs/check_dashboard.py 2>&1",
+			"isBackground": false
+		},
+		{
+			"label": "CheckMainFile",
+			"type": "shell",
+			"command": "docker exec xauusd-api python -c \"import xauusd_ai.api.main as m; import inspect; print(inspect.getfile(m))\" 2>&1",
+			"isBackground": false
+		},
+		{
+			"label": "CheckApiLogs2026",
+			"type": "shell",
+			"command": "docker logs xauusd-api 2>&1 | Select-Object -Last 25",
+			"isBackground": false
+		},
+		{
+			"label": "CheckCodeInContainer",
+			"type": "shell",
+			"command": "docker exec xauusd-api grep -n 'run_in_executor\\|wait_for\\|init_tables' /app/src/xauusd_ai/api/main.py | head -10 2>&1",
+			"isBackground": false
+		},
+		{
+			"label": "CheckCode2026",
+			"type": "shell",
+			"command": "docker exec xauusd-api python /app/outputs/check_code.py 2>&1",
+			"isBackground": false
+		},
+		{
+			"label": "TopApi2026",
+			"type": "shell",
+			"command": "docker top xauusd-api 2>&1",
+			"isBackground": false
+		},
+		{
+			"label": "GetTunnelUrl2026",
+			"type": "shell",
+			"command": "docker logs xauusd-cloudflared 2>&1 | Select-String -Pattern 'trycloudflare|https://' | Select-Object -Last 5",
+			"isBackground": false
+		},
+		{
+			"label": "CheckLiveContainers",
+			"type": "shell",
+			"command": "docker ps -a --format 'table {{.Names}}\\t{{.Status}}' | Tee-Object -FilePath C:\\Temp\\containers.txt; Write-Host 'DONE'; Get-Content C:\\Temp\\containers.txt"
+		},
+		{
+			"label": "CheckContainers2026c",
+			"type": "shell",
+			"command": "docker ps -a --format 'table {{.Names}}\\t{{.Status}}' > C:\\Temp\\containers_now.txt 2>&1; Get-Content C:\\Temp\\containers_now.txt"
+		},
+		{
+			"label": "CheckAcc1CsvAndLogs",
+			"type": "shell",
+			"command": "Write-Host '=ACC1 CONTAINER='; docker inspect trade-indicator-live-acc1-1 --format '{{.State.Status}} {{.State.StartedAt}}' 2>&1; Write-Host '=CSV='; (Get-Item 'outputs\\live_closed_trades_acc1.csv').LastWriteTime; (Get-Content 'outputs\\live_closed_trades_acc1.csv').Count; Write-Host '=LAST LOG='; docker logs trade-indicator-live-acc1-1 --tail 10 2>&1 | Select-Object -Last 10"
 		}
 	]
 }

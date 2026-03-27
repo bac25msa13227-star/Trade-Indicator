@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json as _json
 import os
+import urllib.error as _urlerr
+import urllib.request as _urllib
 from typing import Any
 
 from xauusd_ai.config import Settings
@@ -11,6 +14,27 @@ try:
 except ImportError:
     mt5 = None
 
+# When running inside a Linux Docker container MetaTrader5 is unavailable.
+# Set MT5_BRIDGE_URL=http://host.docker.internal:5600 to delegate all MT5 calls
+# to the bridge process running natively on the Windows host.
+_BRIDGE_URL: str = os.getenv("MT5_BRIDGE_URL", "").rstrip("/")
+
+
+def _bridge_call(method: str, path: str, body: dict | None = None) -> Any:
+    """Send a JSON request to the MT5 bridge and return the parsed response."""
+    url = _BRIDGE_URL + path
+    data = _json.dumps(body).encode("utf-8") if body is not None else None
+    headers = {"Content-Type": "application/json"} if data else {}
+    req = _urllib.Request(url, data=data, method=method, headers=headers)
+    try:
+        with _urllib.urlopen(req, timeout=10) as resp:
+            result = _json.loads(resp.read())
+            if isinstance(result, dict) and "error" in result:
+                raise RuntimeError(f"MT5 bridge error: {result['error']}")
+            return result
+    except _urlerr.URLError as exc:
+        raise RuntimeError(f"MT5 bridge unreachable at {url}: {exc}") from exc
+
 
 class MT5Executor:
     def __init__(self, settings: Settings) -> None:
@@ -18,6 +42,8 @@ class MT5Executor:
 
     def _ensure_connection(self) -> None:
         if mt5 is None:
+            if _BRIDGE_URL:
+                return  # all calls delegated to bridge; no local connection needed
             raise RuntimeError("MetaTrader5 package is not installed in this environment")
 
         if self.settings.integrations.mt5.enabled:
@@ -62,6 +88,8 @@ class MT5Executor:
         except Exception:
             return {"balance": 0.0, "equity": 0.0, "margin": 0.0, "free_margin": 0.0, "connected": False}
         if mt5 is None:
+            if _BRIDGE_URL:
+                return _bridge_call("GET", "/account")
             return {"balance": 0.0, "equity": 0.0, "margin": 0.0, "free_margin": 0.0, "connected": False}
         info = mt5.account_info()
         if info is None:
@@ -85,6 +113,12 @@ class MT5Executor:
         except Exception:
             return 0
         if mt5 is None:
+            if _BRIDGE_URL:
+                symbol = self.settings.market.symbol
+                qs = f"/positions/count?symbol={symbol}"
+                if magic_number is not None:
+                    qs += f"&magic={magic_number}"
+                return int(_bridge_call("GET", qs).get("count", 0))
             return 0
         if magic_number is not None:
             positions = mt5.positions_get(symbol=self.settings.market.symbol)
@@ -105,6 +139,12 @@ class MT5Executor:
         except Exception:
             return []
         if mt5 is None:
+            if _BRIDGE_URL:
+                symbol = self.settings.market.symbol
+                qs = f"/positions?symbol={symbol}"
+                if magic_number is not None:
+                    qs += f"&magic={magic_number}"
+                return _bridge_call("GET", qs)
             return []
         positions = mt5.positions_get(symbol=self.settings.market.symbol)
         if not positions:
@@ -137,6 +177,12 @@ class MT5Executor:
         """
         self._ensure_connection()
         if mt5 is None:
+            if _BRIDGE_URL:
+                return _bridge_call("POST", f"/positions/{ticket}/close", {
+                    "volume": volume,
+                    "deviation": self.settings.execution.deviation,
+                    "magic": self.settings.execution.magic_number,
+                })
             raise RuntimeError("MetaTrader5 not available")
         positions = mt5.positions_get(ticket=ticket)
         if not positions:
@@ -193,6 +239,8 @@ class MT5Executor:
         """
         self._ensure_connection()
         if mt5 is None:
+            if _BRIDGE_URL:
+                return _bridge_call("POST", f"/positions/{ticket}/sl", {"new_sl": new_sl})
             raise RuntimeError("MetaTrader5 not available")
         positions = mt5.positions_get(ticket=ticket)
         if not positions:
@@ -218,6 +266,20 @@ class MT5Executor:
 
     def place_order(self, plan: OrderPlan) -> dict[str, Any]:
         self._ensure_connection()
+        if mt5 is None:
+            if _BRIDGE_URL:
+                return _bridge_call("POST", "/order", {
+                    "symbol":      plan.symbol,
+                    "side":        plan.side,
+                    "volume":      plan.volume,
+                    "stop_loss":   plan.stop_loss,
+                    "take_profit": plan.take_profit,
+                    "entry_price": plan.entry_price,
+                    "deviation":   self.settings.execution.deviation,
+                    "magic":       self.settings.execution.magic_number,
+                    "comment":     self.settings.execution.comment,
+                })
+            raise RuntimeError("MetaTrader5 not available")
         # Log trạng thái AutoTrading để debug
         _tinfo = mt5.terminal_info()
         if _tinfo is not None:
@@ -316,6 +378,15 @@ class MT5Executor:
         except Exception:
             return []
         if mt5 is None:
+            if _BRIDGE_URL:
+                symbol = self.settings.market.symbol
+                qs = f"/history/closed?symbol={symbol}&since={since_epoch}"
+                if magic_number is not None:
+                    qs += f"&magic={magic_number}"
+                try:
+                    return _bridge_call("GET", qs)
+                except Exception:
+                    return []
             return []
 
         import datetime as _dt

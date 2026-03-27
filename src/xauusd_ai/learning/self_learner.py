@@ -150,7 +150,8 @@ class SelfLearner:
 
         interval = TIMEFRAME_MAP.get(timeframe, "15m")
         period = YFINANCE_PERIOD_MAP.get(timeframe, "60d")
-        tickers = [self.settings.market.training_symbol or "GC=F", "GC=F", "GLD"]
+        _sym = (self.settings.market.training_symbol or "GC=F").strip()
+        tickers = list(dict.fromkeys([_sym, "GC=F", "GLD"]))  # dedup, keep order
 
         for ticker in tickers:
             try:

@@ -265,11 +265,15 @@ def load_wf_signals() -> pd.DataFrame:
         return pd.DataFrame()
 
 
-def load_live_closed_trades(filename: str = "live_closed_trades.csv") -> pd.DataFrame:
+def load_live_closed_trades(filename: str = "live_closed_trades_acc1.csv") -> pd.DataFrame:
     """Load live closed trades logged by the live trading loop (all sessions)."""
     path = OUTPUTS / filename
     if not path.exists():
-        return pd.DataFrame()
+        # Fallback: try the old non-suffixed file for backward compat
+        if filename == "live_closed_trades_acc1.csv":
+            path = OUTPUTS / "live_closed_trades.csv"
+        if not path.exists():
+            return pd.DataFrame()
     try:
         df = pd.read_csv(path, on_bad_lines="skip")
         if "time" in df.columns:
@@ -771,7 +775,7 @@ _WATCHED_FILES = {
     "live_status_acc2.json",
     "paper_trade_signals.csv",
     "paper_trade_signals_acc2.csv",
-    "live_closed_trades.csv",
+    "live_closed_trades_acc1.csv",
     "live_closed_trades_acc2.csv",
 }
 
@@ -913,7 +917,7 @@ def _render_live_tab() -> None:
         else:
             st.error("❌ Model chưa được train")
     with hdr_r:
-        _now_str = dt.datetime.now().strftime("%H:%M:%S")
+        _now_str = dt.datetime.now(dt.timezone.utc).strftime("%H:%M:%S UTC")
         st.markdown(
             f'<div style="text-align:right;color:#64748b;font-size:0.75rem">'
             f'Auto-refresh 30s<br>⏱ {_now_str}</div>',
@@ -3249,7 +3253,7 @@ print("Xong!")
     _OUT_FILES = [
         ("paper_trade_signals.csv",             "Tín hiệu live ACC1"),
         ("paper_trade_signals_acc2.csv",        "Tín hiệu live ACC2"),
-        ("live_closed_trades.csv",              "Lệnh đã đóng ACC1"),
+        ("live_closed_trades_acc1.csv",          "Lệnh đã đóng ACC1"),
         ("live_closed_trades_acc2.csv",         "Lệnh đã đóng ACC2"),
         ("backtest_report_acc1.json",           "Báo cáo backtest ACC1 (mới nhất)"),
         ("backtest_trades_acc1.csv",            "Lệnh backtest ACC1 (mới nhất)"),

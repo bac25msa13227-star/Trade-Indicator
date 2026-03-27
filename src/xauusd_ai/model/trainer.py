@@ -264,6 +264,9 @@ class ModelTrainer:
                       "positive_rate_train", "positive_rate_test"):
                 if k in self._last_metrics:
                     meta_dict[k] = self._last_metrics[k]
+            # roc_auc fallback: if _last_roc_auc wasn't set (save_artifacts=False path)
+            if "roc_auc" not in meta_dict and "roc_auc" in self._last_metrics:
+                meta_dict["roc_auc"] = round(float(self._last_metrics["roc_auc"]), 6)
         meta_path.write_text(json.dumps(meta_dict, indent=2), encoding="utf-8")
 
     def load_artifacts(self) -> bool:
@@ -405,7 +408,9 @@ class ModelTrainer:
             "loss_patterns_count": len(loss_patterns),
             "upweighted_samples": int(weights[weights > 1.0].sum()),
         }
+        # Always update in-memory state so _save_artifacts() has fresh metrics
+        self._last_metrics = metrics
+        self._last_roc_auc = metrics.get("roc_auc", 0.0)
         if save_artifacts:
-            self._last_roc_auc = metrics.get("roc_auc", 0.0)
             self._save_artifacts()
         return metrics

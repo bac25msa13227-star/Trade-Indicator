@@ -24,7 +24,7 @@ app:
 
 market:
   symbol: XAUUSDm
-  training_symbol: XAUUSD=X
+  training_symbol: GC=F
   training_data_source: csv_folder
   live_data_source: mt5
   csv_folder_path: src/xauusd_ai/real_data
@@ -181,5 +181,5 @@ integrations:
     token_env: TELEGRAM_BOT_TOKEN_ACC1
     chat_id_env: TELEGRAM_CHAT_ID_ACC1
   news:
-    enabled: false
+    enabled: true
     provider: stub

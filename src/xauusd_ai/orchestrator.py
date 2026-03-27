@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import queue
+import signal as _signal
 import threading
 import time
 from pathlib import Path
@@ -291,7 +292,7 @@ def run_walkforward(settings: Settings) -> None:
 
     n_combos = len(candidate_grid)
     progress_path = Path(settings.app.walkforward_report_path).parent / "walkforward_progress.json"
-    _wf_started_at = datetime.datetime.now()
+    _wf_started_at = datetime.datetime.now(datetime.timezone.utc)
 
     def _write_progress(
         completed: int,
@@ -299,7 +300,7 @@ def run_walkforward(settings: Settings) -> None:
         current_params: dict | None = None,
         best_so_far: dict | None = None,
     ) -> None:
-        elapsed = (datetime.datetime.now() - _wf_started_at).total_seconds()
+        elapsed = (datetime.datetime.now(datetime.timezone.utc) - _wf_started_at).total_seconds()
         condensed: dict | None = None
         if best_so_far:
             condensed = {
@@ -319,7 +320,7 @@ def run_walkforward(settings: Settings) -> None:
                 "pct_done": round(completed / n_combos * 100, 1) if n_combos > 0 else 0,
                 "elapsed_seconds": round(elapsed, 1),
                 "started_at": _wf_started_at.isoformat(),
-                "last_updated": datetime.datetime.now().isoformat(),
+                "last_updated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 "current_params": current_params,
                 "best_so_far": condensed,
             }, indent=2), encoding="utf-8")
@@ -559,6 +560,18 @@ def run_paper_trade_loop(settings: Settings) -> None:
 
 def run_live_loop(settings: Settings) -> None:
     data_service, trainer, strategy, notifier, executor, risk_manager, self_learner = _bootstrap_with_learner(settings)
+
+    # ── SIGTERM handler: Docker stop → send Telegram then exit cleanly ────────
+    def _handle_sigterm(signum, frame):
+        try:
+            notifier.send_message(
+                f"🔴 <b>Bot đã dừng</b> — Docker stop (SIGTERM)\n"
+                f"└ Account: {settings.market.symbol}"
+            )
+        except Exception:
+            pass
+        raise SystemExit(0)
+    _signal.signal(_signal.SIGTERM, _handle_sigterm)
 
     # ── Infrastructure: PostgreSQL + Prometheus ───────────────────────────────
     _account_tag = Path(settings.app.live_closed_trades_path).stem.replace("live_closed_trades_", "").strip("_") or "default"
@@ -829,7 +842,7 @@ def run_live_loop(settings: Settings) -> None:
         except Exception:
             pass
     # â”€â”€ Loss learning state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    _last_closed_check_epoch: float = time.time() - 300  # look back 5 min on startup
+    _last_closed_check_epoch: float = time.time() - 86400  # look back 24h on startup
     _known_loss_tickets: set[int] = set()
     _accumulated_losses: int = 0
     # Pre-load already-recorded tickets so we don't re-notify on restart
@@ -1093,6 +1106,9 @@ def run_live_loop(settings: Settings) -> None:
                 # â”€â”€ Láº¥y thÃ´ng tin tÃ i khoáº£n â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 account_info = executor.get_account_info()
                 account_balance = account_info.get("balance", 0.0)
+                # Fallback: MT5 khong chay trong Docker -> dung peak_balance da luu
+                if account_balance == 0.0 and risk_manager._peak_balance > 0:
+                    account_balance = risk_manager._peak_balance
                 open_positions = executor.get_open_positions_count(
                     magic_number=settings.execution.magic_number
                 )
@@ -1262,6 +1278,55 @@ def run_live_loop(settings: Settings) -> None:
                         else:
                             LOGGER.info("NEWS TRADE allowed: trade_before=%s trade_after=%s | %s",
                                         news_cfg.trade_before_news, news_cfg.trade_after_news, news_reason)
+
+                # -- News Trade Override -------------------------------------------------
+                # Khi tin vua ra: phan tich actual vs estimate -> ep BUY/SELL ngay.
+                # Chay doc lap voi decision.should_trade (ke ca khi ML khong signal).
+                _novr_cfg = settings.integrations.news
+                if (
+                    news_crawler is not None
+                    and getattr(_novr_cfg, "news_trade_override", False)
+                    and atr_value > 0
+                ):
+                    import datetime as _dt_novr
+                    _novr_now = _dt_novr.datetime.now(_dt_novr.timezone.utc)
+                    _novr_window = int(getattr(_novr_cfg, "news_trade_window_minutes", 3))
+                    _novr_dir, _novr_title, _novr_reason = news_crawler.get_news_direction(
+                        now=_novr_now,
+                        window_minutes=_novr_window,
+                        currencies=_novr_cfg.currencies,
+                        high_impact_only=_novr_cfg.high_impact_only,
+                    )
+                    if _novr_dir != 0:
+                        _novr_side = "buy" if _novr_dir > 0 else "sell"
+                        _novr_entry = float(latest_row.get("close", 0.0))
+                        if _novr_entry <= 0:
+                            _novr_entry = decision.entry_price or 0.0
+                        _novr_sl_mult = float(getattr(_novr_cfg, "news_trade_atr_sl_mult", 1.5))
+                        _novr_tp_mult = float(getattr(_novr_cfg, "news_trade_atr_tp_mult", 3.5))
+                        _novr_sl = round(_novr_entry - _novr_dir * atr_value * _novr_sl_mult, 2)
+                        _novr_tp = round(_novr_entry + _novr_dir * atr_value * _novr_tp_mult, 2)
+                        LOGGER.info(
+                            "NEWS OVERRIDE: '%s' -> %s | entry=%.2f sl=%.2f tp=%.2f ATR=%.2f | %s",
+                            _novr_title, _novr_side.upper(),
+                            _novr_entry, _novr_sl, _novr_tp, atr_value, _novr_reason,
+                        )
+                        _novr_dir_label = "📈 BUY" if _novr_dir > 0 else "📉 SELL"
+                        notifier.send_message(
+                            f"📰 <b>NEWS TRADE: {_novr_title}</b>\n"
+                            f"├ Hướng: <b>{_novr_dir_label} GOLD</b>\n"
+                            f"├ {_novr_reason}\n"
+                            f"└ Entry={_novr_entry:.2f} | SL={_novr_sl:.2f} | TP={_novr_tp:.2f}"
+                        )
+                        decision = decision.__class__(
+                            should_trade=True,
+                            side=_novr_side,
+                            confidence=0.97,
+                            reason=f"NEWS: {_novr_title} | {_novr_reason}",
+                            entry_price=_novr_entry,
+                            stop_loss=_novr_sl,
+                            take_profit=_novr_tp,
+                        )
 
                 # â”€â”€ Position gate â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 position_allowed, position_reason = risk_manager.can_open_position(

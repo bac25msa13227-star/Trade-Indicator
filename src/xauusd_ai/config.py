@@ -304,6 +304,12 @@ class NewsIntegrationSettings(BaseModel):
     minutes_after: int = 30          # Block N phút sau tin
     high_impact_only: bool = True    # Chỉ filter tin High Impact
     currencies: list[str] = Field(default_factory=lambda: ["USD"])  # Tiền tệ liên quan
+    # ── News Trade Override ────────────────────────────────────────────────
+    # Khi ra tin: phân tích actual vs estimate → BUY/SELL ngay lập tức
+    news_trade_override: bool = False    # True = ép lệnh theo hướng tin
+    news_trade_window_minutes: int = 3   # Cửa sổ giao dịch sau khi tin ra (phút)
+    news_trade_atr_sl_mult: float = 1.5  # SL = N × ATR (xa hơn để tránh spike)
+    news_trade_atr_tp_mult: float = 3.5  # TP = N × ATR (RR ~1:2.3)
 
 
 class IntegrationSettings(BaseModel):

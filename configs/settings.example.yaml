@@ -19,7 +19,7 @@ app:
 
 market:
   symbol: XAUUSD
-  training_symbol: XAUUSD=X
+  training_symbol: GC=F
   training_data_source: csv_folder
   live_data_source: mt5
   csv_data_path: data/xauusd_m15.csv

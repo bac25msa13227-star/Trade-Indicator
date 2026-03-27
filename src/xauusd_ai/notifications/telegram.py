@@ -12,6 +12,10 @@ from xauusd_ai.strategies.hybrid import TradeDecision
 class TelegramNotifier:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        # Derive account tag for message prefix (e.g. "acc1", "acc2")
+        from pathlib import Path as _Path
+        _stem = _Path(settings.app.live_closed_trades_path).stem  # live_closed_trades_acc1
+        self._acct = _stem.replace("live_closed_trades_", "").strip("_") or ""
 
     def send_signal(self, decision: TradeDecision, order_plan: OrderPlan) -> None:
         if not self.settings.notifications.telegram_enabled:
@@ -50,6 +54,9 @@ class TelegramNotifier:
                             self.settings.integrations.telegram.token_env,
                             self.settings.integrations.telegram.chat_id_env)
             return
+        # Prepend account tag so user can distinguish ACC1 vs ACC2 messages
+        if self._acct:
+            text = f"[<b>{self._acct.upper()}</b>] {text}"
         try:
             resp = requests.post(
                 f"https://api.telegram.org/bot{token}/sendMessage",
