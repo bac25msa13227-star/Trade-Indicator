@@ -106,6 +106,29 @@ class MT5Executor:
             "connected": True,
         }
 
+    def get_current_price(self, symbol: str, side: str) -> float:
+        """
+        Lấy giá thị trường real-time từ MT5: ask cho BUY, bid cho SELL.
+        Dùng để rebase entry/SL/TP từ giá yfinance (delay ~15 phút) sang giá thật
+        trước khi gửi Telegram notification và đặt lệnh.
+        """
+        try:
+            self._ensure_connection()
+        except Exception:
+            return 0.0
+        if mt5 is None:
+            if _BRIDGE_URL:
+                try:
+                    resp = _bridge_call("GET", f"/tick?symbol={symbol}")
+                    return float(resp.get("ask" if side == "buy" else "bid", 0))
+                except Exception:
+                    return 0.0
+            return 0.0
+        tick = mt5.symbol_info_tick(symbol)
+        if tick is None:
+            return 0.0
+        return float(tick.ask) if side == "buy" else float(tick.bid)
+
     def get_open_positions_count(self, magic_number: int | None = None) -> int:
         """Đếm số lệnh đang mở (theo magic number nếu có)."""
         try:
@@ -305,14 +328,27 @@ class MT5Executor:
             )
             return None
 
-        # Round SL/TP to symbol's decimal precision so broker stores them correctly
+        # Round to symbol's decimal precision
         _sinfo = mt5.symbol_info(plan.symbol)
         _digits = _sinfo.digits if _sinfo is not None else 5
-        _sl = round(plan.stop_loss, _digits) if plan.stop_loss else 0.0
-        _tp = round(plan.take_profit, _digits) if plan.take_profit else 0.0
 
         order_type = mt5.ORDER_TYPE_BUY if plan.side == "buy" else mt5.ORDER_TYPE_SELL
         price = tick.ask if plan.side == "buy" else tick.bid
+
+        # Re-anchor SL/TP về giá fill thực tế (giống mt5_bridge)
+        # Tránh sai lệch khi entry_price từ yfinance lệch xa giá fill 10-20 USD
+        if plan.entry_price and plan.entry_price > 0 and plan.stop_loss and plan.take_profit:
+            _sl_dist = abs(plan.entry_price - plan.stop_loss)
+            _tp_dist = abs(plan.take_profit - plan.entry_price)
+            if plan.side == "buy":
+                _sl = round(price - _sl_dist, _digits)
+                _tp = round(price + _tp_dist, _digits)
+            else:
+                _sl = round(price + _sl_dist, _digits)
+                _tp = round(price - _tp_dist, _digits)
+        else:
+            _sl = round(plan.stop_loss, _digits) if plan.stop_loss else 0.0
+            _tp = round(plan.take_profit, _digits) if plan.take_profit else 0.0
 
         # Thử các filling mode theo thứ tự ưu tiên (Exness thường dùng RETURN)
         filling_modes = [

@@ -267,6 +267,21 @@ def op_get_account() -> dict:
     }
 
 
+def op_get_tick(symbol: str) -> dict:
+    """Return current real-time ask/bid price for symbol."""
+    _ensure()
+    tick = mt5.symbol_info_tick(symbol)
+    if tick is None:
+        raise RuntimeError(f"No tick data for {symbol}: {mt5.last_error()}")
+    return {
+        "symbol": symbol,
+        "ask":    float(tick.ask),
+        "bid":    float(tick.bid),
+        "last":   float(tick.last),
+        "time":   int(tick.time),
+    }
+
+
 def op_get_history_deals(symbol: str, since_epoch: float, magic: int | None = None) -> list:
     """Return all OUT deals for symbol since since_epoch (Unix timestamp)."""
     import datetime as _dt
@@ -357,6 +372,9 @@ class _Handler(BaseHTTPRequestHandler):
                 since  = float(qs["since"][0]) if "since" in qs else 0.0
                 magic  = int(qs["magic"][0]) if "magic" in qs else None
                 self._send_json(200, op_get_history_deals(symbol, since, magic))
+            elif path == "/tick":
+                symbol = qs.get("symbol", ["XAUUSD"])[0]
+                self._send_json(200, op_get_tick(symbol))
             else:
                 self._send_json(404, {"error": "not found"})
         except Exception as exc:

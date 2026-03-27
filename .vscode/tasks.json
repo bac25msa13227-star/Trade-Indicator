@@ -202,6 +202,31 @@
 			"label": "CheckAcc1CsvAndLogs",
 			"type": "shell",
 			"command": "Write-Host '=ACC1 CONTAINER='; docker inspect trade-indicator-live-acc1-1 --format '{{.State.Status}} {{.State.StartedAt}}' 2>&1; Write-Host '=CSV='; (Get-Item 'outputs\\live_closed_trades_acc1.csv').LastWriteTime; (Get-Content 'outputs\\live_closed_trades_acc1.csv').Count; Write-Host '=LAST LOG='; docker logs trade-indicator-live-acc1-1 --tail 10 2>&1 | Select-Object -Last 10"
+		},
+		{
+			"label": "CheckLiveContainersForCP",
+			"type": "shell",
+			"command": "docker ps -a --format '{{.Names}}\\t{{.Status}}'"
+		},
+		{
+			"label": "CpFilesToContainers",
+			"type": "shell",
+			"command": "Write-Host 'START COPY'; docker cp 'C:\\Users\\Administrator\\Documents\\Trade-Indicator\\src\\xauusd_ai\\execution\\mt5_executor.py' 'trade-indicator-live-acc1-1:/app/src/xauusd_ai/execution/mt5_executor.py'; Write-Host \"cp mt5_executor acc1: $LASTEXITCODE\"; docker cp 'C:\\Users\\Administrator\\Documents\\Trade-Indicator\\src\\xauusd_ai\\orchestrator.py' 'trade-indicator-live-acc1-1:/app/src/xauusd_ai/orchestrator.py'; Write-Host \"cp orchestrator acc1: $LASTEXITCODE\"; docker cp 'C:\\Users\\Administrator\\Documents\\Trade-Indicator\\src\\xauusd_ai\\execution\\mt5_executor.py' 'trade-indicator-live-1:/app/src/xauusd_ai/execution/mt5_executor.py'; Write-Host \"cp mt5_executor live: $LASTEXITCODE\"; docker cp 'C:\\Users\\Administrator\\Documents\\Trade-Indicator\\src\\xauusd_ai\\orchestrator.py' 'trade-indicator-live-1:/app/src/xauusd_ai/orchestrator.py'; Write-Host \"cp orchestrator live: $LASTEXITCODE\"; Write-Host 'DONE COPY'"
+		},
+		{
+			"label": "RestartLiveContainers",
+			"type": "shell",
+			"command": "Write-Host 'RESTARTING CONTAINERS...'; docker restart trade-indicator-live-acc1-1; Write-Host \"restart acc1: $LASTEXITCODE\"; docker restart trade-indicator-live-1; Write-Host \"restart live: $LASTEXITCODE\"; Start-Sleep 8; docker ps --format 'table {{.Names}}\\t{{.Status}}' | Select-String 'live|acc'"
+		},
+		{
+			"label": "ForceRestartAcc1",
+			"type": "shell",
+			"command": "Write-Host 'FORCE STOP acc1...'; docker stop -t 5 trade-indicator-live-acc1-1 2>&1; Write-Host \"stop acc1: $LASTEXITCODE\"; Write-Host 'CLEAR PYCACHE acc1...'; docker run --rm -v trade-indicator_live:/app/src --entrypoint sh trade-indicator-live-acc1-1 -c 'find /app/src/xauusd_ai/execution /app/src/xauusd_ai -maxdepth 1 -name __pycache__ -exec rm -rf {} + 2>/dev/null; echo DONE' 2>&1; Write-Host 'START acc1...'; docker start trade-indicator-live-acc1-1 2>&1; Write-Host \"start acc1: $LASTEXITCODE\""
+		},
+		{
+			"label": "ForceRestartLive1",
+			"type": "shell",
+			"command": "Write-Host 'STOP live-1...'; docker stop -t 5 trade-indicator-live-1 2>&1; Write-Host \"stop: $LASTEXITCODE\"; Write-Host 'CLEAR PYCACHE inside live-1...'; docker exec trade-indicator-live-acc1-1 find /app/src/xauusd_ai/execution /app/src/xauusd_ai -maxdepth 1 -name '__pycache__' -exec rm -rf '{}' ';' 2>&1; Write-Host 'CLEAR PYCACHE inside acc1...'; docker exec trade-indicator-live-1 find /app/src/xauusd_ai/execution /app/src/xauusd_ai -maxdepth 1 -name '__pycache__' -exec rm -rf '{}' ';' 2>&1; Write-Host 'START live-1...'; docker start trade-indicator-live-1 2>&1; Write-Host \"start: $LASTEXITCODE\""
 		}
 	]
 }
