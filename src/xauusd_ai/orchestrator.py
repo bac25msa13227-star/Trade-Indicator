@@ -194,7 +194,7 @@ def _bootstrap_with_learner(
     # trainer_learn lÃ  instance riÃªng dÃ nh cho background thread â€” trÃ¡nh race condition
     # vá»›i trainer_live Ä‘ang Ä‘Æ°á»£c main thread dÃ¹ng Ä‘á»ƒ score tÃ­n hiá»‡u.
     trainer_learn = ModelTrainer(settings)
-    self_learner = SelfLearner(settings, trainer_learn, strategy)
+    self_learner = SelfLearner(settings, trainer_learn, strategy, notifier=notifier)
     return data_service, trainer_live, strategy, notifier, executor, risk_manager, self_learner
 
 
@@ -1515,6 +1515,7 @@ def run_live_loop(settings: Settings) -> None:
                     "should_trade": decision.should_trade,
                     "side": decision.side,
                     "reason": decision.reason,
+                    "signal_threshold": round(settings.strategy.signal_threshold, 4),
                 }
                 try:
                     _status_path.write_text(json.dumps(_status_payload, ensure_ascii=False), encoding="utf-8")
@@ -1583,7 +1584,10 @@ def run_live_loop(settings: Settings) -> None:
                     except Exception as _rebase_err:
                         LOGGER.warning("Price rebase failed (using yfinance price): %s", _rebase_err)
 
-                    notifier.send_signal(decision, order_plan)
+                    try:
+                        notifier.send_signal(decision, order_plan)
+                    except Exception as _notify_err:
+                        LOGGER.warning("Telegram notification failed (order will still be placed): %s", _notify_err)
                     if settings.execution.auto_trade:
                         # ── Chốt lệnh ngược chiều đang lời trước khi vào lệnh mới ──
                         if settings.execution.close_opposite_on_signal:

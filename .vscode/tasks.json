@@ -227,6 +227,59 @@
 			"label": "ForceRestartLive1",
 			"type": "shell",
 			"command": "Write-Host 'STOP live-1...'; docker stop -t 5 trade-indicator-live-1 2>&1; Write-Host \"stop: $LASTEXITCODE\"; Write-Host 'CLEAR PYCACHE inside live-1...'; docker exec trade-indicator-live-acc1-1 find /app/src/xauusd_ai/execution /app/src/xauusd_ai -maxdepth 1 -name '__pycache__' -exec rm -rf '{}' ';' 2>&1; Write-Host 'CLEAR PYCACHE inside acc1...'; docker exec trade-indicator-live-1 find /app/src/xauusd_ai/execution /app/src/xauusd_ai -maxdepth 1 -name '__pycache__' -exec rm -rf '{}' ';' 2>&1; Write-Host 'START live-1...'; docker start trade-indicator-live-1 2>&1; Write-Host \"start: $LASTEXITCODE\""
+		},
+		{
+			"label": "DeployTrainerRestartBots",
+			"type": "shell",
+			"command": "Set-Location 'C:\\Users\\Administrator\\Documents\\Trade-Indicator'; Write-Host '=DEPLOY TRAINER.PY='; docker cp src/xauusd_ai/model/trainer.py trade-indicator-live-acc1-1:/app/src/xauusd_ai/model/trainer.py 2>&1; Write-Host \"cp acc1: $LASTEXITCODE\"; docker cp src/xauusd_ai/model/trainer.py trade-indicator-live-1:/app/src/xauusd_ai/model/trainer.py 2>&1; Write-Host \"cp acc2: $LASTEXITCODE\"; Write-Host '=CLEAR PYCACHE='; docker exec trade-indicator-live-acc1-1 sh -c 'find /app/src/xauusd_ai/model -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null; echo done' 2>&1; docker exec trade-indicator-live-1 sh -c 'find /app/src/xauusd_ai/model -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null; echo done' 2>&1; Write-Host '=RESTART='; docker restart trade-indicator-live-acc1-1 2>&1; Write-Host \"restart acc1: $LASTEXITCODE\"; docker restart trade-indicator-live-1 2>&1; Write-Host \"restart acc2: $LASTEXITCODE\"; Start-Sleep 90; Write-Host '=LOGS ACC1='; docker logs trade-indicator-live-acc1-1 --tail 15 2>&1; Write-Host '=LOGS ACC2='; docker logs trade-indicator-live-1 --tail 10 2>&1; Write-Host '=STATUS='; docker ps --format 'table {{.Names}}\\t{{.Status}}' 2>&1",
+			"isBackground": false
+		},
+		{
+			"label": "CheckBotStatus2026b",
+			"type": "shell",
+			"command": "Write-Host '=STATUS='; docker ps --format 'table {{.Names}}\\t{{.Status}}'; Write-Host '=ACC1 LAST LOGS='; docker logs trade-indicator-live-acc1-1 2>&1 | Select-Object -Last 10; Write-Host '=ACC2 LAST LOGS='; docker logs trade-indicator-live-1 2>&1 | Select-Object -Last 5",
+			"isBackground": false
+		},
+		{
+			"label": "StopAllDockerWrite",
+			"type": "shell",
+			"command": "docker stop $(docker ps -q) 2>&1 | Out-Null; Start-Sleep 3; docker ps -a --format '{{.Names}}\\t{{.Status}}' | Out-File C:\\Temp\\stopped.txt -Encoding UTF8; Get-Content C:\\Temp\\stopped.txt",
+			"isBackground": false
+		},
+		{
+			"label": "RestartBots2026",
+			"type": "shell",
+			"command": "Write-Host 'RESTARTING ACC1...'; docker stop trade-indicator-live-acc1-1 2>&1; Start-Sleep 3; docker start trade-indicator-live-acc1-1 2>&1; Write-Host \"ACC1: $LASTEXITCODE\"; Write-Host 'RESTARTING ACC2...'; docker stop trade-indicator-live-1 2>&1; Start-Sleep 3; docker start trade-indicator-live-1 2>&1; Write-Host \"ACC2: $LASTEXITCODE\"; Start-Sleep 25; Write-Host '=== ACC1 LOGS ==='; docker logs trade-indicator-live-acc1-1 --tail 5 2>&1; Write-Host '=== ACC2 LOGS ==='; docker logs trade-indicator-live-1 --tail 5 2>&1"
+		},
+		{
+			"label": "CheckBotLogsKS",
+			"type": "shell",
+			"command": "Write-Host '=ACC1 LIVE LOGS='; docker logs trade-indicator-live-acc1-1 --tail 8 2>&1; Write-Host '=ACC2 LIVE LOGS='; docker logs trade-indicator-live-1 --tail 8 2>&1; Write-Host '=STATUS='; docker ps --format '{{.Names}} | {{.Status}}'"
+		},
+		{
+			"label": "CheckBotLogsNew",
+			"type": "shell",
+			"command": "Write-Host '=ACC1 NEW LOGS (since 01:50)='; docker logs trade-indicator-live-acc1-1 --since '2026-03-30T01:50:00' 2>&1 | Select-Object -Last 10; Write-Host '=ACC2 NEW LOGS (since 01:50)='; docker logs trade-indicator-live-1 --since '2026-03-30T01:50:00' 2>&1 | Select-Object -Last 10"
+		},
+		{
+			"label": "CheckBotLogs5m",
+			"type": "shell",
+			"command": "Write-Host '=ACC1 LATEST='; docker logs trade-indicator-live-acc1-1 --since 5m 2>&1 | Select-Object -Last 6; Write-Host '=ACC2 LATEST='; docker logs trade-indicator-live-1 --since 5m 2>&1 | Select-Object -Last 6"
+		},
+		{
+			"label": "CheckBotLogsFinal",
+			"type": "shell",
+			"command": "Write-Host '=ACC1 LATEST='; docker logs trade-indicator-live-acc1-1 --tail 10 2>&1 | Select-Object -Last 5; Write-Host '=ACC2 LATEST='; docker logs trade-indicator-live-1 --tail 6 2>&1 | Select-Object -Last 5"
+		},
+		{
+			"label": "CheckAcc2Decision",
+			"type": "shell",
+			"command": "docker logs trade-indicator-live-1 --tail 30 2>&1 | Select-Object -Last 30"
+		},
+		{
+			"label": "RestartAcc1NewCreds",
+			"type": "shell",
+			"command": "Write-Host 'Restarting ACC1 with new MT5 credentials...'; docker stop trade-indicator-live-acc1-1 2>&1; Start-Sleep 3; docker start trade-indicator-live-acc1-1 2>&1; Write-Host \"ACC1 restart: $LASTEXITCODE\"; Start-Sleep 20; Write-Host '=== ACC1 STARTUP LOGS ==='; docker logs trade-indicator-live-acc1-1 --tail 15 2>&1"
 		}
 	]
 }

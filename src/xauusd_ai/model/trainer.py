@@ -299,10 +299,19 @@ class ModelTrainer:
         meta_path = Path(self.settings.app.model_meta_path)
         if not model_path.exists() or not scaler_path.exists():
             return False
-        with open(str(model_path), "rb") as file_handle:
-            self.model = pickle.load(file_handle)
-        with open(str(scaler_path), "rb") as file_handle:
-            self.scaler = pickle.load(file_handle)
+        try:
+            with open(str(model_path), "rb") as file_handle:
+                self.model = pickle.load(file_handle)
+            with open(str(scaler_path), "rb") as file_handle:
+                self.scaler = pickle.load(file_handle)
+        except (AttributeError, ModuleNotFoundError, ImportError, Exception) as _pkl_err:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "load_artifacts: failed to unpickle model/scaler (%s). "
+                "Likely sklearn version mismatch — will retrain.",
+                _pkl_err,
+            )
+            return False
         # Load calibrator if available
         _cal_path = model_path.with_suffix(".cal.pkl")
         if _cal_path.exists():

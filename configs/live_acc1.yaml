@@ -1,7 +1,7 @@
 # ─────────────────────────────────────────────────────────────────
 # LIVE TRADING CONFIG — Account 1 (ACC1 freeze profile)
 # Model:  outputs/acc1_live_model.pkl  (frozen snapshot from acc2 live-freeze)
-# Symbol: XAUUSDm  |  Threshold: 0.60  |  Risk: 5% dynamic
+# Symbol: XAUUSD   |  Threshold: 0.70  |  Risk: 5% dynamic
 # Target: frozen paper/deploy profile with stricter gate than the previous 0.50 setup
 # ─────────────────────────────────────────────────────────────────
 app:
@@ -23,7 +23,7 @@ app:
   log_level: INFO
 
 market:
-  symbol: XAUUSDm
+  symbol: XAUUSD
   training_symbol: GC=F
   training_data_source: csv_folder
   live_data_source: yfinance
@@ -50,7 +50,7 @@ strategy:
   liquidity_lookback: 15
   swing_lookback: 20
   volatility_window: 20
-  signal_threshold: 0.60             # Freeze threshold requested for acc1
+  signal_threshold: 0.70             # Freeze threshold requested for acc1
   sideways_volatility_threshold: 0.003
   strong_volatility_threshold: 0.016
   news_block_minutes: 0              # Tắt blackout ML feature (dùng news override thay thế)
@@ -99,8 +99,8 @@ strategy:
   adx_gate_enabled: true
   adx_min_trend: 15.0               # More relaxed than acc2 (18.0)
   # Regime-specific confidence thresholds — all lower than acc2
-  sideway_min_confidence: 0.60       # Freeze acc1 at a single 0.60 gate across regimes
-  volatile_min_confidence: 0.60
+  sideway_min_confidence: 0.70       # Freeze acc1 at a single 0.70 gate across regimes
+  volatile_min_confidence: 0.70
 
 risk:
   mode: fixed_fractional
@@ -111,13 +111,14 @@ risk:
   take_profit_rr: 3.5
   volatile_take_profit_rr: 5.0     # ACC2 logic: Volatile regime RR 1:5
   sideway_take_profit_rr: 2.5      # Sideways regime RR 1:2.5
-  min_confidence: 0.60             # Freeze threshold requested for acc1
+  min_confidence: 0.70             # Freeze threshold requested for acc1
   fixed_lot: 0.01
   max_risk_fraction: 0.05           # 5% cap per trade (same as acc2)
   sideway_risk_multiplier: 0.4      # ACC2 logic: giảm risk trong sideway
   normal_risk_multiplier: 1.0
   strong_volatility_risk_multiplier: 0.65  # ACC2 logic
-  # Circuit breaker — copied from acc2
+  # Circuit breaker — all kill switches DISABLED for acc1
+  kill_switch_enabled: false
   daily_loss_limit_pct: 0.0
   max_drawdown_kill_pct: 0.15       # ACC2 logic: 15% drawdown → full stop
   consecutive_loss_pause_count: 0  # Disabled    # ACC2 logic: 3 losses before pause
@@ -180,12 +181,12 @@ training:
   label_horizon: 24                  # 2h horizon for signal validity
   min_return_threshold: 0.0008       # Lower → even more positive labels
   retrain_on_startup: false          # Dùng model freeze hiện tại ngay khi bot khởi động
-  live_learning_enabled: true        # Bật tự học sau startup
+  live_learning_enabled: false       # Tắt self-learn — dùng model cố định
   live_learning_interval_minutes: 60
   live_learning_min_new_bars: 12
   live_learning_min_rows: 500
   min_self_learning_roc_auc: 0.53
-  optimize_threshold: false          # Giữ threshold 0.60 cố định cho acc1 live
+  optimize_threshold: false          # Giữ threshold 0.70 cố định cho acc1 live
 
 notifications:
   telegram_enabled: true
@@ -197,9 +198,9 @@ integrations:
     login_env: MT5_LOGIN
     password_env: MT5_PASSWORD
     server_env: MT5_SERVER
-    login: 270832477
+    login: 103613837
     password: "07032001bB@"
-    server: "Exness-MT5Trial17"
+    server: "Exness-MT5Real15"
     terminal_path: "C:\\Program Files\\MetaTrader 5\\terminal64.exe"
   telegram:
     token_env: TELEGRAM_BOT_TOKEN

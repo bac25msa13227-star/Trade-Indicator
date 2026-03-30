@@ -6,6 +6,9 @@ account's live_status file has been updated recently. If the file is
 stale (> MAX_STALE_SECS) or missing, a Telegram alert is fired.
 When the bot comes back online, a recovery notification is sent.
 
+Also sends market session alerts 15 minutes before major Forex/Gold session
+opens and closes, repeating every 5 minutes (T-15, T-10, T-5).
+
 Environment variables (loaded from .env via docker-compose):
   TELEGRAM_BOT_TOKEN_ACC1  or  TELEGRAM_BOT_TOKEN
   TELEGRAM_CHAT_ID_ACC1    or  TELEGRAM_CHAT_ID
@@ -18,7 +21,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -123,9 +126,74 @@ def _check_status(acct_id: str, cfg: dict, down_state: dict[str, bool]) -> None:
             LOGGER.debug("%s: OK — stale %ds", acct_id, int(stale_secs))
 
 
+# ── Market session events (UTC) ─────────────────────────────────────────────
+# Each entry: (display_name, hour_utc, minute_utc, event_type, weekdays)
+# weekdays: 0=Mon … 4=Fri, 6=Sun
+_MARKET_EVENTS = [
+    ("Tokyo Open",    0,  0, "open",  [0, 1, 2, 3, 6]),  # Mon-Thu + Sun (Sunday 22 UTC is Mon 00)
+    ("London Open",   8,  0, "open",  [0, 1, 2, 3, 4]),  # Mon-Fri
+    ("NY Open",      13,  0, "open",  [0, 1, 2, 3, 4]),  # Mon-Fri
+    ("London Close", 16,  0, "close", [0, 1, 2, 3, 4]),  # Mon-Fri
+    ("NY Close",     22,  0, "close", [0, 1, 2, 3, 4]),  # Mon-Fri (Friday = weekly close)
+]
+# Alert slots in minutes before event  (T-15, T-10, T-5)
+_ALERT_SLOTS_MIN = [15, 10, 5]
+# Match window: ±2.5 minutes around each slot so a 60s poll doesn't miss it
+_SLOT_TOLERANCE_MIN = 2.5
+
+
+def _check_market_alerts(sent_state: dict) -> None:
+    """Send Telegram session open/close warnings. Fires at T-15, T-10, T-5 min."""
+    now = datetime.now(timezone.utc)
+    weekday = now.weekday()  # 0=Mon … 6=Sun
+
+    for name, ev_hour, ev_min, ev_type, weekdays in _MARKET_EVENTS:
+        if weekday not in weekdays:
+            continue
+
+        ev_time = now.replace(hour=ev_hour, minute=ev_min, second=0, microsecond=0)
+        # If event already passed today, skip
+        minutes_to = (ev_time - now).total_seconds() / 60.0
+        if minutes_to < 0:
+            continue
+
+        for slot in _ALERT_SLOTS_MIN:
+            if not (slot - _SLOT_TOLERANCE_MIN <= minutes_to < slot + _SLOT_TOLERANCE_MIN):
+                continue
+
+            key = f"{now.strftime('%Y-%m-%d')}_{name}_{slot}"
+            if key in sent_state:
+                break  # already fired this slot
+
+            sent_state[key] = True
+            emoji = "🟢" if ev_type == "open" else "🔴"
+            ev_label = "MỞ CỬA" if ev_type == "open" else "ĐÓNG CỬA"
+            # Add "💎 Weekly market close" tag for Friday NY Close
+            suffix = ""
+            if ev_type == "close" and name == "NY Close" and weekday == 4:
+                suffix = "\n└⚠️ <b>Thị trường đóng cửa cuối tuần!</b>"
+
+            msg = (
+                f"{emoji} <b>Chuẩn bị — {name} {ev_label}</b>\n"
+                f"├ Giờ mở/đóng: {ev_time.strftime('%H:%M UTC')} "
+                f"({(ev_time + timedelta(hours=7)).strftime('%H:%M +07')})\n"
+                f"├ Còn lại: <b>~{slot} phút</b>\n"
+                f"└ Hãy kiểm tra vị thế đang mở!{suffix}"
+            )
+            # Broadcast to all accounts
+            for acct_id, cfg in ACCOUNTS.items():
+                token = cfg["token_env"]
+                chat_id = cfg["chat_id_env"]
+                if token and chat_id:
+                    _send_telegram(token, chat_id, msg)
+                    LOGGER.info("Market alert: %s T-%dmin → %s", name, slot, acct_id)
+            break  # one slot per event per loop
+
+
 def main() -> None:
     LOGGER.info("Healthwatch started — interval=%ds  max_stale=%ds", POLL_INTERVAL, MAX_STALE_SECS)
     down_state: dict[str, bool] = {acct_id: False for acct_id in ACCOUNTS}
+    market_alert_state: dict[str, bool] = {}  # tracks sent market alerts (key = date_event_slot)
 
     # Send startup notification
     for acct_id, cfg in ACCOUNTS.items():
@@ -143,6 +211,11 @@ def main() -> None:
                 _check_status(acct_id, cfg, down_state)
             except Exception as exc:
                 LOGGER.error("Error checking %s: %s", acct_id, exc)
+        # Check market session alerts (T-15, T-10, T-5 before open/close)
+        try:
+            _check_market_alerts(market_alert_state)
+        except Exception as exc:
+            LOGGER.error("Error in market alerts: %s", exc)
         time.sleep(POLL_INTERVAL)
 
 

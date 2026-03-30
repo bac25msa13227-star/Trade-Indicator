@@ -1094,13 +1094,15 @@ live_trades     = load_live_closed_trades()
 live_trades_acc2 = load_live_closed_trades("live_closed_trades_acc2.csv")
 
 threshold_val = float(
-    model_meta.get("decision_threshold")
+    load_json(OUTPUTS / "live_status_acc1.json").get("signal_threshold")
+    or model_meta.get("decision_threshold")
     or model_meta.get("selected_threshold")
-    or 0.5
+    or 0.65
 )
 model_meta_acc2  = load_json(OUTPUTS / "acc2_live_model_meta.json")
 threshold_val_acc2 = float(
-    model_meta_acc2.get("decision_threshold")
+    load_json(OUTPUTS / "live_status_acc2.json").get("signal_threshold")
+    or model_meta_acc2.get("decision_threshold")
     or model_meta_acc2.get("selected_threshold")
     or 0.55
 )
@@ -1333,12 +1335,12 @@ def _render_live_tab() -> None:
         st.rerun()
 
     # ── Fresh data reads on every auto-refresh cycle ─────────────────────
-    _live_sigs      = load_signals()
+    _live_sigs      = load_signals("paper_trade_signals_acc1.csv")
     _live_sigs_acc2 = load_signals("paper_trade_signals_acc2.csv")
     _ltrades        = load_live_closed_trades()
     _ltrades_acc2   = load_live_closed_trades("live_closed_trades_acc2.csv")
-    _thr     = float(model_meta.get("decision_threshold") or model_meta.get("selected_threshold") or 0.5)
-    _thr_acc2 = float(model_meta_acc2.get("decision_threshold") or model_meta_acc2.get("selected_threshold") or 0.55)
+    _thr     = float(load_json(OUTPUTS / "live_status_acc1.json").get("signal_threshold") or model_meta.get("decision_threshold") or model_meta.get("selected_threshold") or 0.65)
+    _thr_acc2 = float(load_json(OUTPUTS / "live_status_acc2.json").get("signal_threshold") or model_meta_acc2.get("decision_threshold") or model_meta_acc2.get("selected_threshold") or 0.55)
 
     st.markdown(
         '<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px">'
@@ -1430,7 +1432,7 @@ def _render_live_tab() -> None:
     _sel_thr  = _thr_acc2 if "Acc 2" in _sel_acc else _thr
     # Model metadata & walk-forward report for the selected account
     _sel_meta     = model_meta_acc2 if "Acc 2" in _sel_acc else model_meta
-    _sel_wf_file  = "walkforward_report_acc2.json" if "Acc 2" in _sel_acc else "walkforward_report_ict_wyckoff.json"
+    _sel_wf_file  = "walkforward_report_acc2.json" if "Acc 2" in _sel_acc else "walkforward_report_acc1.json"
     # Live-status JSON — single read, reused across all sections below
     _detail_status = load_json(OUTPUTS / ("live_status_acc2.json" if "Acc 2" in _sel_acc else "live_status_acc1.json"))
 
@@ -1771,9 +1773,7 @@ with tab_analysis:
     _ana_options = ["Acc 1 — 270832477", "Acc 2 — 433326057"]
     _ana_sel = st.radio("Tài khoản:", _ana_options, horizontal=True, key="ana_acc_selector")
     _analysis_signals = live_signals if "Acc 1" in _ana_sel else live_signals_acc2
-    _ana_threshold = threshold_val_acc2 if "Acc 2" in _ana_sel else float(
-        model_meta.get("decision_threshold") or model_meta.get("selected_threshold") or 0.5
-    )
+    _ana_threshold = threshold_val_acc2 if "Acc 2" in _ana_sel else threshold_val
 
     if _analysis_signals.empty:
         st.warning("Chưa có tín hiệu. Đợi bot chạy ít nhất 1 chu kỳ.")

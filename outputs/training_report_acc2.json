@@ -1,12 +1,12 @@
 {
   "train_rows": 97099.0,
   "test_rows": 2791.0,
-  "positive_rate_train": 0.43481395276985346,
-  "positive_rate_test": 0.42959512719455395,
-  "selected_threshold": 0.7300000000000003,
-  "accuracy": 0.5997850232891436,
-  "precision": 0.6132596685082873,
-  "recall": 0.18515429524603835,
-  "f1": 0.28443305573350414,
-  "roc_auc": 0.5849514461381135
+  "positive_rate_train": 0.4445153915076365,
+  "positive_rate_test": 0.434969544965962,
+  "selected_threshold": 0.78,
+  "accuracy": 0.6030096739519886,
+  "precision": 0.6934306569343066,
+  "recall": 0.15650741350906094,
+  "f1": 0.2553763440860215,
+  "roc_auc": 0.5631179882975934
 }

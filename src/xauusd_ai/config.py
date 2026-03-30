@@ -179,6 +179,8 @@ class RiskSettings(BaseModel):
     #   XAUUSD ~30 pts normal; reject if > 80 pts (news/off-hours)
     max_spread_points: float = 0.0
     # ── Circuit breaker & capital preservation ─────────────────────
+    # Master switch: set to False to bypass ALL circuit breakers (kill switch, daily loss, cooldown)
+    kill_switch_enabled: bool = True
     # Daily loss limit: stop trading when cumulative daily loss exceeds N% of starting balance
     daily_loss_limit_pct: float = 0.08    # 8% max daily loss → stop all trading today
     # Max drawdown kill switch: halt trading when drawdown from peak exceeds this

@@ -258,7 +258,7 @@ class HybridStrategy:
         news_minutes_ahead = float(live_row.get("news_hours_ahead", 48.0)) * 60.0
         block_news_minutes = float(self.settings.strategy.news_block_minutes)
         no_news_block = not (
-            news_is_blackout == 1
+            (block_news_minutes > 0 and news_is_blackout == 1)
             or (news_impact_ahead == 2 and block_news_minutes > 0 and news_minutes_ahead <= block_news_minutes)
         )
 

@@ -295,7 +295,7 @@ training:
   label_horizon: 36                  # M5: 3h = 36 bars
   min_return_threshold: 0.0010       # Tăng positive rate
   retrain_on_startup: false          # Dùng model freeze hiện tại ngay khi bot khởi động
-  live_learning_enabled: true        # Bật tự học sau startup
+  live_learning_enabled: false       # Tắt self-learn — dùng model cố định
   live_learning_interval_minutes: 60
   live_learning_min_new_bars: 12
   live_learning_min_rows: 500

@@ -26,8 +26,9 @@ class TelegramNotifier:
         if not token or not chat_id:
             return
 
+        acct_prefix = f"[<b>{self._acct.upper()}</b>] " if self._acct else ""
         message = (
-            f"XAUUSD AI Signal\n"
+            f"{acct_prefix}XAUUSD AI Signal\n"
             f"Side: {decision.side}\n"
             f"Confidence: {decision.confidence:.2%}\n"
             f"Entry: {order_plan.entry_price:.2f}\n"
@@ -37,7 +38,7 @@ class TelegramNotifier:
         )
         requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat_id, "text": message},
+            json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"},
             timeout=10,
         )
 

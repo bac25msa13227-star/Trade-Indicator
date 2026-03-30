@@ -166,6 +166,10 @@ class RiskManager:
 
     def is_circuit_breaker_active(self, balance: float) -> tuple[bool, str]:
         """Check if any circuit breaker is active. Returns (blocked, reason)."""
+        # Master bypass — all circuit breakers disabled when kill_switch_enabled=False
+        if not self.settings.risk.kill_switch_enabled:
+            return False, "ok"
+
         # Kill switch
         if self._killed:
             return True, "KILL_SWITCH: max drawdown exceeded — manual restart required"
@@ -330,8 +334,8 @@ class RiskManager:
         if cb_blocked:
             return False, cb_reason
 
-        if balance < 50:
-            return False, f"Balance quá thấp (${balance:.2f}), cần tối thiểu $50"
+        if balance < 0:
+            return False, f"Balance quá thấp (${balance:.2f}), cần tối thiểu $0"
 
         max_pos = self.get_dynamic_max_positions(balance, volatility_regime)
         if current_open_positions >= max_pos:
