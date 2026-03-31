@@ -163,6 +163,9 @@ risk:
   anti_martingale_factor: 0.6        # Risk × 0.6 per consecutive loss
   anti_martingale_max_reductions: 3  # Max 3 reductions (down to ~21% of base risk)
   max_total_exposure_pct: 0.09       # 9% max total risk across all open positions
+  reentry_guard_enabled: true
+  reentry_cooldown_bars_after_sl: 1
+  reentry_min_distance_atr: 0.35
   # Partial Take Profit
   partial_tp_enabled: true
   partial_tp_rr: 1.5                # Close 50% at 1.5R profit (was 1.0)

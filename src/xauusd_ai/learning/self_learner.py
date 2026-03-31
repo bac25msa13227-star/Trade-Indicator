@@ -434,12 +434,29 @@ class SelfLearner:
     # Số lệnh thua tích lũy trước khi trigger retrain (có thể ghi vào config sau)
     LOSS_RETRAIN_THRESHOLD = 3
 
-    def analyze_loss(self, position: dict, live_row: "pd.Series") -> dict:
+    def analyze_loss(
+        self,
+        position: dict,
+        live_row: "pd.Series | dict | None",
+        entry_snapshot: dict[str, object] | None = None,
+    ) -> dict:
         """
         Phân tích tại sao lệnh bị thua.
         Trả về dict mô tả nguyên nhân và các features lúc vào lệnh.
         """
         reasons: list[str] = []
+        snapshot = entry_snapshot or {}
+
+        def _read_feature(field: str, default: object) -> object:
+            if field in snapshot and snapshot.get(field) is not None:
+                return snapshot.get(field, default)
+            if live_row is None:
+                return default
+            if isinstance(live_row, dict):
+                return live_row.get(field, default)
+            if isinstance(live_row, pd.Series):
+                return live_row.get(field, default)
+            return getattr(live_row, field, default)
 
         side = position.get("side", "unknown")
         profit = float(position.get("profit", 0))
@@ -447,18 +464,19 @@ class SelfLearner:
         commission = float(position.get("commission", 0))
         net_pnl = profit + swap + commission
 
-        # --- Feature snapshot lúc vào lệnh (lấy từ live_row hiện tại) ---
-        strategy_score = float(getattr(live_row, "strategy_score", 0))
-        volatility_regime = int(getattr(live_row, "volatility_regime", 1))
-        rsi_val = float(getattr(live_row, "rsi", 50))
-        macd_hist = float(getattr(live_row, "macd_hist", 0))
-        atr_val = float(getattr(live_row, "atr", 0))
-        trend_alignment = int(getattr(live_row, "trend_alignment", 0))
-        hourly_bias = float(getattr(live_row, "hourly_bias", 0))
-        daily_bias = float(getattr(live_row, "daily_bias", 0))
-        liquidity_sweep = int(getattr(live_row, "liquidity_sweep", 0))
-        wyckoff_phase = int(getattr(live_row, "wyckoff_phase", 0))
-        order_flow_proxy = float(getattr(live_row, "order_flow_proxy", 0))
+        # --- Feature snapshot lúc vào lệnh ---
+        # Ưu tiên entry_snapshot đã lưu theo ticket; fallback về row hiện tại nếu thiếu.
+        strategy_score = float(_read_feature("strategy_score", 0))
+        volatility_regime = int(_read_feature("volatility_regime", 1))
+        rsi_val = float(_read_feature("rsi", 50))
+        macd_hist = float(_read_feature("macd_hist", 0))
+        atr_val = float(_read_feature("atr", 0))
+        trend_alignment = int(_read_feature("trend_alignment", 0))
+        hourly_bias = float(_read_feature("hourly_bias", 0))
+        daily_bias = float(_read_feature("daily_bias", 0))
+        liquidity_sweep = int(_read_feature("liquidity_sweep", 0))
+        wyckoff_phase = int(_read_feature("wyckoff_phase", 0))
+        order_flow_proxy = float(_read_feature("order_flow_proxy", 0))
 
         # --- Phân tích nguyên nhân ---
         settings = self.settings
@@ -521,6 +539,8 @@ class SelfLearner:
             "liquidity_sweep": liquidity_sweep,
             "wyckoff_phase": wyckoff_phase,
             "order_flow_proxy": round(order_flow_proxy, 4),
+            "snapshot_source": "entry_snapshot" if snapshot else "live_row_fallback",
+            "entry_time": snapshot.get("time"),
         }
 
         return {
@@ -529,12 +549,17 @@ class SelfLearner:
             "net_pnl": round(net_pnl, 4),
         }
 
-    def log_loss_analysis(self, position: dict, live_row: "pd.Series") -> dict:
+    def log_loss_analysis(
+        self,
+        position: dict,
+        live_row: "pd.Series | dict | None",
+        entry_snapshot: dict[str, object] | None = None,
+    ) -> dict:
         """
         Gọi analyze_loss() → ghi log vào outputs/loss_analysis.jsonl.
         Trả về dict phân tích để orchestrator dùng tiếp.
         """
-        analysis = self.analyze_loss(position, live_row)
+        analysis = self.analyze_loss(position, live_row, entry_snapshot=entry_snapshot)
         event = {
             "event": "loss_analysis",
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -547,6 +572,7 @@ class SelfLearner:
             "net_pnl": analysis["net_pnl"],
             "reasons": analysis["reasons"],
             "features": analysis["features"],
+            "entry_snapshot_available": bool(entry_snapshot),
         }
         with self._loss_log_path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(event, default=str) + "\n")

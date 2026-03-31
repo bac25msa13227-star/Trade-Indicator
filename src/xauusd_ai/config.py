@@ -8,7 +8,11 @@ import yaml
 from pydantic import BaseModel, Field
 
 
-class AppSettings(BaseModel):
+class StrictSettingsModel(BaseModel):
+    model_config = {"extra": "forbid"}
+
+
+class AppSettings(StrictSettingsModel):
     poll_seconds: int = 60
     model_path: str = "outputs/model.pkl"
     scaler_path: str = "outputs/scaler.pkl"
@@ -29,7 +33,7 @@ class AppSettings(BaseModel):
     log_level: str = "INFO"
 
 
-class MarketSettings(BaseModel):
+class MarketSettings(StrictSettingsModel):
     symbol: str = "XAUUSD"
     training_symbol: str = "XAUUSD=X"
     training_data_source: str = "yfinance"
@@ -45,7 +49,7 @@ class MarketSettings(BaseModel):
     timezone: str = "UTC"
 
 
-class StrategyEnabled(BaseModel):
+class StrategyEnabled(StrictSettingsModel):
     ict: bool = True
     wyckoff: bool = True
     order_flow_proxy: bool = True
@@ -54,7 +58,7 @@ class StrategyEnabled(BaseModel):
     news_filter: bool = True
 
 
-class RegimeShutdownRuleSettings(BaseModel):
+class RegimeShutdownRuleSettings(StrictSettingsModel):
     enabled: bool = True
     name: str = ""
     weekdays_utc: list[str] = Field(default_factory=list)
@@ -76,7 +80,7 @@ class RegimeShutdownRuleSettings(BaseModel):
     strategy_score_max: float | None = None
 
 
-class RiskThrottleRuleSettings(BaseModel):
+class RiskThrottleRuleSettings(StrictSettingsModel):
     enabled: bool = True
     name: str = ""
     risk_multiplier: float = 1.0
@@ -99,7 +103,7 @@ class RiskThrottleRuleSettings(BaseModel):
     strategy_score_max: float | None = None
 
 
-class StrategySettings(BaseModel):
+class StrategySettings(StrictSettingsModel):
     enabled: StrategyEnabled = Field(default_factory=StrategyEnabled)
     rsi_period: int = 14
     macd_fast: int = 12
@@ -141,7 +145,7 @@ class StrategySettings(BaseModel):
     regime_shutdown_rules: list[RegimeShutdownRuleSettings] = Field(default_factory=list)
 
 
-class RiskSettings(BaseModel):
+class RiskSettings(StrictSettingsModel):
     mode: str = "fixed_fractional"
     risk_per_trade: float = 0.0075
     max_open_positions: int = 1
@@ -193,6 +197,10 @@ class RiskSettings(BaseModel):
     anti_martingale_max_reductions: int = 3  # Max 3 reductions (0.6^3 = 21.6% of base)
     # Total exposure cap: max % of balance at risk across all open positions
     max_total_exposure_pct: float = 0.12   # 12% total risk across all open positions
+    # Anti re-entry guard after SL (same side)
+    reentry_guard_enabled: bool = True
+    reentry_cooldown_bars_after_sl: int = 1
+    reentry_min_distance_atr: float = 0.35
     # ── Partial Take Profit ────────────────────────────────────────
     partial_tp_enabled: bool = False
     partial_tp_rr: float = 1.0             # Close partial_tp_pct at 1R profit
@@ -200,7 +208,7 @@ class RiskSettings(BaseModel):
     risk_throttle_rules: list[RiskThrottleRuleSettings] = Field(default_factory=list)
 
 
-class TrailingSlSettings(BaseModel):
+class TrailingSlSettings(StrictSettingsModel):
     """Diịch SL động theo giá để bảo vệ lợi nhuậnChức năng:
       1. Breakeven: chuyển SL về hoà vốn sau breakeven_at_rr R lợi nhuận
       2. Trail: diời SL theo giá sau activation_rr R lợi nhuận
@@ -211,7 +219,7 @@ class TrailingSlSettings(BaseModel):
     trail_atr_multiple: float = 1.0    # Trail distance = N × ATR
 
 
-class DcaSettings(BaseModel):
+class DcaSettings(StrictSettingsModel):
     """Dollar Cost Averaging — mở thêm lệnh khi giá đi ngược chiều.
     Cảnh báo: DCA tăng exposure, dùng thận trọng."""
     enabled: bool = False
@@ -221,7 +229,7 @@ class DcaSettings(BaseModel):
     max_total_risk_pct: float = 0.03   # Tổng risk tối đa 3% balance (an toàn)
 
 
-class ExitModelSettings(BaseModel):
+class ExitModelSettings(StrictSettingsModel):
     """Exit model — model riêng học khi nào nên chốt lời sớm / cắt lỗ sớm.
     Hoạt động độc lập với entry model, chạy bar-by-bar trên lệnh đang mở.
 
@@ -254,7 +262,7 @@ class ExitModelSettings(BaseModel):
     include_loss_entries: bool = True  # Thêm target=0 entries để model học cắt lỗ
 
 
-class ExecutionSettings(BaseModel):
+class ExecutionSettings(StrictSettingsModel):
     auto_trade: bool = False
     deviation: int = 20
     magic_number: int = 20260309
@@ -268,7 +276,7 @@ class ExecutionSettings(BaseModel):
     exit_model: ExitModelSettings = Field(default_factory=ExitModelSettings)
 
 
-class TrainingSettings(BaseModel):
+class TrainingSettings(StrictSettingsModel):
     train_split: float = 0.8
     train_start_date: str | datetime | None = None
     train_end_date: str | datetime | None = None
@@ -323,12 +331,12 @@ class TrainingSettings(BaseModel):
     max_train_bars: int = 0
 
 
-class NotificationSettings(BaseModel):
+class NotificationSettings(StrictSettingsModel):
     telegram_enabled: bool = False
     verbose_message: bool = True
 
 
-class Mt5IntegrationSettings(BaseModel):
+class Mt5IntegrationSettings(StrictSettingsModel):
     enabled: bool = True
     login_env: str = "MT5_LOGIN"
     password_env: str = "MT5_PASSWORD"
@@ -340,12 +348,12 @@ class Mt5IntegrationSettings(BaseModel):
     terminal_path: str | None = None  # Path to MT5 terminal64.exe folder
 
 
-class TelegramIntegrationSettings(BaseModel):
+class TelegramIntegrationSettings(StrictSettingsModel):
     token_env: str = "TELEGRAM_BOT_TOKEN"
     chat_id_env: str = "TELEGRAM_CHAT_ID"
 
 
-class NewsIntegrationSettings(BaseModel):
+class NewsIntegrationSettings(StrictSettingsModel):
     enabled: bool = False
     provider: str = "forexfactory"   # "forexfactory" | "stub"
     cache_hours: int = 6             # Tự động refresh cache sau N giờ
@@ -363,14 +371,14 @@ class NewsIntegrationSettings(BaseModel):
     news_trade_atr_tp_mult: float = 3.5  # TP = N × ATR (RR ~1:2.3)
 
 
-class IntegrationSettings(BaseModel):
+class IntegrationSettings(StrictSettingsModel):
     mt5: Mt5IntegrationSettings = Field(default_factory=Mt5IntegrationSettings)
     telegram: TelegramIntegrationSettings = Field(default_factory=TelegramIntegrationSettings)
     news: NewsIntegrationSettings = Field(default_factory=NewsIntegrationSettings)
 
 
-class Settings(BaseModel):
-    model_config = {"arbitrary_types_allowed": True}
+class Settings(StrictSettingsModel):
+    model_config = {"arbitrary_types_allowed": True, "extra": "forbid"}
     app: AppSettings = Field(default_factory=AppSettings)
     market: MarketSettings = Field(default_factory=MarketSettings)
     strategy: StrategySettings = Field(default_factory=StrategySettings)

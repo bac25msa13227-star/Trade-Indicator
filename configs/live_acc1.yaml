@@ -59,17 +59,18 @@ strategy:
   ict_weight: 0.40
   wyckoff_weight: 0.35
   momentum_weight: 0.25
-  min_strategy_score: 0.05           # Lower → allow more setups through
-  sideway_min_strategy_score: 0.08   # Lower than acc2 (0.15) → trade more in ranging
-  strong_volatility_min_strategy_score: 0.08
-  require_trend_alignment: false
+  min_strategy_score: 0.10
+  sideway_min_strategy_score: 0.15
+  strong_volatility_min_strategy_score: 0.12
+  require_trend_alignment: true
   force_trade: false
-  blocked_hours_utc: [15, 22, 23]    # Block rollover + validated weak hour cluster
+  blocked_hours_utc: [15, 17, 18, 19, 20, 21, 22, 23]    # Block rollover + bad-loss clusters
   blocked_weekdays_utc: []
   blocked_weekday_hours_utc:
-    Monday: [4, 5, 16, 17, 18, 19, 20, 21]
-    Tuesday: [3, 17, 18]
-    Thursday: [5, 13]
+    Monday: [2, 3, 4, 5, 6, 7]
+    Tuesday: [2, 3, 4, 5, 6, 7]
+    Wednesday: [2, 3, 4, 5, 6, 7]
+    Thursday: [2, 3, 4, 5, 6, 7, 13]
   regime_shutdown_rules:
     - name: monday_early_sell_flow_conflict
       weekdays_utc: [Monday]
@@ -97,39 +98,59 @@ strategy:
   silver_bullet_confidence_boost: 0.05  # Slightly higher boost than acc2 (0.03)
   # ADX trend gate — relaxed so we enter more often
   adx_gate_enabled: true
-  adx_min_trend: 15.0               # More relaxed than acc2 (18.0)
+  adx_min_trend: 17.0
   # Regime-specific confidence thresholds — all lower than acc2
   sideway_min_confidence: 0.70       # Freeze acc1 at a single 0.70 gate across regimes
   volatile_min_confidence: 0.70
 
 risk:
   mode: fixed_fractional
-  risk_per_trade: 0.05              # 5% per trade (acc2=3%) → bigger wins per trade
-  risk_tier_floor: 0.025            # 2.5% floor when in drawdown
-  max_open_positions: 3
+  risk_per_trade: 0.025             # reduced to prevent rapid account drawdown
+  risk_tier_floor: 0.01             # 1% floor in deep drawdown
+  max_open_positions: 2
   stop_loss_atr_multiple: 1.5
   take_profit_rr: 3.5
   volatile_take_profit_rr: 5.0     # ACC2 logic: Volatile regime RR 1:5
   sideway_take_profit_rr: 2.5      # Sideways regime RR 1:2.5
   min_confidence: 0.70             # Freeze threshold requested for acc1
   fixed_lot: 0.01
-  max_risk_fraction: 0.05           # 5% cap per trade (same as acc2)
+  max_risk_fraction: 0.035
   sideway_risk_multiplier: 0.4      # ACC2 logic: giảm risk trong sideway
   normal_risk_multiplier: 1.0
-  strong_volatility_risk_multiplier: 0.65  # ACC2 logic
-  # Circuit breaker — all kill switches DISABLED for acc1
-  kill_switch_enabled: false
-  daily_loss_limit_pct: 0.0
-  max_drawdown_kill_pct: 0.15       # ACC2 logic: 15% drawdown → full stop
-  consecutive_loss_pause_count: 0  # Disabled    # ACC2 logic: 3 losses before pause
-  consecutive_loss_cooldown_bars: 8  # ACC2 logic: wait 8 bars before resuming
+  strong_volatility_risk_multiplier: 0.55
+  # Circuit breaker — ENABLED for capital preservation
+  kill_switch_enabled: true
+  daily_loss_limit_pct: 0.04
+  max_drawdown_kill_pct: 0.12
+  consecutive_loss_pause_count: 2
+  consecutive_loss_cooldown_bars: 16
   anti_martingale_factor: 0.6        # ACC2 logic: Risk × 0.6 per consecutive loss
   anti_martingale_max_reductions: 3
-  max_total_exposure_pct: 0.09       # ACC2 logic: 9% max total exposure
+  max_total_exposure_pct: 0.06
+  reentry_guard_enabled: true
+  reentry_cooldown_bars_after_sl: 3
+  reentry_min_distance_atr: 0.35
   # Partial Take Profit — book at 1.5R (better quality exits than 1.0R)
   partial_tp_enabled: true
-  partial_tp_rr: 1.5                # Close 50% at 1.5R profit
+  partial_tp_rr: 1.2
   partial_tp_pct: 0.5               # Close 50% of position
+  risk_throttle_rules:
+    - name: monday_0207_all_heavy_throttle
+      risk_multiplier: 0.20
+      weekdays_utc: [Monday]
+      hours_utc: [2, 3, 4, 5, 6, 7]
+    - name: monday_1721_all_heavy_throttle
+      risk_multiplier: 0.25
+      weekdays_utc: [Monday]
+      hours_utc: [17, 18, 19, 20, 21]
+    - name: tue_wed_thu_0207_all_throttle
+      risk_multiplier: 0.35
+      weekdays_utc: [Tuesday, Wednesday, Thursday]
+      hours_utc: [2, 3, 4, 5, 6, 7]
+    - name: tue_wed_thu_1721_all_throttle
+      risk_multiplier: 0.40
+      weekdays_utc: [Tuesday, Wednesday, Thursday]
+      hours_utc: [17, 18, 19, 20, 21]
 
 execution:
   auto_trade: true

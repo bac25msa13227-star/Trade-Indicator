@@ -297,7 +297,8 @@ def run_backtest(settings: Settings) -> None:
     data_service, trainer, strategy, _, _, risk_manager = _bootstrap(settings)
     frames = data_service.fetch_multi_timeframe_data(source=settings.market.training_data_source, all_bars=True)
     dataset = prepare_training_dataset(settings, frames, strategy)
-    metrics = trainer.train(dataset)
+    # Backtest must never overwrite live/train artifacts.
+    metrics = trainer.train(dataset, save_artifacts=False)
     predictions = trainer.predict_dataset(dataset)
     result = simulate_prediction_backtest(predictions, settings, risk_manager)
     train_rows = predictions[predictions["split"] == "train"].copy()
@@ -723,6 +724,9 @@ def run_live_loop(settings: Settings) -> None:
             settings.risk.max_open_positions = new_settings.risk.max_open_positions
             settings.risk.take_profit_rr = new_settings.risk.take_profit_rr
             settings.risk.stop_loss_atr_multiple = new_settings.risk.stop_loss_atr_multiple
+            settings.risk.reentry_guard_enabled = new_settings.risk.reentry_guard_enabled
+            settings.risk.reentry_cooldown_bars_after_sl = new_settings.risk.reentry_cooldown_bars_after_sl
+            settings.risk.reentry_min_distance_atr = new_settings.risk.reentry_min_distance_atr
             settings.strategy.signal_threshold = new_settings.strategy.signal_threshold
             settings.strategy.min_strategy_score = new_settings.strategy.min_strategy_score
             settings.strategy.force_trade = new_settings.strategy.force_trade
@@ -781,13 +785,22 @@ def run_live_loop(settings: Settings) -> None:
             LOGGER.error("ExitModel load error: %s", _em_err)
             _exit_model = None
 
+    _state_suffix = _account_tag or "default"
     # Tracks RSI value at the moment each order was placed: {ticket: rsi_at_entry}
-    _RSI_TRACKER_FILE = Path("outputs/entry_rsi_tracker.json")
+    _RSI_TRACKER_FILE = Path(f"outputs/entry_rsi_tracker_{_state_suffix}.json")
+    _LEGACY_RSI_TRACKER_FILE = Path("outputs/entry_rsi_tracker.json")
+    # Full feature snapshot at entry for loss-analysis correctness.
+    _ENTRY_SNAPSHOT_FILE = Path(f"outputs/entry_snapshot_tracker_{_state_suffix}.json")
+    # Re-entry guard state after SL, per side.
+    _REENTRY_GUARD_FILE = Path(f"outputs/reentry_guard_{_state_suffix}.json")
 
     def _load_rsi_tracker() -> dict[int, float]:
         try:
             if _RSI_TRACKER_FILE.exists():
                 data = json.loads(_RSI_TRACKER_FILE.read_text(encoding="utf-8"))
+                return {int(k): float(v) for k, v in data.items()}
+            if _LEGACY_RSI_TRACKER_FILE.exists():
+                data = json.loads(_LEGACY_RSI_TRACKER_FILE.read_text(encoding="utf-8"))
                 return {int(k): float(v) for k, v in data.items()}
         except Exception as _e:
             LOGGER.warning("Failed to load entry_rsi_tracker: %s", _e)
@@ -802,7 +815,130 @@ def run_live_loop(settings: Settings) -> None:
         except Exception as _e:
             LOGGER.warning("Failed to save entry_rsi_tracker: %s", _e)
 
+    def _load_entry_snapshot_tracker() -> dict[int, dict[str, object]]:
+        try:
+            if _ENTRY_SNAPSHOT_FILE.exists():
+                raw = json.loads(_ENTRY_SNAPSHOT_FILE.read_text(encoding="utf-8"))
+                out: dict[int, dict[str, object]] = {}
+                for key, value in raw.items():
+                    if isinstance(value, dict):
+                        out[int(key)] = value
+                return out
+        except Exception as _e:
+            LOGGER.warning("Failed to load entry_snapshot_tracker: %s", _e)
+        return {}
+
+    def _save_entry_snapshot_tracker(tracker: dict[int, dict[str, object]]) -> None:
+        try:
+            _ENTRY_SNAPSHOT_FILE.parent.mkdir(parents=True, exist_ok=True)
+            tmp = _ENTRY_SNAPSHOT_FILE.with_suffix(".tmp")
+            tmp.write_text(json.dumps({str(k): v for k, v in tracker.items()}, default=str), encoding="utf-8")
+            tmp.replace(_ENTRY_SNAPSHOT_FILE)
+        except Exception as _e:
+            LOGGER.warning("Failed to save entry_snapshot_tracker: %s", _e)
+
+    def _load_reentry_guard_state() -> dict[str, dict[str, float | str]]:
+        try:
+            if _REENTRY_GUARD_FILE.exists():
+                raw = json.loads(_REENTRY_GUARD_FILE.read_text(encoding="utf-8"))
+                state = raw.get("last_sl_by_side", {}) if isinstance(raw, dict) else {}
+                if isinstance(state, dict):
+                    out: dict[str, dict[str, float | str]] = {}
+                    for side, payload in state.items():
+                        if side in {"buy", "sell"} and isinstance(payload, dict):
+                            out[side] = payload
+                    return out
+        except Exception as _e:
+            LOGGER.warning("Failed to load reentry_guard state: %s", _e)
+        return {}
+
+    def _save_reentry_guard_state(state: dict[str, dict[str, float | str]]) -> None:
+        try:
+            _REENTRY_GUARD_FILE.parent.mkdir(parents=True, exist_ok=True)
+            tmp = _REENTRY_GUARD_FILE.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"last_sl_by_side": state}, default=str), encoding="utf-8")
+            tmp.replace(_REENTRY_GUARD_FILE)
+        except Exception as _e:
+            LOGGER.warning("Failed to save reentry_guard state: %s", _e)
+
+    def _safe_float(value: object, default: float = 0.0) -> float:
+        try:
+            if value is None:
+                return default
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _safe_int(value: object, default: int = 0) -> int:
+        try:
+            if value is None:
+                return default
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _build_entry_snapshot(
+        row: pd.Series | dict | None,
+        decision: object,
+        order_plan: object,
+    ) -> dict[str, object]:
+        if row is None:
+            row_map: dict[str, object] = {}
+        elif isinstance(row, pd.Series):
+            row_map = row.to_dict()
+        else:
+            row_map = dict(row)
+        numeric_fields = [
+            "open",
+            "high",
+            "low",
+            "close",
+            "atr",
+            "rsi",
+            "macd_hist",
+            "strategy_score",
+            "volatility_regime",
+            "trend_alignment",
+            "hourly_bias",
+            "daily_bias",
+            "liquidity_sweep",
+            "wyckoff_phase",
+            "order_flow_proxy",
+            "adx",
+            "trend_strength_score",
+            "pullback_quality",
+            "execution_quality",
+        ]
+        snapshot: dict[str, object] = {
+            "captured_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "side": getattr(decision, "side", ""),
+            "confidence": _safe_float(getattr(decision, "confidence", 0.0), 0.0),
+            "reason": str(getattr(decision, "reason", "") or ""),
+            "entry_price": _safe_float(getattr(order_plan, "entry_price", 0.0), 0.0),
+            "stop_loss": _safe_float(getattr(order_plan, "stop_loss", 0.0), 0.0),
+            "take_profit": _safe_float(getattr(order_plan, "take_profit", 0.0), 0.0),
+            "volume": _safe_float(getattr(order_plan, "volume", 0.0), 0.0),
+        }
+        time_value = row_map.get("time")
+        if isinstance(time_value, pd.Timestamp):
+            snapshot["time"] = time_value.isoformat()
+        elif time_value is not None:
+            snapshot["time"] = str(time_value)
+        else:
+            snapshot["time"] = None
+        for field in numeric_fields:
+            value = row_map.get(field)
+            if value is None or pd.isna(value):
+                snapshot[field] = None
+            elif field in {"volatility_regime", "trend_alignment", "liquidity_sweep", "wyckoff_phase"}:
+                snapshot[field] = _safe_int(value, 0)
+            else:
+                snapshot[field] = _safe_float(value, 0.0)
+        return snapshot
+
     _entry_rsi_tracker: dict[int, float] = _load_rsi_tracker()
+    _entry_snapshot_tracker: dict[int, dict[str, object]] = _load_entry_snapshot_tracker()
+    _reentry_guard_state: dict[str, dict[str, float | str]] = _load_reentry_guard_state()
 
     # â”€â”€ Khá»Ÿi táº¡o News Crawler (náº¿u báº­t) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     news_crawler = None
@@ -954,6 +1090,39 @@ def run_live_loop(settings: Settings) -> None:
     _last_row_ctx: pd.Series | None = None
     _last_frames_ctx: dict | None = None
 
+    def _row_feature_value(row: pd.Series | dict | None, field: str, default: float = 0.0) -> float:
+        if row is None:
+            return default
+        if isinstance(row, pd.Series):
+            return _safe_float(row.get(field), default)
+        if isinstance(row, dict):
+            return _safe_float(row.get(field), default)
+        return _safe_float(getattr(row, field, default), default)
+
+    def _record_sl_reentry_marker(
+        position: dict,
+        entry_snapshot: dict[str, object] | None,
+        row_ctx: pd.Series | dict | None,
+    ) -> None:
+        side = str(position.get("side", "") or "").strip().lower()
+        if side not in {"buy", "sell"}:
+            return
+        close_epoch = _safe_float(position.get("close_time"), 0.0)
+        if close_epoch <= 0:
+            close_epoch = time.time()
+        close_price = _safe_float(position.get("close_price"), 0.0)
+        atr_from_snapshot = _safe_float((entry_snapshot or {}).get("atr"), 0.0)
+        atr_from_row = _row_feature_value(row_ctx, "atr", 0.0)
+        atr_value = atr_from_snapshot if atr_from_snapshot > 0 else atr_from_row
+        _reentry_guard_state[side] = {
+            "ticket": _safe_int(position.get("ticket"), 0),
+            "close_epoch": close_epoch,
+            "close_time": datetime.datetime.fromtimestamp(close_epoch, tz=datetime.timezone.utc).isoformat(),
+            "close_price": close_price,
+            "atr": atr_value,
+        }
+        _save_reentry_guard_state(_reentry_guard_state)
+
     def _check_closed_positions(row_ctx: pd.Series | None, frames_ctx: dict | None) -> None:
         """Phát hiện lệnh vừa đóng và gửi Telegram ngay lập tức (30s sau khi đóng)."""
         nonlocal _last_closed_check_epoch, _accumulated_losses
@@ -967,11 +1136,16 @@ def run_live_loop(settings: Settings) -> None:
             )
             _last_closed_check_epoch = now_epoch
             for pos in closed:
-                ticket = pos.get("ticket", 0)
+                ticket = int(pos.get("ticket", 0) or 0)
                 pnl = pos.get("profit", 0) + pos.get("swap", 0) + pos.get("commission", 0)
                 if ticket in _known_loss_tickets:
+                    if _entry_snapshot_tracker.pop(ticket, None) is not None:
+                        _save_entry_snapshot_tracker(_entry_snapshot_tracker)
                     continue
                 _known_loss_tickets.add(ticket)
+                _entry_snapshot = _entry_snapshot_tracker.pop(ticket, None)
+                if _entry_snapshot is not None:
+                    _save_entry_snapshot_tracker(_entry_snapshot_tracker)
                 # Determine close type from MT5 deal reason
                 # DEAL_REASON_SL=4, DEAL_REASON_TP=5, DEAL_REASON_EXPERT=3
                 _reason_code = int(pos.get("reason", 0))
@@ -987,6 +1161,7 @@ def run_live_loop(settings: Settings) -> None:
                 # SL hit with non-negative PnL = trailing SL closed in profit/breakeven
                 # This must NOT be counted as a win — it is an SL close, not a TP close
                 if _reason_code == 4 and pnl >= 0:
+                    _record_sl_reentry_marker(pos, _entry_snapshot, row_ctx)
                     LOGGER.info(
                         "SL-breakeven ticket=%d side=%s pnl=%.2f (SL moved to profit/BE — NOT a win)",
                         ticket, pos.get("side"), pnl,
@@ -1002,17 +1177,25 @@ def run_live_loop(settings: Settings) -> None:
                     _entry_rsi_tracker.pop(ticket, None)
                     _save_rsi_tracker(_entry_rsi_tracker)
                 elif pnl < 0:
+                    # Treat manual-loss closes like SL for re-entry protection.
+                    # If user force-closes a losing trade, we still want cooldown
+                    # + minimum-distance guard before re-entering the same side.
+                    if _close_type in {"SL", "MANUAL"}:
+                        _record_sl_reentry_marker(pos, _entry_snapshot, row_ctx)
                     _accumulated_losses += 1
                     self_learner._accumulated_losses = _accumulated_losses
                     LOGGER.warning("LOSS detected ticket=%d side=%s pnl=%.2f close_type=%s", ticket, pos.get("side"), pnl, _close_type)
                     _feat: dict = {}
                     _reasons: list[str] = []
                     try:
-                        if row_ctx is not None:
-                            analysis = self_learner.log_loss_analysis(pos, row_ctx)
-                            _feat = analysis.get("features", {})
-                            _reasons = analysis.get("reasons", [])
-                            LOGGER.warning("LOSS reasons: %s", " | ".join(_reasons))
+                        analysis = self_learner.log_loss_analysis(
+                            pos,
+                            row_ctx,
+                            entry_snapshot=_entry_snapshot,
+                        )
+                        _feat = analysis.get("features", {})
+                        _reasons = analysis.get("reasons", [])
+                        LOGGER.warning("LOSS reasons: %s", " | ".join(_reasons))
                     except Exception as _ae:
                         LOGGER.error("Loss analysis failed (notification still sent): %s", _ae)
                     _regime_label = {0: "sideway", 1: "normal", 2: "volatile"}.get(
@@ -1066,6 +1249,61 @@ def run_live_loop(settings: Settings) -> None:
     # timeframe seconds mapping for bars_held computation
     _tf_secs_map = {"M1": 60, "M5": 300, "M15": 900, "M30": 1800, "H1": 3600, "H4": 14400, "D1": 86400}
     _exec_tf_secs = _tf_secs_map.get(settings.market.execution_timeframe, 900)
+
+    def _check_reentry_guard(
+        decision: object,
+        order_plan: object,
+        latest_bar_time: pd.Timestamp,
+        latest_row: pd.Series,
+    ) -> tuple[bool, str]:
+        if not settings.risk.reentry_guard_enabled:
+            return True, "ok"
+        side = str(getattr(decision, "side", "") or "").strip().lower()
+        if side not in {"buy", "sell"}:
+            return True, "ok"
+        marker = _reentry_guard_state.get(side)
+        if not marker:
+            return True, "ok"
+
+        close_epoch = _safe_float(marker.get("close_epoch"), 0.0)
+        if close_epoch <= 0:
+            return True, "ok"
+
+        close_ts = pd.to_datetime(close_epoch, unit="s", utc=True, errors="coerce")
+        if pd.isna(close_ts):
+            return True, "ok"
+        bars_since = int(max(0.0, (latest_bar_time - close_ts).total_seconds()) // max(_exec_tf_secs, 1))
+        cooldown_bars = max(_safe_int(settings.risk.reentry_cooldown_bars_after_sl, 0), 0)
+        if cooldown_bars > 0 and bars_since < cooldown_bars:
+            return (
+                False,
+                f"REENTRY_GUARD: {side.upper()} blocked {bars_since}/{cooldown_bars} bars after SL",
+            )
+
+        min_dist_atr = max(_safe_float(settings.risk.reentry_min_distance_atr, 0.0), 0.0)
+        if min_dist_atr <= 0:
+            return True, "ok"
+
+        close_price = _safe_float(marker.get("close_price"), 0.0)
+        entry_price = _safe_float(getattr(order_plan, "entry_price", 0.0), 0.0)
+        if entry_price <= 0:
+            entry_price = _row_feature_value(latest_row, "close", 0.0)
+        atr_ref = _safe_float(marker.get("atr"), 0.0)
+        if atr_ref <= 0:
+            atr_ref = _row_feature_value(latest_row, "atr", 0.0)
+        if close_price <= 0 or entry_price <= 0 or atr_ref <= 0:
+            return True, "ok"
+
+        distance = abs(entry_price - close_price)
+        min_distance = atr_ref * min_dist_atr
+        if distance < min_distance:
+            return (
+                False,
+                f"REENTRY_GUARD: {side.upper()} too near last SL "
+                f"(dist={distance:.2f} < {min_distance:.2f}, atr={atr_ref:.2f})",
+            )
+
+        return True, "ok"
 
     def _check_exit_model(row_ctx: pd.Series | None, frames_ctx: dict | None) -> None:
         """Exit open positions early when ExitModel probability exceeds threshold."""
@@ -1468,6 +1706,30 @@ def run_live_loop(settings: Settings) -> None:
                     volatility_regime=volatility_regime,
                 )
 
+                # ── Anti re-entry guard after SL (same side) ───────────────────────────
+                if decision.should_trade and not settings.strategy.force_trade:
+                    reentry_allowed, reentry_reason = _check_reentry_guard(
+                        decision,
+                        order_plan,
+                        latest_bar_time,
+                        latest_row,
+                    )
+                    if not reentry_allowed:
+                        LOGGER.warning(
+                            "Reentry guard BLOCKED: %s | side=%s",
+                            reentry_reason,
+                            decision.side,
+                        )
+                        decision = decision.__class__(
+                            should_trade=False,
+                            side=decision.side,
+                            confidence=decision.confidence,
+                            reason=reentry_reason,
+                            entry_price=decision.entry_price,
+                            stop_loss=decision.stop_loss,
+                            take_profit=decision.take_profit,
+                        )
+
                 # â”€â”€ Log tÃ­n hiá»‡u cho dashboard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 log_path = Path(settings.app.paper_trade_log_path)
                 log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1628,10 +1890,17 @@ def run_live_loop(settings: Settings) -> None:
                                 result,
                             )
                             # Track RSI at entry for exit model position-state features
-                            _new_ticket = int(result.get("order", 0) or result.get("deal", 0))
-                            if _new_ticket and "rsi" in latest_row.index:
-                                _entry_rsi_tracker[_new_ticket] = float(latest_row.get("rsi", 50.0))
-                                _save_rsi_tracker(_entry_rsi_tracker)
+                            _new_ticket = int(result.get("position", 0) or result.get("order", 0) or result.get("deal", 0))
+                            if _new_ticket:
+                                if "rsi" in latest_row.index:
+                                    _entry_rsi_tracker[_new_ticket] = float(latest_row.get("rsi", 50.0))
+                                    _save_rsi_tracker(_entry_rsi_tracker)
+                                _entry_snapshot_tracker[_new_ticket] = _build_entry_snapshot(
+                                    latest_row,
+                                    decision,
+                                    order_plan,
+                                )
+                                _save_entry_snapshot_tracker(_entry_snapshot_tracker)
                         except Exception as order_err:
                             LOGGER.error("MT5 order failed: %s", order_err)
                 else:

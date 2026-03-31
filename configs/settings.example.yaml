@@ -100,6 +100,9 @@ risk:
   anti_martingale_factor: 0.6
   anti_martingale_max_reductions: 3
   max_total_exposure_pct: 0.12
+  reentry_guard_enabled: true
+  reentry_cooldown_bars_after_sl: 1
+  reentry_min_distance_atr: 0.35
   # Partial Take Profit
   partial_tp_enabled: false
   partial_tp_rr: 1.0
