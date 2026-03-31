@@ -63,7 +63,7 @@ strategy:
   min_strategy_score: 0.10           # Tăng từ 0.05 → filter yếu hơn bị loại
   sideway_min_strategy_score: 0.15   # Tăng từ 0.05 → chỉ trade sideway khi score rõ ràng
   strong_volatility_min_strategy_score: 0.12  # Tăng từ 0.10
-  require_trend_alignment: false    # Tắt — model confidence là cổng chính cho hướng
+  require_trend_alignment: true    # Bật — model confidence là cổng chính cho hướng
   force_trade: false
   blocked_hours_utc: [15, 22, 23]   # Block rollover + validated weak hour cluster
   blocked_weekdays_utc: []

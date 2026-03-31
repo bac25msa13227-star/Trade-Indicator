@@ -64,7 +64,9 @@ class TelegramNotifier:
                 json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
                 timeout=10,
             )
-            if not resp.ok:
+            if resp.ok:
+                _logger.info("Telegram message sent OK (msg_id=%s)", resp.json().get("result", {}).get("message_id", "?"))
+            else:
                 # HTML parse_mode failed — retry without parse_mode
                 _logger.warning("Telegram send_message HTML failed (%s): %s — retrying as plain text",
                                 resp.status_code, resp.text[:200])
@@ -73,7 +75,9 @@ class TelegramNotifier:
                     json={"chat_id": chat_id, "text": text},
                     timeout=10,
                 )
-                if not resp2.ok:
+                if resp2.ok:
+                    _logger.info("Telegram message sent OK plain-text (msg_id=%s)", resp2.json().get("result", {}).get("message_id", "?"))
+                else:
                     _logger.error("Telegram send_message plain text also failed (%s): %s",
                                   resp2.status_code, resp2.text[:200])
         except Exception as e:

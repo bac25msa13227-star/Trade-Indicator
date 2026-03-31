@@ -1,7 +1,7 @@
 # ─────────────────────────────────────────────────────────────────
 # LIVE TRADING CONFIG — Account 1 (ACC1 freeze profile)
 # Model:  outputs/acc1_live_model.pkl  (frozen snapshot from acc2 live-freeze)
-# Symbol: XAUUSD   |  Threshold: 0.70  |  Risk: 5% dynamic
+# Symbol: XAUUSDm  |  Threshold: 0.70  |  Risk: 5% dynamic  |  Login: 270832477 / Exness-MT5Trial17
 # Target: frozen paper/deploy profile with stricter gate than the previous 0.50 setup
 # ─────────────────────────────────────────────────────────────────
 app:
@@ -23,7 +23,7 @@ app:
   log_level: INFO
 
 market:
-  symbol: XAUUSD
+  symbol: XAUUSDm
   training_symbol: GC=F
   training_data_source: csv_folder
   live_data_source: yfinance
@@ -219,9 +219,9 @@ integrations:
     login_env: MT5_LOGIN
     password_env: MT5_PASSWORD
     server_env: MT5_SERVER
-    login: 103613837
+    login: 270832477
     password: "07032001bB@"
-    server: "Exness-MT5Real15"
+    server: "Exness-MT5Trial17"
     terminal_path: "C:\\Program Files\\MetaTrader 5\\terminal64.exe"
   telegram:
     token_env: TELEGRAM_BOT_TOKEN
@@ -237,7 +237,7 @@ integrations:
     currencies:
       - USD
     # --- News Trade Override: ép BUY/SELL ngay khi tin vừa ra ---
-    news_trade_override: true          # true = kích hoạt giao dịch theo tin
+    news_trade_override: false         # false = tắt giao dịch theo tin (2026-03-30)
     news_trade_window_minutes: 3       # Thực hiện trong 3 phút đầu sau khi tin ra
     news_trade_atr_sl_mult: 1.5        # SL = 1.5 × ATR (đủ rộng tránh spike)
     news_trade_atr_tp_mult: 3.5        # TP = 3.5 × ATR  →  RR ≈ 1:2.3

@@ -1087,6 +1087,23 @@ def run_live_loop(settings: Settings) -> None:
                         _known_loss_tickets.add(_t)
         except Exception as _le:
             LOGGER.debug("Could not pre-load known tickets: %s", _le)
+    # Also pre-load from MT5 recent history to avoid re-notifying all 24h of trades
+    # on restart (especially important if the CSV was reset/cleared)
+    try:
+        _mt5_startup_history = executor.get_recently_closed_positions(
+            since_epoch=time.time() - 86400,
+            magic_number=settings.execution.magic_number,
+        )
+        _startup_pre_count = 0
+        for _mp in _mt5_startup_history:
+            _mt = int(float(_mp.get("ticket", 0) or 0))
+            if _mt and _mt not in _known_loss_tickets:
+                _known_loss_tickets.add(_mt)
+                _startup_pre_count += 1
+        if _startup_pre_count:
+            LOGGER.info("Pre-loaded %d MT5 historical tickets into known set (no re-notify on restart)", _startup_pre_count)
+    except Exception as _mt5_le:
+        LOGGER.debug("Could not pre-load MT5 historical tickets: %s", _mt5_le)
     _last_row_ctx: pd.Series | None = None
     _last_frames_ctx: dict | None = None
 

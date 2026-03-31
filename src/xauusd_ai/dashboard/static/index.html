@@ -1045,7 +1045,7 @@ function renderSunnyDeck(){
   el('assistant-summary').textContent = note.summary;
   el('assistant-detail').textContent = note.detail;
   el('sunny-live-status').textContent = live ? 'WebSocket uplink hot' : 'HTTP fallback';
-  el('sunny-live-updated').textContent = data?.ts ? `Synced ${String(data.ts).replace('T',' ').slice(5,16)} UTC` : 'Realtime ops console';
+  el('sunny-live-updated').textContent = data?.ts ? `Synced ${String(data.ts).replace('T',' ').slice(0,16)} UTC` : 'Realtime ops console';
   const dot=el('sunny-live-dot');
   if(dot) dot.classList.toggle('live',live);
   const assistantCard=el('assistant-card');
@@ -1128,7 +1128,7 @@ function renderOverview(acct,d){
   const miniRows=trades.slice(-5).reverse().map(t=>{
     const pnl=t.pnl??t.profit??null;
     return `<tr>
-      <td class="dim">${String(t.time||t.ts||'').replace('T',' ').slice(5,16)}</td>
+      <td class="dim">${String(t.time||t.ts||'').replace('T',' ').slice(0,16)}</td>
       <td>${badge(t.side||t.direction||'')}</td>
       <td class="${clr(pnl)}">${dol(pnl)}</td>
       <td class="dim" style="font-size:.67rem">${q(t.close_type||t.reason||'')}</td>
@@ -1328,7 +1328,7 @@ function renderTrading(acct,d){
     const over=c!=null&&thr!=null?+c>=+thr:null;
     const vrSig=sg.volatility_regime!=null?+sg.volatility_regime:-1;
     return `<tr>
-      <td class="dim">${String(sg.time||sg.ts||'').slice(2,16)}</td>
+      <td class="dim">${String(sg.time||sg.ts||'').slice(0,16)}</td>
       <td>${badge(sg.direction||sg.signal||sg.side||'')}</td>
       <td class="${over===true?'win':over===false?'loss':''}">${fmt(c,3)}</td>
       <td><span class="vol-${Math.min(Math.max(vrSig,0),3)}">${vrSig>=0?vrNames[vrSig]:'-'}</span></td>
@@ -1413,7 +1413,7 @@ function renderTrading(acct,d){
       <div class="strat-r"><span class="strat-k">Direction</span><span class="strat-v">${badge(lastSig.direction||lastSig.side||s.side||'')}</span></div>
       <div class="strat-r"><span class="strat-k">Multi-TF</span><span class="strat-v ${parseFloat(lastSig.multi_tf_consensus||0)>0?'win':'dim'}">${fmt(parseFloat(lastSig.multi_tf_consensus||0),2)}</span></div>
       <div class="strat-r"><span class="strat-k">Trend Align</span><span class="strat-v">${fmt(parseFloat(lastSig.trend_alignment||0),2)}</span></div>
-      <div class="strat-r"><span class="strat-k">Last Signal</span><span class="strat-v dim">${String(lastSig.time||lastSig.ts||'&#8212;').slice(5,16)}</span></div>
+      <div class="strat-r"><span class="strat-k">Last Signal</span><span class="strat-v dim">${String(lastSig.time||lastSig.ts||'&#8212;').replace('T',' ').slice(0,16)}</span></div>
     </div>
   </div>
 

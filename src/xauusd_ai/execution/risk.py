@@ -227,8 +227,8 @@ class RiskManager:
         Tính số lệnh tối đa được phép mở dựa trên số dư tài khoản.
 
         Tier map (theo balance USD):
-            < $200   → 1 lệnh   (tài khoản micro, XAUUSD rủi ro cao)
-            < $500   → 3 lệnh   (tăng từ 2→3 để bắt nhiều signal hơn với vốn $200, max 18% exposure)
+            < $200   → 2 lệnh   (tài khoản micro, giảm exposure)
+            < $500   → 3 lệnh   (vốn nhỏ, max 18% exposure)
             < $2 000 → 5 lệnh
             < $10 000→ 8 lệnh
             < $50 000→ 10 lệnh
@@ -240,8 +240,10 @@ class RiskManager:
         """
         config_ceiling = self.settings.risk.max_open_positions
 
-        if balance < 500:
-            tier_max = 3          # $200-$499: 3 lenh, max 18% exposure, WR93%+ nen an toan
+        if balance < 200:
+            tier_max = 2          # < $200: tối đa 2 lệnh, giảm rủi ro vốn micro
+        elif balance < 500:
+            tier_max = 3          # $200-$499: 3 lệnh, max 18% exposure
         elif balance < 2_000:
             tier_max = 5
         elif balance < 10_000:

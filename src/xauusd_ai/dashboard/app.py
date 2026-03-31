@@ -1574,7 +1574,7 @@ def _render_live_tab() -> None:
             _sig_sim = simulate_signal_outcomes(_sig_disp)
 
         # Format cột hiển thị
-        _sig_sim["Thời gian"]    = _sig_sim["time"].astype(str).str[:16]
+        _sig_sim["Thời gian"]    = pd.to_datetime(_sig_sim["time"], utc=True, errors="coerce").dt.strftime("%Y-%m-%d %H:%M").fillna("—")
         _sig_sim["Tín hiệu"]     = _sig_sim["side"].str.upper()
         _sig_sim["Vào lệnh?"]    = _sig_sim["should_trade"].map(lambda x: "✅ CÓ" if x else "❌ KHÔNG")
         _sig_sim["Confidence"]   = _sig_sim["confidence"].map(lambda x: f"{x:.1%}" if pd.notna(x) else "")
@@ -1717,7 +1717,7 @@ def _render_live_tab() -> None:
             _closed_disp["Entry"]     = _closed_disp["open_price"].map(lambda x: f"{x:.3f}" if pd.notna(x) else "")
             _closed_disp["Exit"]      = _closed_disp["close_price"].map(lambda x: f"{x:.3f}" if pd.notna(x) else "")
             _closed_disp["Lot"]       = _closed_disp["volume"].map(lambda x: f"{x:.2f}")
-            _closed_disp["Thời gian"] = _closed_disp["time"].astype(str).str[:16]
+            _closed_disp["Thời gian"] = pd.to_datetime(_closed_disp["time"], utc=True, errors="coerce").dt.strftime("%Y-%m-%d %H:%M").fillna("—")
             _closed_disp["Side"]      = _closed_disp["side"].str.upper() if "side" in _closed_disp.columns else ""
             _closed_disp["Session"]   = _closed_disp.get("session_id", "—").fillna("—")
             _w = int(_closed_disp["is_win"].sum())
@@ -2160,7 +2160,10 @@ with tab_pnl:
             _lcols = [c for c in ["time", "ticket", "side", "volume", "open_price", "close_price",
                                    "profit", "swap", "commission", "pnl", "is_win"]
                       if c in lt.columns]
-            st.dataframe(lt[_lcols], use_container_width=True)
+            _lt_disp = lt[_lcols].copy()
+            if "time" in _lt_disp.columns:
+                _lt_disp["time"] = pd.to_datetime(_lt_disp["time"], utc=True, errors="coerce").dt.strftime("%Y-%m-%d %H:%M").fillna("—")
+            st.dataframe(_lt_disp, use_container_width=True)
         else:
             st.info(f"Chưa có lệnh live nào được đóng cho {acc_label}.")
 
@@ -2318,7 +2321,10 @@ with tab_pnl:
         dcols = [c for c in ["time", "side", "entry_price", "exit_price",
                                "pnl", "is_win", "balance_after", "drawdown", "realized_rr"]
                   if c in trades.columns]
-        st.dataframe(trades[dcols].tail(200), use_container_width=True)
+        _trades_disp = trades[dcols].tail(200).copy()
+        if "time" in _trades_disp.columns:
+            _trades_disp["time"] = pd.to_datetime(_trades_disp["time"], utc=True, errors="coerce").dt.strftime("%Y-%m-%d %H:%M").fillna("—")
+        st.dataframe(_trades_disp, use_container_width=True)
     else:
         st.info("Chưa có dữ liệu backtest. Chạy: python scripts/backtest_ict_wyckoff.py")
 
