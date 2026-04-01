@@ -1089,6 +1089,7 @@ def run_live_loop(settings: Settings) -> None:
             LOGGER.debug("Could not pre-load known tickets: %s", _le)
     # Also pre-load from MT5 recent history to avoid re-notifying all 24h of trades
     # on restart (especially important if the CSV was reset/cleared)
+    _mt5_startup_history: list[dict] = []
     try:
         _mt5_startup_history = executor.get_recently_closed_positions(
             since_epoch=time.time() - 86400,
@@ -1104,6 +1105,7 @@ def run_live_loop(settings: Settings) -> None:
             LOGGER.info("Pre-loaded %d MT5 historical tickets into known set (no re-notify on restart)", _startup_pre_count)
     except Exception as _mt5_le:
         LOGGER.debug("Could not pre-load MT5 historical tickets: %s", _mt5_le)
+        _mt5_startup_history = []
     _last_row_ctx: pd.Series | None = None
     _last_frames_ctx: dict | None = None
 
@@ -1139,6 +1141,24 @@ def run_live_loop(settings: Settings) -> None:
             "atr": atr_value,
         }
         _save_reentry_guard_state(_reentry_guard_state)
+
+    # Seed re-entry guard from startup MT5 history so a bot restart does not
+    # allow immediate same-side re-entry right after an SL/manual loss.
+    _startup_guard_seeded = 0
+    for _startup_pos in _mt5_startup_history:
+        _startup_reason = _safe_int(_startup_pos.get("reason"), 0)
+        _startup_pnl = (
+            _safe_float(_startup_pos.get("profit"), 0.0)
+            + _safe_float(_startup_pos.get("swap"), 0.0)
+            + _safe_float(_startup_pos.get("commission"), 0.0)
+        )
+        _is_sl = _startup_reason == 4
+        _is_manual_loss = _startup_reason not in {3, 4, 5} and _startup_pnl < 0
+        if _is_sl or _is_manual_loss:
+            _record_sl_reentry_marker(_startup_pos, None, None)
+            _startup_guard_seeded += 1
+    if _startup_guard_seeded:
+        LOGGER.info("Seeded reentry guard from %d startup closed trades", _startup_guard_seeded)
 
     def _check_closed_positions(row_ctx: pd.Series | None, frames_ctx: dict | None) -> None:
         """Phát hiện lệnh vừa đóng và gửi Telegram ngay lập tức (30s sau khi đóng)."""

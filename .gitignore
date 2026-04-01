@@ -19,3 +19,7 @@ src/*.egg-info/
 
 # Backup files
 *.bak
+
+# Local market-data cache (keep on machine, never push)
+.dukascopy-cache/
+src/xauusd_ai/real_data/XAUUSDm_*.csv
