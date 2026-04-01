@@ -1803,6 +1803,16 @@ def run_live_loop(settings: Settings) -> None:
                 import datetime as _dtnow
                 _is_acc2 = "acc2" in log_path.stem
                 _status_path = log_path.parent / ("live_status_acc2.json" if _is_acc2 else "live_status_acc1.json")
+                _model_file = Path(settings.app.model_path)
+                _model_mtime_utc = None
+                try:
+                    if _model_file.exists():
+                        _model_mtime_utc = _dtnow.datetime.fromtimestamp(
+                            _model_file.stat().st_mtime,
+                            tz=_dtnow.timezone.utc,
+                        ).isoformat()
+                except Exception:
+                    _model_mtime_utc = None
                 _status_payload = {
                     "ts": _dtnow.datetime.now(_dtnow.timezone.utc).isoformat(),
                     "bar_time": str(latest_bar_time),
@@ -1815,6 +1825,13 @@ def run_live_loop(settings: Settings) -> None:
                     "side": decision.side,
                     "reason": decision.reason,
                     "signal_threshold": round(settings.strategy.signal_threshold, 4),
+                    "model_path": str(settings.app.model_path),
+                    "model_meta_path": str(settings.app.model_meta_path),
+                    "model_decision_threshold": round(
+                        float(getattr(trainer, "decision_threshold", settings.strategy.signal_threshold)),
+                        4,
+                    ),
+                    "model_mtime_utc": _model_mtime_utc,
                 }
                 try:
                     _status_path.write_text(json.dumps(_status_payload, ensure_ascii=False), encoding="utf-8")

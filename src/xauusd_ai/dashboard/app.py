@@ -25,6 +25,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import streamlit as st
+import yaml
 try:
     from streamlit_autorefresh import st_autorefresh as _st_autorefresh
     _HAS_AUTOREFRESH = True
@@ -40,6 +41,49 @@ except ImportError:
 
 ROOT = Path(__file__).resolve().parents[3]
 OUTPUTS = ROOT / "outputs"
+
+
+def _load_live_app_files(config_filename: str, defaults: dict[str, str]) -> dict[str, str]:
+    cfg_path = ROOT / "configs" / config_filename
+    if not cfg_path.exists():
+        return defaults.copy()
+    try:
+        raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+        app_cfg = raw.get("app", {}) if isinstance(raw, dict) else {}
+        merged = defaults.copy()
+        for key, default_name in defaults.items():
+            path_like = app_cfg.get(key)
+            if path_like:
+                merged[key] = Path(str(path_like)).name or default_name
+        return merged
+    except Exception:
+        return defaults.copy()
+
+
+_ACC1_APP_FILES = _load_live_app_files(
+    "live_acc1.yaml",
+    {
+        "model_path": "acc1_live_model.pkl",
+        "model_meta_path": "acc1_live_model_meta.json",
+        "backtest_report_path": "backtest_report_acc1.json",
+        "backtest_trades_path": "backtest_trades_acc1.csv",
+        "walkforward_report_path": "walkforward_report_acc1.json",
+        "paper_trade_log_path": "paper_trade_signals_acc1.csv",
+        "live_closed_trades_path": "live_closed_trades_acc1.csv",
+    },
+)
+_ACC2_APP_FILES = _load_live_app_files(
+    "live_acc2.yaml",
+    {
+        "model_path": "acc2_live_model.pkl",
+        "model_meta_path": "acc2_live_model_meta.json",
+        "backtest_report_path": "backtest_report_acc2.json",
+        "backtest_trades_path": "backtest_trades_acc2.csv",
+        "walkforward_report_path": "walkforward_report_acc2.json",
+        "paper_trade_log_path": "paper_trade_signals_acc2.csv",
+        "live_closed_trades_path": "live_closed_trades_acc2.csv",
+    },
+)
 
 GREEN  = "#26a69a"
 RED    = "#ef5350"
@@ -1008,10 +1052,10 @@ if _tunnel.exists():
 _WATCHED_FILES = {
     "live_status_acc1.json",
     "live_status_acc2.json",
-    "paper_trade_signals.csv",
-    "paper_trade_signals_acc2.csv",
-    "live_closed_trades_acc1.csv",
-    "live_closed_trades_acc2.csv",
+    _ACC1_APP_FILES["paper_trade_log_path"],
+    _ACC2_APP_FILES["paper_trade_log_path"],
+    _ACC1_APP_FILES["live_closed_trades_path"],
+    _ACC2_APP_FILES["live_closed_trades_path"],
 }
 
 if _HAS_WATCHDOG:
@@ -1051,18 +1095,18 @@ if _HAS_WATCHDOG:
 ])
 
 # --- Shared data -------------------------------------------------------
-model_meta      = load_json(OUTPUTS / "acc1_live_model_meta.json")
+model_meta      = load_json(OUTPUTS / _ACC1_APP_FILES["model_meta_path"])
 if not model_meta:
     model_meta  = load_json(OUTPUTS / "model_meta_ict_wyckoff.json")
 if not model_meta:
     model_meta  = load_json(OUTPUTS / "model_meta.json")  # fallback
-model_path      = OUTPUTS / "acc1_live_model.pkl"
+model_path      = OUTPUTS / _ACC1_APP_FILES["model_path"]
 if not model_path.exists():
     model_path  = OUTPUTS / "model_ict_wyckoff.pkl"
 if not model_path.exists():
     model_path  = OUTPUTS / "model.pkl"  # fallback
-live_signals    = load_signals("paper_trade_signals_acc1.csv")
-live_signals_acc2 = load_signals("paper_trade_signals_acc2.csv")
+live_signals    = load_signals(_ACC1_APP_FILES["paper_trade_log_path"])
+live_signals_acc2 = load_signals(_ACC2_APP_FILES["paper_trade_log_path"])
 learn_events    = load_learning_events()
 learn_events_acc2 = load_learning_events("live_learning_log_acc2.jsonl")
 wf_win_events, wf_loss_events = load_win_loss_events()
@@ -1083,15 +1127,15 @@ if not trades.empty and "time" in trades.columns:
     trades["time"] = pd.to_datetime(trades["time"], utc=True, errors="coerce")
     if "is_win" not in trades.columns and "pnl" in trades.columns:
         trades["is_win"] = trades["pnl"] > 0
-# ACC2 (Model2) backtest data
-backtest_report_acc2 = load_json(OUTPUTS / "backtest_report_acc2.json")
-trades_acc2          = load_csv(OUTPUTS / "backtest_trades_acc2.csv")
+# ACC2 backtest data (from live_acc2.yaml app paths)
+backtest_report_acc2 = load_json(OUTPUTS / _ACC2_APP_FILES["backtest_report_path"])
+trades_acc2          = load_csv(OUTPUTS / _ACC2_APP_FILES["backtest_trades_path"])
 if not trades_acc2.empty and "time" in trades_acc2.columns:
     trades_acc2["time"] = pd.to_datetime(trades_acc2["time"], utc=True, errors="coerce")
     if "is_win" not in trades_acc2.columns and "pnl" in trades_acc2.columns:
         trades_acc2["is_win"] = trades_acc2["pnl"] > 0
-live_trades     = load_live_closed_trades()
-live_trades_acc2 = load_live_closed_trades("live_closed_trades_acc2.csv")
+live_trades     = load_live_closed_trades(_ACC1_APP_FILES["live_closed_trades_path"])
+live_trades_acc2 = load_live_closed_trades(_ACC2_APP_FILES["live_closed_trades_path"])
 
 threshold_val = float(
     load_json(OUTPUTS / "live_status_acc1.json").get("signal_threshold")
@@ -1099,7 +1143,7 @@ threshold_val = float(
     or model_meta.get("selected_threshold")
     or 0.65
 )
-model_meta_acc2  = load_json(OUTPUTS / "acc2_live_model_meta.json")
+model_meta_acc2  = load_json(OUTPUTS / _ACC2_APP_FILES["model_meta_path"])
 threshold_val_acc2 = float(
     load_json(OUTPUTS / "live_status_acc2.json").get("signal_threshold")
     or model_meta_acc2.get("decision_threshold")
@@ -3707,23 +3751,23 @@ print("Xong!")
     st.subheader("📁 Trạng thái File Đầu ra (outputs/)")
 
     _OUT_FILES = [
-        ("paper_trade_signals.csv",             "Tín hiệu live ACC1"),
-        ("paper_trade_signals_acc2.csv",        "Tín hiệu live ACC2"),
-        ("live_closed_trades_acc1.csv",          "Lệnh đã đóng ACC1"),
-        ("live_closed_trades_acc2.csv",         "Lệnh đã đóng ACC2"),
-        ("backtest_report_acc1.json",           "Báo cáo backtest ACC1 (mới nhất)"),
-        ("backtest_trades_acc1.csv",            "Lệnh backtest ACC1 (mới nhất)"),
-        ("backtest_report_acc2.json",           "Báo cáo backtest ACC2 (mới nhất)"),
-        ("backtest_trades_acc2.csv",            "Lệnh backtest ACC2 (mới nhất)"),
-        ("walkforward_report_ict_wyckoff.json", "Báo cáo walk-forward ACC1"),
-        ("walkforward_report_acc2.json",        "Báo cáo walk-forward ACC2"),
-        ("live_learning_log.jsonl",             "Log học liên tục ACC1"),
-        ("live_learning_log_acc2.jsonl",        "Log học liên tục ACC2"),
-        ("acc1_live_model.pkl",                 "Model ACC1 đang dùng"),
-        ("acc2_live_model.pkl",                 "Model ACC2 đang dùng"),
-        ("acc1_live_model_meta.json",           "Metadata model ACC1"),
-        ("acc2_live_model_meta.json",           "Metadata model ACC2"),
-        ("training_report_ict_wyckoff.json",    "Kết quả training ACC1"),
+        (_ACC1_APP_FILES["paper_trade_log_path"],      "Tín hiệu live ACC1"),
+        (_ACC2_APP_FILES["paper_trade_log_path"],      "Tín hiệu live ACC2"),
+        (_ACC1_APP_FILES["live_closed_trades_path"],   "Lệnh đã đóng ACC1"),
+        (_ACC2_APP_FILES["live_closed_trades_path"],   "Lệnh đã đóng ACC2"),
+        (_ACC1_APP_FILES["backtest_report_path"],      "Báo cáo backtest ACC1 (mới nhất)"),
+        (_ACC1_APP_FILES["backtest_trades_path"],      "Lệnh backtest ACC1 (mới nhất)"),
+        (_ACC2_APP_FILES["backtest_report_path"],      "Báo cáo backtest ACC2 (mới nhất)"),
+        (_ACC2_APP_FILES["backtest_trades_path"],      "Lệnh backtest ACC2 (mới nhất)"),
+        (_ACC1_APP_FILES["walkforward_report_path"],   "Báo cáo walk-forward ACC1"),
+        (_ACC2_APP_FILES["walkforward_report_path"],   "Báo cáo walk-forward ACC2"),
+        ("live_learning_log.jsonl",                    "Log học liên tục ACC1"),
+        ("live_learning_log_acc2.jsonl",               "Log học liên tục ACC2"),
+        (_ACC1_APP_FILES["model_path"],                "Model ACC1 đang dùng"),
+        (_ACC2_APP_FILES["model_path"],                "Model ACC2 đang dùng"),
+        (_ACC1_APP_FILES["model_meta_path"],           "Metadata model ACC1"),
+        (_ACC2_APP_FILES["model_meta_path"],           "Metadata model ACC2"),
+        ("training_report_ict_wyckoff.json",           "Kết quả training ACC1"),
     ]
 
     _out_status = []

@@ -30,6 +30,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, WebSocket, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
+from xauusd_ai.config import load_settings
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ _STATIC_DIR = Path(__file__).resolve().parent.parent / "dashboard" / "static"
 
 _ACCOUNT_CFG: dict[str, dict[str, str]] = {
     "acc1": {
-        "label": "ACC1 · Model v3 (Aggressive)",
+        "label": "ACC1 · Live Profile",
         "status": "live_status_acc1.json",
         "trades": "live_closed_trades_acc1.csv",
         "trades_fallback": "live_closed_trades.csv",
@@ -78,7 +79,7 @@ _ACCOUNT_CFG: dict[str, dict[str, str]] = {
         "daily": "risk_daily_state_acc1.json",
     },
     "acc2": {
-        "label": "ACC2 · Model v2",
+        "label": "ACC2 · Live Profile",
         "status": "live_status_acc2.json",
         "trades": "live_closed_trades_acc2.csv",
         "trades_fallback": "live_closed_trades_acc2.csv",
@@ -91,6 +92,43 @@ _ACCOUNT_CFG: dict[str, dict[str, str]] = {
         "daily": "risk_daily_state_acc2.json",
     },
 }
+
+
+def _output_path(path_like: str | Path) -> Path:
+    """Resolve output file path robustly for absolute/relative/basename inputs."""
+    p = Path(path_like)
+    if p.is_absolute():
+        return p
+    # Keep "outputs/..." relative paths as-is; they are already anchored.
+    if p.parts and p.parts[0] == "outputs":
+        return p
+    return _OUTPUTS / p
+
+
+def _apply_live_config_overrides() -> None:
+    """Use live YAML configs as source of truth for dashboard artifact filenames."""
+    cfg_map = {
+        "acc1": Path(os.getenv("ACC1_SETTINGS_PATH", "configs/live_acc1.yaml")),
+        "acc2": Path(os.getenv("ACC2_SETTINGS_PATH", "configs/live_acc2.yaml")),
+    }
+    for acct, cfg_path in cfg_map.items():
+        if acct not in _ACCOUNT_CFG:
+            continue
+        try:
+            settings = load_settings(cfg_path)
+            app_cfg = settings.app
+            _ACCOUNT_CFG[acct]["label"] = f"{acct.upper()} · {Path(app_cfg.model_path).name}"
+            _ACCOUNT_CFG[acct]["meta"] = Path(app_cfg.model_meta_path).name
+            _ACCOUNT_CFG[acct]["wf"] = Path(app_cfg.walkforward_report_path).name
+            _ACCOUNT_CFG[acct]["bt"] = Path(app_cfg.backtest_report_path).name
+            _ACCOUNT_CFG[acct]["bt_trades"] = Path(app_cfg.backtest_trades_path).name
+            _ACCOUNT_CFG[acct]["signals"] = Path(app_cfg.paper_trade_log_path).name
+            _ACCOUNT_CFG[acct]["trades"] = Path(app_cfg.live_closed_trades_path).name
+        except Exception as exc:
+            logger.warning("Could not apply live config override for %s from %s: %s", acct, cfg_path, exc)
+
+
+_apply_live_config_overrides()
 
 
 # ── WebSocket connection manager ──────────────────────────────────────────────
@@ -438,19 +476,19 @@ def _build_dashboard_payload() -> dict:
 def _build_dashboard_payload_uncached() -> dict:
     accounts: dict[str, Any] = {}
     for acct, cfg in _ACCOUNT_CFG.items():
-        daily    = _safe_json(_OUTPUTS / cfg.get("daily", "risk_daily_state.json"))
-        peak_bal = float(_safe_json(_OUTPUTS / cfg.get("peak", "risk_peak_balance.json")).get("peak_balance") or 0)
-        status = _safe_json(_OUTPUTS / cfg["status"])
-        meta   = _safe_json(_OUTPUTS / cfg["meta"])
-        wf     = _safe_json(_OUTPUTS / cfg["wf"])
-        bt     = _safe_json(_OUTPUTS / cfg["bt"])
+        daily    = _safe_json(_output_path(cfg.get("daily", "risk_daily_state.json")))
+        peak_bal = float(_safe_json(_output_path(cfg.get("peak", "risk_peak_balance.json"))).get("peak_balance") or 0)
+        status = _safe_json(_output_path(cfg["status"]))
+        meta   = _safe_json(_output_path(cfg["meta"]))
+        wf     = _safe_json(_output_path(cfg["wf"]))
+        bt     = _safe_json(_output_path(cfg["bt"]))
 
-        trades_path = _OUTPUTS / cfg["trades"]
+        trades_path = _output_path(cfg["trades"])
         if not trades_path.exists():
-            trades_path = _OUTPUTS / cfg["trades_fallback"]
+            trades_path = _output_path(cfg["trades_fallback"])
         trades   = _safe_csv_tail(trades_path, 200)
-        signals  = _safe_csv_tail(_OUTPUTS / cfg["signals"], 20)
-        bt_trades = _safe_csv_tail(_OUTPUTS / cfg.get("bt_trades", ""), 500) if cfg.get("bt_trades") else []
+        signals  = _safe_csv_tail(_output_path(cfg["signals"]), 20)
+        bt_trades = _safe_csv_tail(_output_path(cfg.get("bt_trades", "")), 500) if cfg.get("bt_trades") else []
 
         bal = float(status.get("account_balance") or 0)
         dd  = round((peak_bal - bal) / peak_bal * 100, 2) if peak_bal > 0 else 0.0

@@ -104,6 +104,32 @@ Mở dashboard:
 5. Kiểm tra test:
    - `PYTHONPATH=src pytest -q tests`
 
+## 5.1) Verify bot đang dùng đúng model nào (rất quan trọng)
+
+Kiểm tra config live:
+
+```bash
+PYTHONPATH=src python3 - <<'PY'
+from pathlib import Path
+from xauusd_ai.config import load_settings
+for cfg in ["configs/live_acc1.yaml", "configs/live_acc2.yaml"]:
+    s = load_settings(Path(cfg))
+    print(cfg, "->", s.app.model_path, "|", s.app.model_meta_path)
+PY
+```
+
+Kiểm tra runtime status (sau khi bot chạy):
+
+```bash
+cat outputs/live_status_acc1.json
+cat outputs/live_status_acc2.json
+```
+
+Trong JSON phải thấy các field:
+- `model_path`
+- `model_meta_path`
+- `model_decision_threshold`
+
 ## 6) Unit test status (hiện tại)
 
 Đã pass:
