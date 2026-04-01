@@ -944,6 +944,116 @@ const pctR= v => v==null?'&#8212;':(+v).toFixed(1)+'%';
 const dol = v => { if(v==null) return '&#8212;'; const n=+v; return (n>=0?'$':'-$')+Math.abs(n).toFixed(2); };
 const q   = v => (v==null||v===''||v===undefined)?'&#8212;':v;
 const clr = v => v==null?'':(+v>0?'win':+v<0?'loss':'');
+const px  = (v,d=3) => (v==null||v===''||v===undefined||!Number.isFinite(+v))?'&#8212;':(+v).toFixed(d);
+
+function parseTs(v){
+  if(v==null||v===''||v===undefined) return NaN;
+  if(typeof v==='number'){
+    if(v>1e12) return v;
+    if(v>1e9) return v*1000;
+    return NaN;
+  }
+  const s=String(v).trim();
+  if(!s||s.toLowerCase()==='nan') return NaN;
+  if(/^\d+(\.\d+)?$/.test(s)){
+    const n=+s;
+    if(n>1e12) return n;
+    if(n>1e9) return n*1000;
+    return NaN;
+  }
+  const t=Date.parse(s);
+  return Number.isFinite(t)?t:NaN;
+}
+
+function timeTextFrom(v){
+  const ts=parseTs(v);
+  if(Number.isFinite(ts)) return new Date(ts).toISOString().replace('T',' ').slice(0,16);
+  const s=String(v??'').trim();
+  if(!s||s.toLowerCase()==='nan') return '';
+  return s.replace('T',' ').slice(0,16);
+}
+
+function pickTimeText(...vals){
+  for(const v of vals){
+    const t=timeTextFrom(v);
+    if(t) return t;
+  }
+  return '&#8212;';
+}
+
+function normSide(v){
+  const s=String(v||'').trim().toLowerCase();
+  if(!s) return '';
+  if(s==='buy'||s==='long') return 'buy';
+  if(s==='sell'||s==='short') return 'sell';
+  return '';
+}
+
+function isTrue(v){
+  if(v===true||v===1) return true;
+  const s=String(v??'').trim().toLowerCase();
+  return s==='true'||s==='1'||s==='yes';
+}
+
+function buildSignalOutcomes(signalRows, trades){
+  const horizonMs = 12 * 60 * 60 * 1000;
+  const timeline = (trades||[])
+    .map(t=>({
+      ts: parseTs(t.time ?? t.close_time ?? t.ts ?? t.close_ts ?? t.open_time),
+      side: normSide(t.side ?? t.direction),
+      pnl: +(t.pnl ?? t.profit),
+      closeType: String(t.close_type ?? t.exit_reason ?? '').toUpperCase(),
+    }))
+    .filter(t=>Number.isFinite(t.ts))
+    .sort((a,b)=>a.ts-b.ts);
+
+  return (signalRows||[]).map(sg=>{
+    const attempted = isTrue(sg.should_trade);
+    const sigTs = parseTs(sg.time ?? sg.ts ?? sg.bar_time);
+    const sigSide = normSide(sg.direction ?? sg.signal ?? sg.side);
+    if(!attempted) return {label:'N/A', cls:'dim', pnl:null};
+    if(!Number.isFinite(sigTs) || !sigSide) return {label:'OPEN', cls:'dim', pnl:null};
+    let match=null;
+    for(const tr of timeline){
+      if(tr.ts < sigTs) continue;
+      if(tr.ts - sigTs > horizonMs) break;
+      if(tr.side && tr.side!==sigSide) continue;
+      match=tr;
+      break;
+    }
+    if(!match) return {label:'OPEN', cls:'dim', pnl:null};
+    const isWin = Number.isFinite(match.pnl) ? match.pnl>0 : match.closeType==='TP';
+    return {
+      label: isWin ? 'WIN' : 'LOSS',
+      cls: isWin ? 'win' : 'loss',
+      pnl: Number.isFinite(match.pnl) ? match.pnl : null,
+    };
+  });
+}
+
+function inferTradePlan(trade, signals){
+  const tradeTs = parseTs(trade.time ?? trade.close_time ?? trade.ts ?? trade.open_time);
+  const tradeSide = normSide(trade.side ?? trade.direction);
+  if(!Number.isFinite(tradeTs) || !tradeSide) return null;
+  const maxLagMs = 24 * 60 * 60 * 1000;
+  let best=null;
+  let bestDelta=Number.POSITIVE_INFINITY;
+  for(const sg of (signals||[])){
+    if(!isTrue(sg.should_trade)) continue;
+    if(normSide(sg.direction ?? sg.signal ?? sg.side)!==tradeSide) continue;
+    const sigTs = parseTs(sg.time ?? sg.ts ?? sg.bar_time);
+    if(!Number.isFinite(sigTs) || sigTs>tradeTs) continue;
+    const delta = tradeTs - sigTs;
+    if(delta>maxLagMs) continue;
+    const hasPlan = sg.entry_price!=null || sg.stop_loss!=null || sg.take_profit!=null || sg.sl!=null || sg.tp!=null;
+    if(!hasPlan) continue;
+    if(delta<bestDelta){
+      best=sg;
+      bestDelta=delta;
+    }
+  }
+  return best;
+}
 
 function badge(side){
   if(!side) return '<span class="bdg bdg-n">&#8212;</span>';
@@ -1045,7 +1155,7 @@ function renderSunnyDeck(){
   el('assistant-summary').textContent = note.summary;
   el('assistant-detail').textContent = note.detail;
   el('sunny-live-status').textContent = live ? 'WebSocket uplink hot' : 'HTTP fallback';
-  el('sunny-live-updated').textContent = data?.ts ? `Synced ${String(data.ts).replace('T',' ').slice(0,16)} UTC` : 'Realtime ops console';
+  el('sunny-live-updated').textContent = data?.ts ? `Synced ${String(data.ts).replace('T',' ').slice(5,16)} UTC` : 'Realtime ops console';
   const dot=el('sunny-live-dot');
   if(dot) dot.classList.toggle('live',live);
   const assistantCard=el('assistant-card');
@@ -1128,7 +1238,7 @@ function renderOverview(acct,d){
   const miniRows=trades.slice(-5).reverse().map(t=>{
     const pnl=t.pnl??t.profit??null;
     return `<tr>
-      <td class="dim">${String(t.time||t.ts||'').replace('T',' ').slice(0,16)}</td>
+      <td class="dim">${pickTimeText(t.time, t.close_time, t.ts, t.open_time).slice(5,16)}</td>
       <td>${badge(t.side||t.direction||'')}</td>
       <td class="${clr(pnl)}">${dol(pnl)}</td>
       <td class="dim" style="font-size:.67rem">${q(t.close_type||t.reason||'')}</td>
@@ -1190,13 +1300,13 @@ function renderOverview(acct,d){
           </div>
           <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:6px">
             <span class="${shouldTrade?'bdg bdg-ok':'bdg bdg-warn'}">${shouldTrade?'&#10003; TRADING':'&#10007; BLOCKED'}</span>
-            <span class="dim" style="font-size:.67rem">${s.bar_time?String(s.bar_time).slice(0,16):''}</span>
+            <span class="dim" style="font-size:.67rem">${pickTimeText(s.bar_time, s.time, s.ts)}</span>
           </div>
           <div style="font-size:.7rem;color:var(--text2);line-height:1.5;background:var(--card2);border-radius:var(--rs);padding:5px 8px">${q(s.reason||'&#8212;')}</div>
         </div>
       </div>
       <div style="border-top:1px solid var(--bdr);margin-top:9px;padding-top:7px;font-size:.69rem;color:var(--text3);display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-        <span>Latest signal: ${String(sig.time||sig.ts||'').slice(0,16)}</span>
+        <span>Latest signal: ${pickTimeText(sig.time, sig.ts, sig.bar_time)}</span>
         ${badge(sigSide)}
         <span>conf <b style="color:${sigConf&&thr&&sigConf>=thr?'var(--green)':'var(--text2)'};font-family:var(--m)">${fmt(sigConf,3)}</b></span>
         <span class="dim">score&nbsp;<b>${fmt(parseFloat(sig.strategy_score||0),2)}</b></span>
@@ -1257,6 +1367,8 @@ function renderOverview(acct,d){
 function renderTrading(acct,d){
   const s=d.status||{};const mod=d.model||{};const day=d.daily||{};
   const trades=d.recent_trades||[];const signals=d.recent_signals||[];
+  const signalRows=signals.slice(-State.signalLimit).reverse();
+  const signalOutcomes=buildSignalOutcomes(signalRows, trades);
   const lastSig=signals.slice(-1)[0]||{};
   const thr=parseFloat(mod.threshold||0)||null;
   const conf=s.confidence!=null?+s.confidence:null;
@@ -1277,6 +1389,13 @@ function renderTrading(acct,d){
   const newsHrsAhead=parseFloat(lastSig.news_hours_ahead)||null;
   const newsOk=!newsBlackout&&(newsHrsAhead==null||newsHrsAhead>1);
   const timeFilterPass=(sessClass!=='sess-off')&&newsOk;
+  const timeFilterReason=timeFilterPass
+    ? 'Allowed by session + news filters'
+    : (sessClass==='sess-off'
+      ? 'Blocked: outside allowed trading sessions'
+      : (newsBlackout
+        ? 'Blocked: active news blackout'
+        : (newsHrsAhead!=null ? `Blocked: news in ${newsHrsAhead.toFixed(1)}h` : 'Blocked by time filter')));
   const vr=s.volatility_regime!=null?+s.volatility_regime:-1;
   const vrNames=['Low','Normal','High','Extreme'];
   const vrOk=vr>=0&&vr<=2;
@@ -1301,7 +1420,7 @@ function renderTrading(acct,d){
   function stepArr(pass){return `<div class="step-arr ${pass===true?'pass':pass===false?'fail':''}">&#10132;</div>`;}
 
   const steps=[
-    [timeFilterPass, stepCard('&#9200;','Time Filter',`<span class="${sessClass}">${sessName}</span>`,timeFilterPass,newsBlackout?'News blackout':newsHrsAhead!=null?`News in ${newsHrsAhead.toFixed(1)}h`:'')],
+    [timeFilterPass, stepCard('&#9200;','Time Filter',`<span class="${sessClass}">${sessName}</span>`,timeFilterPass,timeFilterReason)],
     [vrOk,           stepCard('&#127754;','Volatility',`<span class="vol-${Math.min(Math.max(vr,0),3)}">${vr>=0?vrNames[vr]:'-'}</span>`,vrOk,vr===0?'Low — caution':vr===2?'High ATR':vr===3?'Extreme':'')],
     [stratOk,        stepCard('&#128202;','Strategy',stratScore!=null?`<span class="${stratScore>0?'win':stratScore<0?'loss':'dim'}">${stratScore.toFixed(2)}</span>`:'&#8212;',stratOk,stratScore!=null?(stratScore>0.3?'Strong':stratScore>0?'Weak':'Bearish'):'No data')],
     [confPass,       stepCard('&#129302;','ML Model',`${fmt(conf,4)}<br><span style="font-size:.6rem;color:var(--text3)">/ ${fmt(thr,4)}</span>`,confPass,confPass?'Above threshold':'Below threshold')],
@@ -1313,26 +1432,34 @@ function renderTrading(acct,d){
 
   const trRows=trades.slice(-State.signalLimit).reverse().map(t=>{
     const pnl=t.pnl??t.profit??null;
+    const tTime=pickTimeText(t.time, t.close_time, t.ts, t.open_time);
+    const plan=inferTradePlan(t, signals);
     return `<tr>
-      <td class="dim">${String(t.time||t.close_time||t.ts||'').slice(0,16)}</td>
+      <td class="dim">${tTime}</td>
       <td>${badge(t.side||t.direction||'')}</td>
-      <td class="dim">${q(t.open_price||t.entry_price||'')}</td>
-      <td class="dim">${q(t.close_price||t.exit_price||'')}</td>
+      <td class="dim">${px(t.entry_price??t.open_price??plan?.entry_price)}</td>
+      <td class="dim">${px(t.stop_loss??t.sl??plan?.stop_loss??plan?.sl)}</td>
+      <td class="dim">${px(t.take_profit??t.tp??plan?.take_profit??plan?.tp)}</td>
+      <td class="dim">${px(t.close_price||t.exit_price)}</td>
       <td class="${clr(pnl)}">${dol(pnl)}</td>
       <td class="dim">${q(t.close_type||t.exit_reason||'')}</td>
     </tr>`;
   }).join('');
 
-  const sgRows=signals.slice(-State.signalLimit).reverse().map(sg=>{
+  const sgRows=signalRows.map((sg, idx)=>{
     const c=sg.confidence??sg.conf??null;
     const over=c!=null&&thr!=null?+c>=+thr:null;
-    const vrSig=sg.volatility_regime!=null?+sg.volatility_regime:-1;
+    const outcome=signalOutcomes[idx]||{label:'N/A',cls:'dim',pnl:null};
+    const timeTxt=pickTimeText(sg.time, sg.ts, sg.bar_time);
     return `<tr>
-      <td class="dim">${String(sg.time||sg.ts||'').slice(0,16)}</td>
+      <td class="dim">${timeTxt}</td>
       <td>${badge(sg.direction||sg.signal||sg.side||'')}</td>
       <td class="${over===true?'win':over===false?'loss':''}">${fmt(c,3)}</td>
-      <td><span class="vol-${Math.min(Math.max(vrSig,0),3)}">${vrSig>=0?vrNames[vrSig]:'-'}</span></td>
       <td class="${parseFloat(sg.strategy_score||0)>0?'win':parseFloat(sg.strategy_score||0)<0?'loss':'dim'}">${fmt(parseFloat(sg.strategy_score||0),2)}</td>
+      <td class="dim">${px(sg.entry_price)}</td>
+      <td class="dim">${px(sg.stop_loss||sg.sl)}</td>
+      <td class="dim">${px(sg.take_profit||sg.tp)}</td>
+      <td class="${outcome.cls}">${outcome.label}${outcome.pnl!=null?` (${dol(outcome.pnl)})`:''}</td>
       <td class="dim" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${q((sg.reason||'').slice(0,65))}</td>
     </tr>`;
   }).join('');
@@ -1341,7 +1468,7 @@ function renderTrading(acct,d){
   <div class="live-bar ${s.should_trade?'glow-green':'glow-red'}" style="margin-bottom:12px">
     <div class="lb-item">
       <div class="lb-lbl">Bar Time</div>
-      <div class="lb-val">${String(s.bar_time||'&#8212;').slice(0,16)}</div>
+      <div class="lb-val">${pickTimeText(s.bar_time, s.time, s.ts)}</div>
     </div>
     <div class="lb-sep"></div>
     <div class="lb-item">
@@ -1396,12 +1523,14 @@ function renderTrading(acct,d){
       <div class="strat-pt">&#9200; Time Filter</div>
       <div style="text-align:center;margin:7px 0">
         <span class="${sessClass}" style="font-size:.8rem;padding:4px 13px">${sessName}</span>
-        <div style="font-size:.66rem;color:var(--text3);margin-top:4px">UTC ${String(barTs).slice(11,16)||'&#8212;'}</div>
+        <div style="font-size:.66rem;color:var(--text3);margin-top:4px">UTC ${pickTimeText(barTs).slice(11,16)||'&#8212;'}</div>
       </div>
+      <div class="strat-r"><span class="strat-k">Permission</span><span class="${timeFilterPass?'news-ok':'news-block'}">${timeFilterPass?'&#10003; Allowed':'&#10007; Blocked'}</span></div>
       <div class="strat-r"><span class="strat-k">London</span><span class="strat-v ${inLondon?'win':'dim'}">${inLondon?'&#10003; Open':'Closed'}</span></div>
       <div class="strat-r"><span class="strat-k">NY</span><span class="strat-v ${inNY?'win':'dim'}">${inNY?'&#10003; Open':'Closed'}</span></div>
       <div class="strat-r"><span class="strat-k">Kill Zone</span><span class="strat-v ${inLondonKZ||inNYKZ?'win':'dim'}">${inLondonKZ?'London KZ':inNYKZ?'NY KZ':'Inactive'}</span></div>
       <div class="strat-r"><span class="strat-k">News</span><span class="${newsBlackout?'news-block':newsHrsAhead!=null&&newsHrsAhead<1?'news-warn':'news-ok'}">${newsBlackout?'&#128683; Blackout':newsHrsAhead!=null&&newsHrsAhead<1?`&#9888; ${newsHrsAhead.toFixed(1)}h`:'&#10003; Clear'}</span></div>
+      <div class="strat-r"><span class="strat-k">Reason</span><span class="strat-v dim">${timeFilterReason}</span></div>
     </div>
 
     <div class="strat-p">
@@ -1413,7 +1542,7 @@ function renderTrading(acct,d){
       <div class="strat-r"><span class="strat-k">Direction</span><span class="strat-v">${badge(lastSig.direction||lastSig.side||s.side||'')}</span></div>
       <div class="strat-r"><span class="strat-k">Multi-TF</span><span class="strat-v ${parseFloat(lastSig.multi_tf_consensus||0)>0?'win':'dim'}">${fmt(parseFloat(lastSig.multi_tf_consensus||0),2)}</span></div>
       <div class="strat-r"><span class="strat-k">Trend Align</span><span class="strat-v">${fmt(parseFloat(lastSig.trend_alignment||0),2)}</span></div>
-      <div class="strat-r"><span class="strat-k">Last Signal</span><span class="strat-v dim">${String(lastSig.time||lastSig.ts||'&#8212;').replace('T',' ').slice(0,16)}</span></div>
+      <div class="strat-r"><span class="strat-k">Last Signal</span><span class="strat-v dim">${pickTimeText(lastSig.time, lastSig.ts, lastSig.bar_time).slice(5,16)}</span></div>
     </div>
   </div>
 
@@ -1421,15 +1550,15 @@ function renderTrading(acct,d){
     <div class="card">
       <div class="card-ttl">&#128267; Recent Signals (${Math.min(signals.length,State.signalLimit)} shown / ${signals.length})</div>
       <div class="scroll-y"><table class="tbl">
-        <thead><tr><th>Time</th><th>Side</th><th>Conf</th><th>Vol</th><th>Score</th><th>Reason</th></tr></thead>
-        <tbody>${sgRows||'<tr><td colspan="6" class="dim" style="text-align:center;padding:16px">No signals</td></tr>'}</tbody>
+        <thead><tr><th>Time</th><th>Side</th><th>Conf</th><th>Score</th><th>Entry</th><th>SL</th><th>TP</th><th>Outcome</th><th>Reason</th></tr></thead>
+        <tbody>${sgRows||'<tr><td colspan="9" class="dim" style="text-align:center;padding:16px">No signals</td></tr>'}</tbody>
       </table></div>
     </div>
     <div class="card">
       <div class="card-ttl">&#128200; Live Trades (${Math.min(trades.length,State.signalLimit)} shown / ${trades.length})</div>
       <div class="scroll-y"><table class="tbl">
-        <thead><tr><th>Time</th><th>Side</th><th>Entry</th><th>Exit</th><th>PnL</th><th>Type</th></tr></thead>
-        <tbody>${trRows||'<tr><td colspan="6" class="dim" style="text-align:center;padding:16px">No trades</td></tr>'}</tbody>
+        <thead><tr><th>Time</th><th>Side</th><th>Entry</th><th>SL</th><th>TP</th><th>Exit</th><th>PnL</th><th>Type</th></tr></thead>
+        <tbody>${trRows||'<tr><td colspan="8" class="dim" style="text-align:center;padding:16px">No trades</td></tr>'}</tbody>
       </table></div>
     </div>
   </div>`;
@@ -1448,7 +1577,7 @@ function renderPnl(acct,d){
   const trRows=trades.slice().reverse().map((t,i)=>{
     const pnl=t.pnl??t.profit??null;
     const cum=series.values[series.values.length-1-i];
-    return `<tr><td class="dim">${String(t.time||t.close_time||'').slice(0,16)}</td>
+    return `<tr><td class="dim">${pickTimeText(t.time, t.close_time, t.ts, t.open_time)}</td>
       <td>${badge(t.side||t.direction||'')}</td>
       <td class="${clr(pnl)}">${dol(pnl)}</td>
       <td class="${(cum??0)>=0?'win':'loss'}">${dol(cum)}</td>

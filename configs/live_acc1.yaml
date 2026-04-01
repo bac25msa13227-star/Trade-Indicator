@@ -1,8 +1,7 @@
 # ─────────────────────────────────────────────────────────────────
-# LIVE TRADING CONFIG — Account 1 (ACC1 freeze profile)
-# Model:  outputs/acc1_live_model.pkl  (frozen snapshot from acc2 live-freeze)
-# Symbol: XAUUSDm  |  Threshold: 0.70  |  Risk: 5% dynamic  |  Login: 270832477 / Exness-MT5Trial17
-# Target: frozen paper/deploy profile with stricter gate than the previous 0.50 setup
+# LIVE TRADING CONFIG — Account 1 (ACC1 max-net profile)
+# Model:  outputs/acc1_live_model.pkl
+# Symbol: XAUUSD   |  Threshold: 0.74  |  Profile: max-net (higher DD)
 # ─────────────────────────────────────────────────────────────────
 app:
   poll_seconds: 60
@@ -37,6 +36,7 @@ market:
     D1: 100
     H1: 500
     H4: 200
+    M30: 300
     M15: 300
     M5: 500
     M1: 200
@@ -50,7 +50,7 @@ strategy:
   liquidity_lookback: 15
   swing_lookback: 20
   volatility_window: 20
-  signal_threshold: 0.70             # Freeze threshold requested for acc1
+  signal_threshold: 0.74             # Max-net candidate (WF peak net ~$31k, DD~37.7%)
   sideways_volatility_threshold: 0.003
   strong_volatility_threshold: 0.016
   news_block_minutes: 0              # Tắt blackout ML feature (dùng news override thay thế)
@@ -59,18 +59,15 @@ strategy:
   ict_weight: 0.40
   wyckoff_weight: 0.35
   momentum_weight: 0.25
-  min_strategy_score: 0.10
+  min_strategy_score: 0.40
   sideway_min_strategy_score: 0.15
-  strong_volatility_min_strategy_score: 0.12
+  strong_volatility_min_strategy_score: 0.20
   require_trend_alignment: true
   force_trade: false
-  blocked_hours_utc: [15, 17, 18, 19, 20, 21, 22, 23]    # Block rollover + bad-loss clusters
+  blocked_hours_utc: [15, 22, 23]
   blocked_weekdays_utc: []
   blocked_weekday_hours_utc:
-    Monday: [2, 3, 4, 5, 6, 7]
-    Tuesday: [2, 3, 4, 5, 6, 7]
-    Wednesday: [2, 3, 4, 5, 6, 7]
-    Thursday: [2, 3, 4, 5, 6, 7, 13]
+    Monday: [2, 3, 4, 5, 6, 7, 17, 18, 19, 20, 21]
   regime_shutdown_rules:
     - name: monday_early_sell_flow_conflict
       weekdays_utc: [Monday]
@@ -100,33 +97,43 @@ strategy:
   adx_gate_enabled: true
   adx_min_trend: 17.0
   # Regime-specific confidence thresholds — all lower than acc2
-  sideway_min_confidence: 0.70       # Freeze acc1 at a single 0.70 gate across regimes
-  volatile_min_confidence: 0.70
+  sideway_min_confidence: 0.70
+  volatile_min_confidence: 0.64
+  # ICT/SMC FVG hierarchy entry filter
+  fvg_entry_filter_enabled: true
+  fvg_filter_mode: soft
+  fvg_max_refinement_rank: 3
+  fvg_min_confluence_score: 1.8
+  fvg_min_priority_weight: 0.25
+  fvg_require_htf_alignment: true
+  fvg_soft_confidence_scale: 0.08
+  fvg_soft_pivot_quality: 0.60
+  fvg_soft_block_side_mismatch: true
 
 risk:
   mode: fixed_fractional
-  risk_per_trade: 0.025             # reduced to prevent rapid account drawdown
-  risk_tier_floor: 0.01             # 1% floor in deep drawdown
-  max_open_positions: 2
+  risk_per_trade: 0.034
+  risk_tier_floor: 0.022
+  max_open_positions: 3
   stop_loss_atr_multiple: 1.5
   take_profit_rr: 3.5
   volatile_take_profit_rr: 5.0     # ACC2 logic: Volatile regime RR 1:5
   sideway_take_profit_rr: 2.5      # Sideways regime RR 1:2.5
-  min_confidence: 0.70             # Freeze threshold requested for acc1
+  min_confidence: 0.62
   fixed_lot: 0.01
-  max_risk_fraction: 0.035
-  sideway_risk_multiplier: 0.4      # ACC2 logic: giảm risk trong sideway
+  max_risk_fraction: 0.062
+  sideway_risk_multiplier: 0.35
   normal_risk_multiplier: 1.0
-  strong_volatility_risk_multiplier: 0.55
+  strong_volatility_risk_multiplier: 0.65
   # Circuit breaker — ENABLED for capital preservation
   kill_switch_enabled: true
-  daily_loss_limit_pct: 0.04
+  daily_loss_limit_pct: 0.0
   max_drawdown_kill_pct: 0.12
-  consecutive_loss_pause_count: 2
-  consecutive_loss_cooldown_bars: 16
-  anti_martingale_factor: 0.6        # ACC2 logic: Risk × 0.6 per consecutive loss
+  consecutive_loss_pause_count: 3
+  consecutive_loss_cooldown_bars: 0
+  anti_martingale_factor: 0.8
   anti_martingale_max_reductions: 3
-  max_total_exposure_pct: 0.06
+  max_total_exposure_pct: 0.10
   reentry_guard_enabled: true
   reentry_cooldown_bars_after_sl: 3
   reentry_min_distance_atr: 0.35

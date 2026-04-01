@@ -1,7 +1,7 @@
 # ─────────────────────────────────────────────────────────────────
 # LIVE TRADING CONFIG — Account 2 (433326057 / Exness-MT5Trial7)
 # Model:  outputs/acc2_live_model.pkl  (frozen production snapshot)
-# Symbol: XAUUSDm  |  Threshold: 0.78 model / 0.55 trade gate  |  Risk: 3-5% dynamic
+# Symbol: XAUUSDm  |  Stable profile: net ~$6,910 / DD~19.71%
 # ─────────────────────────────────────────────────────────────────
 app:
   poll_seconds: 60
@@ -38,6 +38,7 @@ market:
     D1: 100
     H1: 500
     H4: 200
+    M30: 300
     M15: 300
     M5: 500
     M1: 200
@@ -51,7 +52,7 @@ strategy:
   liquidity_lookback: 15
   swing_lookback: 20
   volatility_window: 20
-  signal_threshold: 0.78             # Frozen artifact threshold from codex live-freeze snapshot
+  signal_threshold: 0.74
   sideways_volatility_threshold: 0.003
   strong_volatility_threshold: 0.016  # Raised: current ATR/close ~0.014 (ATR=45, price=3200)
   news_block_minutes: 0
@@ -60,17 +61,14 @@ strategy:
   ict_weight: 0.40
   wyckoff_weight: 0.35
   momentum_weight: 0.25
-  min_strategy_score: 0.10           # Tăng từ 0.05 → filter yếu hơn bị loại
-  sideway_min_strategy_score: 0.15   # Tăng từ 0.05 → chỉ trade sideway khi score rõ ràng
-  strong_volatility_min_strategy_score: 0.12  # Tăng từ 0.10
-  require_trend_alignment: true    # Bật — model confidence là cổng chính cho hướng
+  min_strategy_score: 0.45
+  sideway_min_strategy_score: 0.10
+  strong_volatility_min_strategy_score: 0.25
+  require_trend_alignment: false    # Tắt — model confidence là cổng chính cho hướng
   force_trade: false
-  blocked_hours_utc: [15, 22, 23]   # Block rollover + validated weak hour cluster
+  blocked_hours_utc: [3, 15, 17, 22, 23]   # Template: block_3_17
   blocked_weekdays_utc: []
-  blocked_weekday_hours_utc:
-    Monday: [4, 5, 16, 17, 18, 19, 20, 21]
-    Tuesday: [3, 17, 18]
-    Thursday: [5, 13]
+  blocked_weekday_hours_utc: {}
   regime_shutdown_rules:
     - name: monday_early_sell_flow_conflict
       weekdays_utc: [Monday]
@@ -137,32 +135,42 @@ strategy:
   adx_gate_enabled: true
   adx_min_trend: 18.0               # Chỉ trade khi có xu hướng đủ rõ
   # Regime-specific confidence
-  sideway_min_confidence: 0.60       # Lowered from 0.65 to allow more trades
-  volatile_min_confidence: 0.55      # Lowered from 0.60 — high ATR regime
+  sideway_min_confidence: 0.66
+  volatile_min_confidence: 0.64
+  # ICT/SMC FVG hierarchy entry filter
+  fvg_entry_filter_enabled: true
+  fvg_filter_mode: soft
+  fvg_max_refinement_rank: 3
+  fvg_min_confluence_score: 1.8
+  fvg_min_priority_weight: 0.25
+  fvg_require_htf_alignment: true
+  fvg_soft_confidence_scale: 0.08
+  fvg_soft_pivot_quality: 0.60
+  fvg_soft_block_side_mismatch: true
 
 risk:
   mode: fixed_fractional
-  risk_per_trade: 0.03              # 3% base — safer than 5%, still aggressive
-  risk_tier_floor: 0.015            # 1.5% floor khi drawdown >= 10%
-  max_open_positions: 3             # giới hạn concurrent
+  risk_per_trade: 0.032
+  risk_tier_floor: 0.014
+  max_open_positions: 3
   stop_loss_atr_multiple: 1.5
   take_profit_rr: 3.5              # ACC2 Model2: RR 1:3.5
   volatile_take_profit_rr: 5.0     # Volatile regime RR 1:5
   sideway_take_profit_rr: 2.5      # Sideways regime RR 1:2.5
-  min_confidence: 0.55
+  min_confidence: 0.62
   fixed_lot: 0.01
-  max_risk_fraction: 0.05           # 5% cap tổng risk per trade (was 8%)
-  sideway_risk_multiplier: 0.4      # Giảm risk trong sideway
+  max_risk_fraction: 0.058
+  sideway_risk_multiplier: 0.35
   normal_risk_multiplier: 1.0
-  strong_volatility_risk_multiplier: 0.65
+  strong_volatility_risk_multiplier: 0.55
   # Circuit breaker & Capital Preservation
-  daily_loss_limit_pct: 0.0         # 0 = tắt daily loss limit (vẫn vào lệnh dù lỗ)
+  daily_loss_limit_pct: 0.03
   max_drawdown_kill_pct: 0.15       # 15% drawdown → full stop (manual restart)
-  consecutive_loss_pause_count: 0  # Disabled    # After 3 consecutive losses...
-  consecutive_loss_cooldown_bars: 8  # ...wait 8 bars (2h M15) before resuming
-  anti_martingale_factor: 0.6        # Risk × 0.6 per consecutive loss
+  consecutive_loss_pause_count: 4
+  consecutive_loss_cooldown_bars: 8
+  anti_martingale_factor: 0.5
   anti_martingale_max_reductions: 3  # Max 3 reductions (down to ~21% of base risk)
-  max_total_exposure_pct: 0.09       # 9% max total risk across all open positions
+  max_total_exposure_pct: 0.10
   reentry_guard_enabled: true
   reentry_cooldown_bars_after_sl: 1
   reentry_min_distance_atr: 0.35
@@ -305,7 +313,7 @@ training:
   min_self_learning_roc_auc: 0.53
   save_dataset: true
   dataset_path: outputs/training_dataset_acc2.csv
-  optimize_threshold: false          # Giữ trade gate 0.78 ổn định trong live
+  optimize_threshold: false          # Giữ trade gate 0.74 ổn định trong live
   validation_split: 0.15
   threshold_min: 0.40                # Hạ xuống 0.40 — tăng recall signal
   threshold_max: 0.78

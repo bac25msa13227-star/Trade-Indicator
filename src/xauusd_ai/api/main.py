@@ -208,6 +208,10 @@ _NEWS_GOLD_DIR: dict[str, int] = {
 }
 
 
+def _is_news_alert_impact(impact: str) -> bool:
+    return str(impact or "").strip().capitalize() in {"High", "Medium"}
+
+
 def _news_base_dir(title: str) -> int:
     t = title.lower()
     for kw, d in _NEWS_GOLD_DIR.items():
@@ -848,7 +852,7 @@ async def _news_alert_loop() -> None:
             loop = asyncio.get_running_loop()
             payload = await loop.run_in_executor(None, _build_news_payload)
             for ev in payload.get("week", []):
-                if ev["impact"] not in ("High",):
+                if not _is_news_alert_impact(str(ev.get("impact", ""))):
                     continue
                 eid   = ev["id"]
                 mins  = ev["minutes_until"]

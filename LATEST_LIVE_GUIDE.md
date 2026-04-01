@@ -1,98 +1,122 @@
 # Latest Live Guide
 
-Last updated: `2026-03-28`
+Last updated: `2026-04-01`
 
-## Keep these files
+## 1) File config nào dùng để chạy thật
 
-Canonical live configs:
+Live configs (chuẩn production):
 
-- `configs/live_acc2.yaml`
 - `configs/live_acc1.yaml`
-- `configs/train_acc1.yaml`
-- `configs/train_ict_wyckoff_2022_2026.yaml`
+- `configs/live_acc2.yaml`
 
-Canonical live artifacts:
+Model/scaler live tương ứng:
 
-- `outputs/acc2_live_model.pkl`
-- `outputs/acc2_live_model.cal.pkl`
-- `outputs/acc2_live_scaler.pkl`
-- `outputs/acc2_live_model_meta.json`
-- `outputs/acc1_live_model.pkl`
-- `outputs/acc1_live_model.cal.pkl`
-- `outputs/acc1_live_scaler.pkl`
-- `outputs/acc1_live_model_meta.json`
+- ACC1:
+  - `outputs/acc1_live_model.pkl`
+  - `outputs/acc1_live_scaler.pkl`
+  - `outputs/acc1_live_model_meta.json`
+- ACC2:
+  - `outputs/acc2_live_model.pkl`
+  - `outputs/acc2_live_scaler.pkl`
+  - `outputs/acc2_live_model_meta.json`
 
-Dashboard/API reports still used at runtime:
+Lưu ý:
 
-- `outputs/backtest_report_acc1.json`
-- `outputs/backtest_report_acc2.json`
-- `outputs/walkforward_report_acc2.json`
+- `threshold` runtime đọc từ `*_model_meta.json` khi load artifact.
+- `retrain_on_startup: false` để bot vào lệnh ngay bằng model freeze.
+- Self-learning vẫn chạy nền, chỉ hot-reload khi candidate đạt điều kiện acceptance.
 
-Rollback references kept on purpose:
+## 2) News trade + realtime dashboard (đã áp dụng)
 
-- `outputs/freeze_manifest_20260327.json`
-- `outputs/archive_model2_weekly500_pre_freeze_20260327.pkl`
-- `outputs/archive_scaler2_weekly500_pre_freeze_20260327.pkl`
-- `outputs/archive_model_meta2_weekly500_pre_freeze_20260327.json`
+- Dashboard websocket:
+  - URL API trực tiếp: `/dashboard` (kèm WS `/ws/live`).
+  - Đã thêm cột `Entry/SL/TP`, `Outcome`, và chuẩn hóa cột `Time` robust hơn.
+- News trade:
+  - Alert Telegram/API hiện lọc `Medium + High` (không alert `Low`).
+  - Trong live loop, khi `news_trade_override=true` thì filter tin dùng `Medium + High`.
 
-## Thresholds in force
+## 3) Cách chạy FULL stack (có MLflow/Grafana/Airflow)
 
-Runtime threshold is loaded from model meta, not just YAML.
-
-- `outputs/acc2_live_model_meta.json` -> `0.78`
-- `outputs/acc1_live_model_meta.json` -> `0.60`
-
-If YAML and model meta disagree, the meta JSON wins during artifact loading.
-
-## Retrain rule
-
-No retrain is required before live startup.
-
-Current policy:
-
-- `retrain_on_startup: false`
-- the bot starts from the frozen validated artifacts immediately
-- self-learning stays enabled in the background
-- only accepted candidates replace the live model
-- threshold auto-optimization is disabled in live configs
-
-So self-learning can improve weights, but it should not silently change the validated live thresholds.
-
-## Telegram behavior
-
-Telegram is enabled for both live accounts.
-
-Self-learning notifications include:
-
-- scheduled or loss-driven retrain reason
-- accepted / rejected verdict
-- ROC AUC delta vs current live model
-- precision / recall / F1 snapshot
-- short explanation of what improved or failed
-
-## Launch commands
-
-MT5 check:
+### 3.1 Start stack
 
 ```bash
-PYTHONPATH=src python3 src/xauusd_ai/main.py mt5-check --config configs/live_acc2.yaml
-PYTHONPATH=src python3 src/xauusd_ai/main.py mt5-check --config configs/live_acc1.yaml
+docker compose up -d \
+  postgres minio mlflow prometheus grafana \
+  airflow-init airflow-webserver airflow-scheduler \
+  api nginx healthwatch live live-acc1
 ```
 
-Paper:
+Tuỳ chọn frontend Streamlit:
 
 ```bash
-PYTHONPATH=src python3 src/xauusd_ai/main.py paper --config configs/live_acc2.yaml
-PYTHONPATH=src python3 src/xauusd_ai/main.py paper --config configs/live_acc1.yaml
+docker compose up -d frontend
 ```
 
-Live:
+### 3.2 URL kiểm tra
+
+- API docs: `http://localhost:8000/docs`
+- Realtime dashboard (WS): `http://localhost/dashboard`
+- MLflow: `http://localhost:5000`
+- Grafana: `http://localhost:3000`
+- Airflow: `http://localhost:8080`
+
+## 4) Cách chạy LITE (không MLflow/Grafana/Airflow)
+
+Mục tiêu: chỉ cần bot chạy + Telegram chạy + dashboard realtime chạy.
+
+### 4.1 Docker lite
 
 ```bash
-PYTHONPATH=src python3 scripts/live_runner.py live --config configs/live_acc2.yaml
+docker compose up -d postgres api nginx healthwatch live live-acc1
+```
+
+Trong mode này:
+
+- Không cần bật `mlflow`, `grafana`, `prometheus`, `airflow-*`.
+- Dashboard realtime vẫn chạy qua API + websocket.
+- Telegram vẫn chạy theo config/env.
+
+### 4.2 Chạy local không docker (tuỳ chọn)
+
+```bash
 PYTHONPATH=src python3 scripts/live_runner.py live --config configs/live_acc1.yaml
+PYTHONPATH=src python3 scripts/live_runner.py live --config configs/live_acc2.yaml
+PYTHONPATH=src python3 -m uvicorn xauusd_ai.api.main:app --host 0.0.0.0 --port 8000
 ```
 
-## One-line answer for future sessions
+Mở dashboard:
 
-Use `configs/live_acc2.yaml` with `outputs/acc2_live_model.*` for ACC2, use `configs/live_acc1.yaml` with `outputs/acc1_live_model.*` for ACC1, do not retrain on startup, and let self-learning hot-reload only accepted candidates.
+- `http://localhost:8000/dashboard`
+
+## 5) Checklist trước khi bật live
+
+1. MT5 bridge đúng cổng account:
+   - ACC1: `MT5_BRIDGE_URL=http://host.docker.internal:5600`
+   - ACC2: `MT5_BRIDGE_URL=http://host.docker.internal:5601`
+2. Telegram env đã set đúng token/chat_id theo account.
+3. `configs/live_acc1.yaml` và `configs/live_acc2.yaml` đúng risk/threshold mong muốn.
+4. Kiểm tra health:
+   - `outputs/live_status_acc1.json`
+   - `outputs/live_status_acc2.json`
+5. Kiểm tra test:
+   - `PYTHONPATH=src pytest -q tests`
+
+## 6) Unit test status (hiện tại)
+
+Đã pass:
+
+- `PYTHONPATH=src pytest -q tests`
+- `56 passed`
+
+Ghi chú:
+
+- `scripts/test_mlflow_integration.py` là integration test, cần dịch vụ MLflow thật để chạy.
+
+## 7) Chính sách dữ liệu Dukascopy CSV
+
+Các file `.csv` lấy từ Dukascopy chỉ giữ local để train/backtest, không đưa lên Git remote.
+
+- Local machine: giữ nguyên file dữ liệu để chạy.
+- Git remote: không commit/push các CSV dữ liệu này.
+
+Khi đồng bộ máy khác, dùng script fetch dữ liệu để kéo lại local data rồi train/run.

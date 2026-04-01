@@ -1624,7 +1624,7 @@ def run_live_loop(settings: Settings) -> None:
                         minutes_before=news_cfg.minutes_before,
                         minutes_after=news_cfg.minutes_after,
                         currencies=news_cfg.currencies,
-                        high_impact_only=news_cfg.high_impact_only,
+                        high_impact_only=(news_cfg.high_impact_only and not getattr(news_cfg, "news_trade_override", False)),
                     )
                     if is_near:
                         block = (is_before and not news_cfg.trade_before_news) or \
@@ -1660,7 +1660,7 @@ def run_live_loop(settings: Settings) -> None:
                         now=_novr_now,
                         window_minutes=_novr_window,
                         currencies=_novr_cfg.currencies,
-                        high_impact_only=_novr_cfg.high_impact_only,
+                        high_impact_only=(_novr_cfg.high_impact_only and not getattr(_novr_cfg, "news_trade_override", False)),
                     )
                     if _novr_dir != 0:
                         _novr_side = "buy" if _novr_dir > 0 else "sell"
