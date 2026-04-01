@@ -1,13 +1,13 @@
 # ─────────────────────────────────────────────────────────────────
 # LIVE TRADING CONFIG — Account 1 (ACC1 max-net profile)
-# Model:  outputs/acc1_live_model.pkl
+# Model:  outputs/exp_acc1_2003_model.pkl
 # Symbol: XAUUSD   |  Threshold: 0.74  |  Profile: max-net (higher DD)
 # ─────────────────────────────────────────────────────────────────
 app:
   poll_seconds: 60
-  model_path:          outputs/acc1_live_model.pkl
-  scaler_path:         outputs/acc1_live_scaler.pkl
-  model_meta_path:     outputs/acc1_live_model_meta.json
+  model_path:          outputs/exp_acc1_2003_model.pkl
+  scaler_path:         outputs/exp_acc1_2003_scaler.pkl
+  model_meta_path:     outputs/exp_acc1_2003_model_meta.json
   training_report_path: outputs/training_report_acc1.json
   training_plot_path:  outputs/training_metrics_acc1.png
   backtest_report_path: outputs/backtest_report_acc1.json
