@@ -244,7 +244,7 @@ integrations:
     currencies:
       - USD
     # --- News Trade Override: ép BUY/SELL ngay khi tin vừa ra ---
-    news_trade_override: false         # false = tắt giao dịch theo tin (2026-03-30)
+    news_trade_override: true          # true = kích hoạt giao dịch theo tin
     news_trade_window_minutes: 3       # Thực hiện trong 3 phút đầu sau khi tin ra
     news_trade_atr_sl_mult: 1.5        # SL = 1.5 × ATR (đủ rộng tránh spike)
     news_trade_atr_tp_mult: 3.5        # TP = 3.5 × ATR  →  RR ≈ 1:2.3

@@ -1,21 +1,21 @@
 # ─────────────────────────────────────────────────────────────────
 # LIVE TRADING CONFIG — Account 2 (433326057 / Exness-MT5Trial7)
 # Model:  outputs/acc2_live_model.pkl  (frozen production snapshot)
-# Symbol: XAUUSDm  |  Stable profile: net ~$6,910 / DD~19.71%
+# Symbol: XAUUSDm  |  Phase-2 DD-tuned snapshot (Net>6k, DD<20%)
 # ─────────────────────────────────────────────────────────────────
 app:
   poll_seconds: 60
-  model_path:          outputs/acc2_live_model.pkl
-  scaler_path:         outputs/acc2_live_scaler.pkl
-  model_meta_path:     outputs/acc2_live_model_meta.json
-  training_report_path: outputs/training_report_acc2.json
-  training_plot_path:  outputs/training_metrics_acc2.png
-  backtest_report_path: outputs/backtest_report_acc2.json
-  backtest_trades_path: outputs/backtest_trades_acc2.csv
-  backtest_equity_plot_path: outputs/backtest_equity_acc2.png
-  backtest_trades_plot_path: outputs/backtest_trades_plot_acc2.png
-  walkforward_report_path: outputs/walkforward_report_acc2.json
-  walkforward_trades_path: outputs/walkforward_trades_acc2.csv
+  model_path:          outputs/exp_acc2_2003_model.pkl
+  scaler_path:         outputs/exp_acc2_2003_scaler.pkl
+  model_meta_path:     outputs/exp_acc2_2003_model_meta.json
+  training_report_path: outputs/exp_acc2_2003_training_report.json
+  training_plot_path:  outputs/exp_acc2_2003_training_metrics.png
+  backtest_report_path: outputs/exp_acc2_2003_backtest_report.json
+  backtest_trades_path: outputs/exp_acc2_2003_backtest_trades.csv
+  backtest_equity_plot_path: outputs/exp_acc2_2003_backtest_equity.png
+  backtest_trades_plot_path: outputs/exp_acc2_2003_backtest_trades_plot.png
+  walkforward_report_path: outputs/exp_acc2_2003_walkforward_report.json
+  walkforward_trades_path: outputs/exp_acc2_2003_walkforward_trades.csv
   paper_trade_log_path: outputs/paper_trade_signals_acc2.csv
   live_learning_log_path: outputs/live_learning_log_acc2.jsonl
   live_closed_trades_path: outputs/live_closed_trades_acc2.csv
@@ -294,11 +294,11 @@ execution:
 
 
 training:
-  # ── DATE-BASED SPLIT: train 2023-2026/03/08, test 09/03 → nay ──────────
-  train_start_date: "2023-01-01"    # 3 năm — bao gồm bull run 2025-2026
-  train_end_date:   "2026-03-08"    # Train đến ngày trước test
-  test_start_date:  "2026-03-09"    # Test: gold 3200→4375 (14 ngày)
-  test_end_date:    null            # Đến cuối data (23/03/2026)
+  # ── DATE-BASED SPLIT: long-history experiment (2003→2026) ───────────────
+  train_start_date: "2003-05-05"
+  train_end_date:   "2025-12-31"
+  test_start_date:  "2026-01-01"
+  test_end_date:    "2026-03-30"
   train_split: 0.70                  # bị bỏ qua khi dùng date split
   use_sltp_label: true
   sltp_label_max_horizon: 192        # M5: 16h = 192 bars
@@ -313,13 +313,18 @@ training:
   min_self_learning_roc_auc: 0.53
   save_dataset: true
   dataset_path: outputs/training_dataset_acc2.csv
-  optimize_threshold: false          # Giữ trade gate 0.74 ổn định trong live
+  optimize_threshold: false          # Giữ trade gate 0.72 ổn định trong live
   validation_split: 0.15
   threshold_min: 0.40                # Hạ xuống 0.40 — tăng recall signal
   threshold_max: 0.78
   threshold_step: 0.01
   min_precision_floor: 0.45          # Hạ xuống 0.45 — với RR 3.5 vẫn EV dương
   backtest_initial_balance: 200.0    # vốn khởi đầu
+  walkforward_train_size: 30000
+  walkforward_test_size: 4000
+  walkforward_step_size: 4000
+  walkforward_max_combinations: 30
+  walkforward_max_folds_per_combination: 8
 
 notifications:
   telegram_enabled: true
