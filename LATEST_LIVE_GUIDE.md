@@ -1,6 +1,6 @@
 # Latest Live Guide
 
-Last updated: `2026-04-01 (profile sync acc1/acc2)`
+Last updated: `2026-04-01 (ACC1 breakthrough max-net + ACC2 breakthrough dd<=25%)`
 
 ## 1) File config nào dùng để chạy thật
 
@@ -12,21 +12,30 @@ Live configs (chuẩn production):
 Model/scaler live tương ứng:
 
 - ACC1:
-  - Profile: `max-net` (~`$31,373`, DD ~`37.72%`)
-  - `outputs/exp_acc1_2003_model.pkl`
-  - `outputs/exp_acc1_2003_scaler.pkl`
-  - `outputs/exp_acc1_2003_model_meta.json`
+  - Profile: `breakthrough max-net` (`Net = $66,590.56`, `DD = 39.53%`, `PF = 1.4809`)
+  - Config freeze: `configs/snapshots/acc1_breakthrough_net66590_dd3953_20260401.yaml`
+  - Live config đang apply: `configs/live_acc1.yaml`
+  - `outputs/acc1_breakthrough_net66590_dd3953_model.pkl`
+  - `outputs/acc1_breakthrough_net66590_dd3953_scaler.pkl`
+  - `outputs/acc1_breakthrough_net66590_dd3953_model_meta.json`
+  - WF evidence: `outputs/wf_breakthrough_dd25_acc2_run1_20260401_222454.csv` (row top-1 `net=66590.56`, `dd=39.53`, `pf=1.4809`)
 - ACC2:
-  - Profile: `stable dd19` (~`$6,910.88`, DD ~`19.71%`)
-  - `outputs/exp_acc2_2003_model.pkl`
-  - `outputs/exp_acc2_2003_scaler.pkl`
-  - `outputs/exp_acc2_2003_model_meta.json`
+  - Profile: `breakthrough dd25` (`Net = $21,057.65`, `DD = 23.33%`, `PF = 2.1906`, `569 trades`, `WR = 64.5%`)
+  - Config freeze: `configs/snapshots/acc2_breakthrough_net21k_dd2333_20260401.yaml`
+  - Live config đang apply: `configs/live_acc2.yaml`
+  - `outputs/acc2_breakthrough_net21k_dd2333_model.pkl`
+  - `outputs/acc2_breakthrough_net21k_dd2333_scaler.pkl`
+  - `outputs/acc2_breakthrough_net21k_dd2333_model_meta.json`
+  - WF evidence: `outputs/wf_breakthrough_dd25_acc2_run1_20260401_222454.json`
+  - WF full candidates: `outputs/wf_breakthrough_dd25_acc2_run1_20260401_222454.csv` (`32` candidates có `net > 21k`)
 
 Lưu ý:
 
 - `threshold` runtime đọc từ `*_model_meta.json` khi load artifact.
-- ACC1 hiện chạy artifact `exp_acc1_2003_*`.
-- ACC2 hiện chạy artifact `exp_acc2_2003_*` (không còn dùng `acc2_live_*`).
+- ACC1 hiện chạy artifact `acc1_breakthrough_net66590_dd3953_*`.
+- ACC2 hiện chạy artifact `acc2_breakthrough_net21k_dd2333_*`.
+- Với ACC1 breakthrough, `decision_threshold` trong model meta đã set `0.62` để khớp profile WF.
+- `acc2_breakthrough_net21k_dd2333_*` là alias freeze để tránh nhầm lẫn giữa các profile.
 - `retrain_on_startup: false` để bot vào lệnh ngay bằng model freeze.
 - Self-learning vẫn chạy nền, chỉ hot-reload khi candidate đạt điều kiện acceptance.
 
