@@ -1,6 +1,6 @@
 # Latest Live Guide
 
-Last updated: `2026-04-01`
+Last updated: `2026-04-01 (profile sync acc1/acc2)`
 
 ## 1) File config nào dùng để chạy thật
 
@@ -12,17 +12,20 @@ Live configs (chuẩn production):
 Model/scaler live tương ứng:
 
 - ACC1:
+  - Profile: `max-net` (~`$31,373`, DD ~`37.72%`)
   - `outputs/acc1_live_model.pkl`
   - `outputs/acc1_live_scaler.pkl`
   - `outputs/acc1_live_model_meta.json`
 - ACC2:
-  - `outputs/acc2_live_model.pkl`
-  - `outputs/acc2_live_scaler.pkl`
-  - `outputs/acc2_live_model_meta.json`
+  - Profile: `stable dd19` (~`$6,910.88`, DD ~`19.71%`)
+  - `outputs/exp_acc2_2003_model.pkl`
+  - `outputs/exp_acc2_2003_scaler.pkl`
+  - `outputs/exp_acc2_2003_model_meta.json`
 
 Lưu ý:
 
 - `threshold` runtime đọc từ `*_model_meta.json` khi load artifact.
+- ACC2 hiện chạy artifact `exp_acc2_2003_*` (không còn dùng `acc2_live_*`).
 - `retrain_on_startup: false` để bot vào lệnh ngay bằng model freeze.
 - Self-learning vẫn chạy nền, chỉ hot-reload khi candidate đạt điều kiện acceptance.
 
