@@ -623,6 +623,20 @@ def run_paper_trade_loop(settings: Settings) -> None:
             signal = trainer.score_live_row(live_frame)
             decision = strategy.build_trade_decision(frames, latest_row, signal)
             order_plan = risk_manager.build_order_plan(decision, frames[settings.market.execution_timeframe].iloc[-1])
+            volatility_regime = int(latest_row["volatility_regime"])
+            ict_score = float(latest_row.get("ict_score", 0.0))
+            wyckoff_score = float(latest_row.get("wyckoff_score", 0.0))
+            momentum_score = float(latest_row.get("momentum_score", 0.0))
+            ict_weight = float(settings.strategy.ict_weight)
+            wyckoff_weight = float(settings.strategy.wyckoff_weight)
+            momentum_weight = float(settings.strategy.momentum_weight)
+            strategy_total_weight = max(ict_weight + wyckoff_weight + momentum_weight, 1e-6)
+            strategy_raw_score = (
+                ict_score * ict_weight + wyckoff_score * wyckoff_weight + momentum_score * momentum_weight
+            ) / strategy_total_weight
+            regime_bias = 0.5 if volatility_regime == 0 else (1.2 if volatility_regime == 2 else 1.0)
+            strategy_required_min = float(strategy.required_strategy_score(volatility_regime))
+            strategy_gate_pass = int(abs(float(latest_row.get("strategy_score", 0.0))) >= strategy_required_min)
             signal_row = pd.DataFrame(
                 [
                     {
@@ -635,7 +649,18 @@ def run_paper_trade_loop(settings: Settings) -> None:
                         "stop_loss": order_plan.stop_loss,
                         "take_profit": order_plan.take_profit,
                         "strategy_score": float(latest_row["strategy_score"]),
-                        "volatility_regime": int(latest_row["volatility_regime"]),
+                        "strategy_raw_score": float(strategy_raw_score),
+                        "regime_bias": float(regime_bias),
+                        "strategy_required_min": strategy_required_min,
+                        "strategy_gate_pass": strategy_gate_pass,
+                        "ict_score": ict_score,
+                        "wyckoff_score": wyckoff_score,
+                        "momentum_score": momentum_score,
+                        "ict_weight": ict_weight,
+                        "wyckoff_weight": wyckoff_weight,
+                        "momentum_weight": momentum_weight,
+                        "strategy_total_weight": strategy_total_weight,
+                        "volatility_regime": volatility_regime,
                     }
                 ]
             )
@@ -897,12 +922,23 @@ def run_live_loop(settings: Settings) -> None:
             "rsi",
             "macd_hist",
             "strategy_score",
+            "strategy_raw_score",
+            "regime_bias",
+            "strategy_required_min",
+            "strategy_gate_pass",
             "volatility_regime",
             "trend_alignment",
             "hourly_bias",
             "daily_bias",
             "liquidity_sweep",
             "wyckoff_phase",
+            "ict_score",
+            "wyckoff_score",
+            "momentum_score",
+            "ict_weight",
+            "wyckoff_weight",
+            "momentum_weight",
+            "strategy_total_weight",
             "order_flow_proxy",
             "adx",
             "trend_strength_score",
@@ -930,7 +966,7 @@ def run_live_loop(settings: Settings) -> None:
             value = row_map.get(field)
             if value is None or pd.isna(value):
                 snapshot[field] = None
-            elif field in {"volatility_regime", "trend_alignment", "liquidity_sweep", "wyckoff_phase"}:
+            elif field in {"volatility_regime", "trend_alignment", "liquidity_sweep", "wyckoff_phase", "strategy_gate_pass"}:
                 snapshot[field] = _safe_int(value, 0)
             else:
                 snapshot[field] = _safe_float(value, 0.0)
@@ -1770,6 +1806,32 @@ def run_live_loop(settings: Settings) -> None:
                 # â”€â”€ Log tÃ­n hiá»‡u cho dashboard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 log_path = Path(settings.app.paper_trade_log_path)
                 log_path.parent.mkdir(parents=True, exist_ok=True)
+                strategy_score_val = _safe_float(latest_row.get("strategy_score", 0.0), 0.0)
+                ict_score = _safe_float(latest_row.get("ict_score", 0.0), 0.0)
+                wyckoff_score = _safe_float(latest_row.get("wyckoff_score", 0.0), 0.0)
+                momentum_score = _safe_float(latest_row.get("momentum_score", 0.0), 0.0)
+                ict_weight = float(settings.strategy.ict_weight)
+                wyckoff_weight = float(settings.strategy.wyckoff_weight)
+                momentum_weight = float(settings.strategy.momentum_weight)
+                strategy_total_weight = max(ict_weight + wyckoff_weight + momentum_weight, 1e-6)
+                strategy_raw_score = (
+                    ict_score * ict_weight + wyckoff_score * wyckoff_weight + momentum_score * momentum_weight
+                ) / strategy_total_weight
+                regime_bias = 0.5 if volatility_regime == 0 else (1.2 if volatility_regime == 2 else 1.0)
+                strategy_required_min = float(strategy.required_strategy_score(volatility_regime))
+                strategy_gate_pass = int(abs(strategy_score_val) >= strategy_required_min)
+                _latest_row_for_snapshot = latest_row.copy()
+                _latest_row_for_snapshot["strategy_raw_score"] = strategy_raw_score
+                _latest_row_for_snapshot["regime_bias"] = regime_bias
+                _latest_row_for_snapshot["strategy_required_min"] = strategy_required_min
+                _latest_row_for_snapshot["strategy_gate_pass"] = strategy_gate_pass
+                _latest_row_for_snapshot["ict_score"] = ict_score
+                _latest_row_for_snapshot["wyckoff_score"] = wyckoff_score
+                _latest_row_for_snapshot["momentum_score"] = momentum_score
+                _latest_row_for_snapshot["ict_weight"] = ict_weight
+                _latest_row_for_snapshot["wyckoff_weight"] = wyckoff_weight
+                _latest_row_for_snapshot["momentum_weight"] = momentum_weight
+                _latest_row_for_snapshot["strategy_total_weight"] = strategy_total_weight
                 signal_row = pd.DataFrame([{
                     "time": str(latest_bar_time),
                     "should_trade": decision.should_trade,
@@ -1780,7 +1842,18 @@ def run_live_loop(settings: Settings) -> None:
                     "stop_loss": order_plan.stop_loss,
                     "take_profit": order_plan.take_profit,
                     "volume": order_plan.volume,
-                    "strategy_score": float(latest_row["strategy_score"]) if "strategy_score" in latest_row.index else 0.0,
+                    "strategy_score": strategy_score_val,
+                    "strategy_raw_score": strategy_raw_score,
+                    "regime_bias": regime_bias,
+                    "strategy_required_min": strategy_required_min,
+                    "strategy_gate_pass": strategy_gate_pass,
+                    "ict_score": ict_score,
+                    "wyckoff_score": wyckoff_score,
+                    "momentum_score": momentum_score,
+                    "ict_weight": ict_weight,
+                    "wyckoff_weight": wyckoff_weight,
+                    "momentum_weight": momentum_weight,
+                    "strategy_total_weight": strategy_total_weight,
                     "volatility_regime": volatility_regime,
                     "account_balance": account_balance,
                     "open_positions": open_positions,
@@ -1824,6 +1897,17 @@ def run_live_loop(settings: Settings) -> None:
                     "should_trade": decision.should_trade,
                     "side": decision.side,
                     "reason": decision.reason,
+                    "strategy_score": strategy_score_val,
+                    "strategy_raw_score": strategy_raw_score,
+                    "strategy_required_min": strategy_required_min,
+                    "strategy_gate_pass": strategy_gate_pass,
+                    "regime_bias": regime_bias,
+                    "ict_score": ict_score,
+                    "wyckoff_score": wyckoff_score,
+                    "momentum_score": momentum_score,
+                    "ict_weight": ict_weight,
+                    "wyckoff_weight": wyckoff_weight,
+                    "momentum_weight": momentum_weight,
                     "signal_threshold": round(settings.strategy.signal_threshold, 4),
                     "model_path": str(settings.app.model_path),
                     "model_meta_path": str(settings.app.model_meta_path),
@@ -1950,7 +2034,7 @@ def run_live_loop(settings: Settings) -> None:
                                     _entry_rsi_tracker[_new_ticket] = float(latest_row.get("rsi", 50.0))
                                     _save_rsi_tracker(_entry_rsi_tracker)
                                 _entry_snapshot_tracker[_new_ticket] = _build_entry_snapshot(
-                                    latest_row,
+                                    _latest_row_for_snapshot,
                                     decision,
                                     order_plan,
                                 )

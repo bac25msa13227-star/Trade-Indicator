@@ -945,6 +945,16 @@ const dol = v => { if(v==null) return '&#8212;'; const n=+v; return (n>=0?'$':'-
 const q   = v => (v==null||v===''||v===undefined)?'&#8212;':v;
 const clr = v => v==null?'':(+v>0?'win':+v<0?'loss':'');
 const px  = (v,d=3) => (v==null||v===''||v===undefined||!Number.isFinite(+v))?'&#8212;':(+v).toFixed(d);
+const toNum = v => {
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? n : null;
+};
+const signed = (v,d=2) => {
+  const n = toNum(v);
+  if(n==null) return '&#8212;';
+  if(n===0) return (0).toFixed(d);
+  return `${n>0?'+':''}${n.toFixed(d)}`;
+};
 
 function parseTs(v){
   if(v==null||v===''||v===undefined) return NaN;
@@ -1234,6 +1244,16 @@ function renderOverview(acct,d){
   const vrBadge=vr>=0?`<span class="vol-${Math.min(vr,3)}">${vrNames[vr]??vr}</span>`:'<span class="vol-0">&#8212;</span>';
   const sigSide=sig.direction??sig.signal??sig.side??null;
   const sigConf=parseFloat(sig.confidence??sig.conf??0)||null;
+  const sigScore=toNum(sig.strategy_score);
+  const sigIct=toNum(sig.ict_score ?? s.ict_score);
+  const sigWyckoff=toNum(sig.wyckoff_score ?? s.wyckoff_score);
+  const sigMomentum=toNum(sig.momentum_score ?? s.momentum_score);
+  const sigRegimeBias=toNum(sig.regime_bias ?? s.regime_bias);
+  const sigReqMin=toNum(sig.strategy_required_min ?? s.strategy_required_min);
+  const sigGateRaw=(sig.strategy_gate_pass ?? s.strategy_gate_pass);
+  const sigGate=sigGateRaw!=null
+    ? isTrue(sigGateRaw)
+    : (sigScore!=null && sigReqMin!=null ? Math.abs(sigScore)>=sigReqMin : null);
 
   const miniRows=trades.slice(-5).reverse().map(t=>{
     const pnl=t.pnl??t.profit??null;
@@ -1309,7 +1329,10 @@ function renderOverview(acct,d){
         <span>Latest signal: ${pickTimeText(sig.time, sig.ts, sig.bar_time)}</span>
         ${badge(sigSide)}
         <span>conf <b style="color:${sigConf&&thr&&sigConf>=thr?'var(--green)':'var(--text2)'};font-family:var(--m)">${fmt(sigConf,3)}</b></span>
-        <span class="dim">score&nbsp;<b>${fmt(parseFloat(sig.strategy_score||0),2)}</b></span>
+        <span class="dim">score&nbsp;<b>${signed(sigScore,2)}</b></span>
+        <span class="dim">ICT ${signed(sigIct,0)} | WYC ${signed(sigWyckoff,0)} | MOM ${signed(sigMomentum,0)}</span>
+        <span class="dim">reg×min ${fmt(sigRegimeBias,2)} × ${fmt(sigReqMin,2)}</span>
+        <span class="${sigGate===true?'win':sigGate===false?'loss':'dim'}">${sigGate===true?'PASS':sigGate===false?'FAIL':'N/A'}</span>
       </div>
     </div>
 
@@ -1399,8 +1422,24 @@ function renderTrading(acct,d){
   const vr=s.volatility_regime!=null?+s.volatility_regime:-1;
   const vrNames=['Low','Normal','High','Extreme'];
   const vrOk=vr>=0&&vr<=2;
-  const stratScore=lastSig.strategy_score!=null?parseFloat(lastSig.strategy_score):null;
-  const stratOk=stratScore!=null?stratScore>0:null;
+  const debugRow=(lastSig && Object.keys(lastSig).length)?lastSig:s;
+  const stratScore=toNum(debugRow.strategy_score ?? lastSig.strategy_score ?? s.strategy_score);
+  const ictScore=toNum(debugRow.ict_score ?? s.ict_score);
+  const wyckoffScore=toNum(debugRow.wyckoff_score ?? s.wyckoff_score);
+  const momentumScore=toNum(debugRow.momentum_score ?? s.momentum_score);
+  const ictWeight=toNum(debugRow.ict_weight) ?? 0.4;
+  const wyckoffWeight=toNum(debugRow.wyckoff_weight) ?? 0.35;
+  const momentumWeight=toNum(debugRow.momentum_weight) ?? 0.25;
+  const strategyTotalWeight=Math.max(toNum(debugRow.strategy_total_weight) ?? (ictWeight+wyckoffWeight+momentumWeight), 1e-6);
+  const strategyRaw=toNum(debugRow.strategy_raw_score) ??
+    (((ictScore??0)*ictWeight + (wyckoffScore??0)*wyckoffWeight + (momentumScore??0)*momentumWeight)/strategyTotalWeight);
+  const regimeBias=toNum(debugRow.regime_bias) ?? (vr===0?0.5:(vr===2?1.2:1.0));
+  const stratRequiredMin=toNum(debugRow.strategy_required_min);
+  const strategyGateRaw=(debugRow.strategy_gate_pass ?? s.strategy_gate_pass);
+  const stratOk=strategyGateRaw!=null
+    ? isTrue(strategyGateRaw)
+    : (stratScore!=null && stratRequiredMin!=null ? Math.abs(stratScore)>=stratRequiredMin : null);
+  const stratStrength=(stratScore==null?'No data':(Math.abs(stratScore)>=0.35?'Strong':Math.abs(stratScore)>=0.1?'Medium':'Weak'));
   const cbOk=!day.killed&&!(day.cooldown_bars>0);
   const posOk=(s.open_positions??0)<(s.max_positions??99);
   const riskOk=cbOk&&posOk;
@@ -1422,7 +1461,7 @@ function renderTrading(acct,d){
   const steps=[
     [timeFilterPass, stepCard('&#9200;','Time Filter',`<span class="${sessClass}">${sessName}</span>`,timeFilterPass,timeFilterReason)],
     [vrOk,           stepCard('&#127754;','Volatility',`<span class="vol-${Math.min(Math.max(vr,0),3)}">${vr>=0?vrNames[vr]:'-'}</span>`,vrOk,vr===0?'Low — caution':vr===2?'High ATR':vr===3?'Extreme':'')],
-    [stratOk,        stepCard('&#128202;','Strategy',stratScore!=null?`<span class="${stratScore>0?'win':stratScore<0?'loss':'dim'}">${stratScore.toFixed(2)}</span>`:'&#8212;',stratOk,stratScore!=null?(stratScore>0.3?'Strong':stratScore>0?'Weak':'Bearish'):'No data')],
+    [stratOk,        stepCard('&#128202;','Strategy',stratScore!=null?`<span class="${stratScore>0?'win':stratScore<0?'loss':'dim'}">${signed(stratScore,2)}</span>`:'&#8212;',stratOk,(stratScore!=null&&stratRequiredMin!=null)?`|score|=${Math.abs(stratScore).toFixed(2)} / min=${stratRequiredMin.toFixed(2)} (${stratStrength})`:stratStrength)],
     [confPass,       stepCard('&#129302;','ML Model',`${fmt(conf,4)}<br><span style="font-size:.6rem;color:var(--text3)">/ ${fmt(thr,4)}</span>`,confPass,confPass?'Above threshold':'Below threshold')],
     [riskOk,         stepCard('&#128737;','Risk Guard',cbOk?`<span class="bdg bdg-ok">Clear</span>`:`<span class="bdg bdg-warn">${day.killed?'Killed':'Cooldown'}</span>`,riskOk,`Pos ${s.open_positions??0}/${s.max_positions??'?'} &#183; ${day.consecutive_losses||0} losses`)],
     [s.should_trade, stepCard('&#9989;','Decision',s.should_trade?`<span style="color:${s.side?.toLowerCase()==='buy'?'var(--green)':'var(--red)'};font-size:.9rem;font-weight:900">${s.side?.toLowerCase()==='buy'?'&#9650;':'&#9660;'} ${(s.side||'').toUpperCase()}</span>`:`<span class="dim">BLOCKED</span>`,s.should_trade,'')]
@@ -1451,11 +1490,26 @@ function renderTrading(acct,d){
     const over=c!=null&&thr!=null?+c>=+thr:null;
     const outcome=signalOutcomes[idx]||{label:'N/A',cls:'dim',pnl:null};
     const timeTxt=pickTimeText(sg.time, sg.ts, sg.bar_time);
+    const sgScore=toNum(sg.strategy_score);
+    const sgIct=toNum(sg.ict_score);
+    const sgWyckoff=toNum(sg.wyckoff_score);
+    const sgMomentum=toNum(sg.momentum_score);
+    const sgRegimeBias=toNum(sg.regime_bias);
+    const sgReqMin=toNum(sg.strategy_required_min);
+    const sgGateRaw=sg.strategy_gate_pass;
+    const sgGate=sgGateRaw!=null
+      ? isTrue(sgGateRaw)
+      : (sgScore!=null && sgReqMin!=null ? Math.abs(sgScore)>=sgReqMin : null);
     return `<tr>
       <td class="dim">${timeTxt}</td>
       <td>${badge(sg.direction||sg.signal||sg.side||'')}</td>
       <td class="${over===true?'win':over===false?'loss':''}">${fmt(c,3)}</td>
-      <td class="${parseFloat(sg.strategy_score||0)>0?'win':parseFloat(sg.strategy_score||0)<0?'loss':'dim'}">${fmt(parseFloat(sg.strategy_score||0),2)}</td>
+      <td class="${(sgScore??0)>0?'win':(sgScore??0)<0?'loss':'dim'}">${signed(sgScore,2)}</td>
+      <td class="${(sgIct??0)>0?'win':(sgIct??0)<0?'loss':'dim'}">${signed(sgIct,0)}</td>
+      <td class="${(sgWyckoff??0)>0?'win':(sgWyckoff??0)<0?'loss':'dim'}">${signed(sgWyckoff,0)}</td>
+      <td class="${(sgMomentum??0)>0?'win':(sgMomentum??0)<0?'loss':'dim'}">${signed(sgMomentum,0)}</td>
+      <td class="dim">${(sgRegimeBias!=null||sgReqMin!=null)?`${fmt(sgRegimeBias,2)} × ${fmt(sgReqMin,2)}`:'&#8212;'}</td>
+      <td class="${sgGate===true?'win':sgGate===false?'loss':'dim'}">${sgGate===true?'PASS':sgGate===false?'FAIL':'N/A'}</td>
       <td class="dim">${px(sg.entry_price)}</td>
       <td class="dim">${px(sg.stop_loss||sg.sl)}</td>
       <td class="dim">${px(sg.take_profit||sg.tp)}</td>
@@ -1536,10 +1590,17 @@ function renderTrading(acct,d){
     <div class="strat-p">
       <div class="strat-pt">&#128202; Strategy Analysis</div>
       <div style="text-align:center;margin:7px 0">
-        <div style="font-size:1.7rem;font-weight:900;color:${stratScore==null?'var(--text3)':stratScore>0?'var(--green)':stratScore<0?'var(--red)':'var(--text3)'}">${stratScore!=null?stratScore.toFixed(2):'&#8212;'}</div>
+        <div style="font-size:1.7rem;font-weight:900;color:${stratScore==null?'var(--text3)':stratScore>0?'var(--green)':stratScore<0?'var(--red)':'var(--text3)'}">${stratScore!=null?signed(stratScore,2):'&#8212;'}</div>
         <div style="font-size:.66rem;color:var(--text3)">Strategy Score</div>
       </div>
       <div class="strat-r"><span class="strat-k">Direction</span><span class="strat-v">${badge(lastSig.direction||lastSig.side||s.side||'')}</span></div>
+      <div class="strat-r"><span class="strat-k">ICT (raw × w)</span><span class="strat-v ${ictScore>0?'win':ictScore<0?'loss':'dim'}">${signed(ictScore,0)} × ${fmt(ictWeight,2)}</span></div>
+      <div class="strat-r"><span class="strat-k">Wyckoff (raw × w)</span><span class="strat-v ${wyckoffScore>0?'win':wyckoffScore<0?'loss':'dim'}">${signed(wyckoffScore,0)} × ${fmt(wyckoffWeight,2)}</span></div>
+      <div class="strat-r"><span class="strat-k">Momentum (raw × w)</span><span class="strat-v ${momentumScore>0?'win':momentumScore<0?'loss':'dim'}">${signed(momentumScore,0)} × ${fmt(momentumWeight,2)}</span></div>
+      <div class="strat-r"><span class="strat-k">Weighted Raw</span><span class="strat-v ${strategyRaw>0?'win':strategyRaw<0?'loss':'dim'}">${signed(strategyRaw,2)}</span></div>
+      <div class="strat-r"><span class="strat-k">Regime Multiplier</span><span class="strat-v">${fmt(regimeBias,2)}</span></div>
+      <div class="strat-r"><span class="strat-k">Required |score|</span><span class="strat-v">${fmt(stratRequiredMin,2)}</span></div>
+      <div class="strat-r"><span class="strat-k">Strategy Gate</span><span class="${stratOk===true?'news-ok':stratOk===false?'news-block':'dim'}">${stratOk===true?'&#10003; PASS':stratOk===false?'&#10007; FAIL':'N/A'}</span></div>
       <div class="strat-r"><span class="strat-k">Multi-TF</span><span class="strat-v ${parseFloat(lastSig.multi_tf_consensus||0)>0?'win':'dim'}">${fmt(parseFloat(lastSig.multi_tf_consensus||0),2)}</span></div>
       <div class="strat-r"><span class="strat-k">Trend Align</span><span class="strat-v">${fmt(parseFloat(lastSig.trend_alignment||0),2)}</span></div>
       <div class="strat-r"><span class="strat-k">Last Signal</span><span class="strat-v dim">${pickTimeText(lastSig.time, lastSig.ts, lastSig.bar_time).slice(5,16)}</span></div>
@@ -1549,14 +1610,14 @@ function renderTrading(acct,d){
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
     <div class="card">
       <div class="card-ttl">&#128267; Recent Signals (${Math.min(signals.length,State.signalLimit)} shown / ${signals.length})</div>
-      <div class="scroll-y"><table class="tbl">
-        <thead><tr><th>Time</th><th>Side</th><th>Conf</th><th>Score</th><th>Entry</th><th>SL</th><th>TP</th><th>Outcome</th><th>Reason</th></tr></thead>
-        <tbody>${sgRows||'<tr><td colspan="9" class="dim" style="text-align:center;padding:16px">No signals</td></tr>'}</tbody>
+      <div class="scroll-y" style="overflow-x:auto"><table class="tbl">
+        <thead><tr><th>Time</th><th>Side</th><th>Conf</th><th>Score</th><th>ICT</th><th>WYC</th><th>MOM</th><th>Reg×Min</th><th>Gate</th><th>Entry</th><th>SL</th><th>TP</th><th>Outcome</th><th>Reason</th></tr></thead>
+        <tbody>${sgRows||'<tr><td colspan="14" class="dim" style="text-align:center;padding:16px">No signals</td></tr>'}</tbody>
       </table></div>
     </div>
     <div class="card">
       <div class="card-ttl">&#128200; Live Trades (${Math.min(trades.length,State.signalLimit)} shown / ${trades.length})</div>
-      <div class="scroll-y"><table class="tbl">
+      <div class="scroll-y" style="overflow-x:auto"><table class="tbl">
         <thead><tr><th>Time</th><th>Side</th><th>Entry</th><th>SL</th><th>TP</th><th>Exit</th><th>PnL</th><th>Type</th></tr></thead>
         <tbody>${trRows||'<tr><td colspan="8" class="dim" style="text-align:center;padding:16px">No trades</td></tr>'}</tbody>
       </table></div>
