@@ -1,6 +1,6 @@
 # Latest Live Guide
 
-Last updated: `2026-04-01 (ACC1 breakthrough max-net + ACC2 breakthrough dd<=25%)`
+Last updated: `2026-04-02 (MT5_BRIDGE Windows + Docker lite no MLflow/Grafana/Airflow)`
 
 ## 1) File config nào dùng để chạy thật
 
@@ -88,8 +88,42 @@ Trong mode này:
 - Không cần bật `mlflow`, `grafana`, `prometheus`, `airflow-*`.
 - Dashboard realtime vẫn chạy qua API + websocket.
 - Telegram vẫn chạy theo config/env.
+- Auto-trade vẫn chạy qua MT5 bridge (`MT5_BRIDGE_URL_ACC1/ACC2`).
 
-### 4.2 Chạy local không docker (tuỳ chọn)
+### 4.2 MT5_BRIDGE trên Windows (khuyến nghị)
+
+Bridge phải chạy trên máy Windows có MT5 terminal đã login account.
+
+1. Mở PowerShell trên Windows, vào root project.
+2. Start bridge cho cả 2 account:
+
+```powershell
+.\scripts\windows\start_bridges.ps1
+```
+
+3. Verify bridge:
+
+```powershell
+Invoke-WebRequest http://localhost:5600/health -UseBasicParsing
+Invoke-WebRequest http://localhost:5601/health -UseBasicParsing
+```
+
+4. Cập nhật `.env` cho Docker live service:
+
+```env
+MT5_BRIDGE_URL_ACC1=http://host.docker.internal:5600
+MT5_BRIDGE_URL_ACC2=http://host.docker.internal:5601
+```
+
+Lưu ý quan trọng:
+
+- Nếu Docker chạy ngay trên Windows host: dùng `host.docker.internal` như trên.
+- Nếu Docker chạy trên máy khác (ví dụ macOS), `host.docker.internal` sẽ trỏ về máy local, không trỏ sang Windows bridge.
+  - Khi đó phải set IP LAN của Windows, ví dụ:
+  - `MT5_BRIDGE_URL_ACC1=http://192.168.1.50:5600`
+  - `MT5_BRIDGE_URL_ACC2=http://192.168.1.50:5601`
+
+### 4.3 Chạy local không docker (tuỳ chọn)
 
 ```bash
 PYTHONPATH=src python3 scripts/live_runner.py live --config configs/live_acc1.yaml
@@ -104,8 +138,8 @@ Mở dashboard:
 ## 5) Checklist trước khi bật live
 
 1. MT5 bridge đúng cổng account:
-   - ACC1: `MT5_BRIDGE_URL=http://host.docker.internal:5600`
-   - ACC2: `MT5_BRIDGE_URL=http://host.docker.internal:5601`
+   - ACC1: `MT5_BRIDGE_URL_ACC1`
+   - ACC2: `MT5_BRIDGE_URL_ACC2`
 2. Telegram env đã set đúng token/chat_id theo account.
 3. `configs/live_acc1.yaml` và `configs/live_acc2.yaml` đúng risk/threshold mong muốn.
 4. Kiểm tra health:
@@ -113,6 +147,27 @@ Mở dashboard:
    - `outputs/live_status_acc2.json`
 5. Kiểm tra test:
    - `PYTHONPATH=src pytest -q tests`
+
+### 5.1 Run nhanh đúng stack tối giản
+
+```bash
+docker compose build api live live-acc1 nginx
+docker compose up -d postgres api nginx healthwatch live live-acc1
+```
+
+Kiểm tra:
+
+```bash
+docker compose ps
+docker compose logs --tail=100 live
+docker compose logs --tail=100 live-acc1
+curl -s http://localhost:8000/health
+```
+
+Dashboard realtime:
+
+- `http://localhost/dashboard`
+- Nếu cần public URL: bật `cloudflared` (`docker compose up -d cloudflared`)
 
 ## 5.1) Verify bot đang dùng đúng model nào (rất quan trọng)
 

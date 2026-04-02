@@ -110,6 +110,20 @@ Notes:
 - If you have a broker feed or CSV export for spot XAUUSD, replace the training source with that feed for closer alignment.
 - `trainer` and `live` now use a lighter core image. `dashboard` is built separately so `streamlit` does not slow every build.
 
+### Docker lite (no MLflow, Grafana, Airflow)
+
+Run only services needed for live bot + Telegram + realtime dashboard:
+
+```bash
+docker compose build api live live-acc1 nginx
+docker compose up -d postgres api nginx healthwatch live live-acc1
+```
+
+Open:
+
+- API health: `http://localhost:8000/health`
+- Realtime dashboard (WebSocket): `http://localhost/dashboard`
+
 ## Main commands
 
 - `train`: fetch data, build features, train model, save artifacts, export charts.
@@ -200,6 +214,32 @@ python -m xauusd_ai.main mt5-check --config configs/live_mt5.yaml
 
 ```bash
 python -m xauusd_ai.main live --config configs/live_mt5.yaml
+```
+
+### MT5 Bridge with Docker (Windows host recommended)
+
+For Docker live services, MT5 execution is routed via bridge URL:
+
+- `MT5_BRIDGE_URL_ACC1` for `live-acc1`
+- `MT5_BRIDGE_URL_ACC2` for `live` (ACC2)
+
+`docker-compose.yml` now reads these env vars with defaults:
+
+- ACC1 default: `http://host.docker.internal:5600`
+- ACC2 default: `http://host.docker.internal:5601`
+
+If Docker runs on the same Windows host as bridge, keep defaults.
+If Docker runs on another machine (macOS/Linux), set the Windows LAN IP instead, for example:
+
+```env
+MT5_BRIDGE_URL_ACC1=http://192.168.1.50:5600
+MT5_BRIDGE_URL_ACC2=http://192.168.1.50:5601
+```
+
+Start bridges on Windows:
+
+```powershell
+.\scripts\windows\start_bridges.ps1
 ```
 
 Online learning during auto trade:

@@ -306,7 +306,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-tradedb}
       MLFLOW_TRACKING_URI: "file:///app/mlruns"
       TRADING_ACCOUNT: acc2
-      MT5_BRIDGE_URL: "http://host.docker.internal:5601"
+      MT5_BRIDGE_URL: ${MT5_BRIDGE_URL_ACC2:-http://host.docker.internal:5601}
     volumes:
       - ./configs:/app/configs
       - ./outputs:/app/outputs
@@ -336,7 +336,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-tradedb}
       MLFLOW_TRACKING_URI: "file:///app/mlruns"
       TRADING_ACCOUNT: acc1
-      MT5_BRIDGE_URL: "http://host.docker.internal:5600"
+      MT5_BRIDGE_URL: ${MT5_BRIDGE_URL_ACC1:-http://host.docker.internal:5600}
     volumes:
       - ./configs:/app/configs
       - ./outputs:/app/outputs
