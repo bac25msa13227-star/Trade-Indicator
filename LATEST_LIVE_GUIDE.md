@@ -1,6 +1,16 @@
 # Latest Live Guide
 
-Last updated: `2026-04-01 (ACC1 breakthrough max-net + ACC2 breakthrough dd<=25%)`
+Last updated: `2026-04-03 (Recovered exact benchmark baseline on commit 2016501)`
+
+## 0) Baseline đã khôi phục (xác thực chính xác)
+
+- Commit baseline: `20165010aca81a6b75a5ceb3265cff0586ad5131`
+- Config replay chuẩn: `configs/snapshots/acc2_phase2_dd19_compat_20260401.yaml`
+- File xác thực replay exact:
+  - `outputs/wf_exact_recovery_verify_2016501.json`
+- Kết quả đã khớp exact:
+  - ACC1: `Net 66,590.56 | DD 39.53% | PF 1.4809 | Trades 1054 | WR 59.01%`
+  - ACC2: `Net 21,057.65 | DD 23.33% | PF 2.1906 | Trades 569 | WR 64.50%`
 
 ## 1) File config nào dùng để chạy thật
 
@@ -35,6 +45,9 @@ Lưu ý:
 - ACC1 hiện chạy artifact `acc1_breakthrough_net66590_dd3953_*`.
 - ACC2 hiện chạy artifact `acc2_breakthrough_net21k_dd2333_*`.
 - Với ACC1 breakthrough, `decision_threshold` trong model meta đã set `0.62` để khớp profile WF.
+- Với ACC2 breakthrough:
+  - `strategy.signal_threshold = 0.76` (router gate trong config)
+  - `model_meta.decision_threshold = 0.72` (ngưỡng predict của model artifact)
 - `acc2_breakthrough_net21k_dd2333_*` là alias freeze để tránh nhầm lẫn giữa các profile.
 - `retrain_on_startup: false` để bot vào lệnh ngay bằng model freeze.
 - Self-learning vẫn chạy nền, chỉ hot-reload khi candidate đạt điều kiện acceptance.
@@ -73,7 +86,7 @@ docker compose up -d frontend
 - Grafana: `http://localhost:3000`
 - Airflow: `http://localhost:8080`
 
-## 4) Cách chạy LITE (không MLflow/Grafana/Airflow)
+## 4) Cách chạy LITE (không MLflow/MinIO/Airflow/Grafana)
 
 Mục tiêu: chỉ cần bot chạy + Telegram chạy + dashboard realtime chạy.
 
@@ -85,7 +98,7 @@ docker compose up -d postgres api nginx healthwatch live live-acc1
 
 Trong mode này:
 
-- Không cần bật `mlflow`, `grafana`, `prometheus`, `airflow-*`.
+- Không cần bật `mlflow`, `minio`, `grafana`, `prometheus`, `airflow-*`.
 - Dashboard realtime vẫn chạy qua API + websocket.
 - Telegram vẫn chạy theo config/env.
 
