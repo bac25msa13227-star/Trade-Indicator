@@ -6,7 +6,7 @@ Last updated: `2026-04-03 (Recovered exact benchmark baseline on commit 2016501)
 
 - Commit baseline: `20165010aca81a6b75a5ceb3265cff0586ad5131`
 - Config replay chuẩn: `configs/snapshots/acc2_phase2_dd19_compat_20260401.yaml`
-- File xác thực replay exact:
+- File xác thực replay exact (artifact local, có thể tự generate lại):
   - `outputs/wf_exact_recovery_verify_2016501.json`
 - Kết quả đã khớp exact:
   - ACC1: `Net 66,590.56 | DD 39.53% | PF 1.4809 | Trades 1054 | WR 59.01%`
