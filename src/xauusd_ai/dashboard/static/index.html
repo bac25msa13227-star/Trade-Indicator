@@ -1111,7 +1111,7 @@ function assistantNarrative(acct,d){
   const day=d?.daily||{};
   const trades=d?.recent_trades||[];
   const conf=s.confidence!=null?+s.confidence:null;
-  const thr=mod.threshold!=null?+mod.threshold:null;
+  const thr=mod.threshold_effective!=null?+mod.threshold_effective:(mod.threshold!=null?+mod.threshold:null);
   const blocked=!(s.should_trade);
   const pnl=+(d?.total_pnl||0);
   const dd=d?.drawdown_pct!=null?+d.drawdown_pct:null;
@@ -1229,15 +1229,22 @@ function renderBars(id,labels,values){
 /* ═══════════════════════════════ RENDER OVERVIEW ═══════════════════════════════ */
 function renderOverview(acct,d){
   const s=d.status||{};const mod=d.model||{};const bt=d.backtest||{};const day=d.daily||{};
+  const bench=d.benchmark||{};
   const trades=d.recent_trades||[];const sig=(d.recent_signals||[]).slice(-1)[0]||{};
   const cbActive=day.killed||day.cooldown_bars>0;
   const cbTxt=day.killed?'KILL SWITCH':day.cooldown_bars>0?`Cooldown ${day.cooldown_bars}b`:'NORMAL';
   const liveSide=s.side;const liveConf=s.confidence!=null?+s.confidence:null;
   const shouldTrade=s.should_trade;
-  const thr=parseFloat(mod.threshold||0)||null;
+  const thr=toNum(mod.threshold_effective ?? mod.threshold);
+  const thrModel=toNum(mod.threshold_model ?? mod.threshold);
+  const thrCfg=toNum(mod.threshold_config);
+  const thrRisk=toNum(mod.threshold_risk);
   const confPct=liveConf!=null?Math.min(100,Math.max(0,liveConf*100)):0;
   const thrPct=thr!=null?Math.min(100,Math.max(0,thr*100)):0;
   const confPass=liveConf!=null&&thr!=null&&liveConf>=thr;
+  const bindingOk = mod.binding_ok!==false;
+  const bindingMismatch = Array.isArray(mod.binding_mismatch)?mod.binding_mismatch:[];
+  const benchOk = bench.net_profit!=null && bench.max_drawdown_pct!=null;
   const confColor=confPass?'var(--green)':'var(--red)';
   const vr=s.volatility_regime!=null?+s.volatility_regime:-1;
   const vrNames=['Low','Normal','High','Extreme'];
@@ -1367,12 +1374,25 @@ function renderOverview(acct,d){
       <div style="font-size:.67rem;color:var(--text3);margin:3px 0 10px;text-align:right">
         Train ${mod.train_rows!=null?(+mod.train_rows).toLocaleString():''} rows &#183; WF ${mod.wf_n_folds??'?'} folds &#183; Avg prec ${mod.wf_precision_avg!=null?(+mod.wf_precision_avg*100).toFixed(1)+'%':'&#8212;'}
       </div>
+      <div style="font-size:.67rem;color:var(--text3);margin:-4px 0 10px;text-align:right">
+        Thr(model/cfg/risk/effective): ${fmt(thrModel,4)} / ${fmt(thrCfg,4)} / ${fmt(thrRisk,4)} / <b style="color:var(--yellow)">${fmt(thr,4)}</b>
+      </div>
+      <div style="font-size:.67rem;color:${bindingOk?'var(--green)':'var(--red)'};margin:-6px 0 8px;text-align:right">
+        Model binding: ${bindingOk?'OK':'MISMATCH'}${bindingMismatch.length?` (${bindingMismatch.join(', ')})`:''}
+      </div>
       <div class="dvd"><span>Backtest Summary</span></div>
       <div class="g4">
         ${statBox('Return',pctR(bt.return_pct),(bt.return_pct||0)>=0?'win':'loss')}
         ${statBox('Profit Factor',fmt(bt.profit_factor))}
         ${statBox('Win Rate',pct(bt.win_rate))}
         ${statBox('Max DD',pctR(bt.max_drawdown_pct),'loss')}
+      </div>
+      <div class="dvd"><span>Locked Benchmark</span></div>
+      <div class="g4">
+        ${statBox('Net',benchOk?dol(bench.net_profit):'&#8212;',benchOk&&(+bench.net_profit)>=0?'win':'')}
+        ${statBox('Max DD',benchOk?`${fmt(bench.max_drawdown_pct,2)}%`:'&#8212;','loss')}
+        ${statBox('PF',benchOk?fmt(bench.profit_factor,4):'&#8212;')}
+        ${statBox('Trades / WR',benchOk?`${bench.trades??'&#8212;'} / ${pct(bench.win_rate)}`:'&#8212;')}
       </div>
     </div>
   </div>
@@ -1393,7 +1413,10 @@ function renderTrading(acct,d){
   const signalRows=signals.slice(-State.signalLimit).reverse();
   const signalOutcomes=buildSignalOutcomes(signalRows, trades);
   const lastSig=signals.slice(-1)[0]||{};
-  const thr=parseFloat(mod.threshold||0)||null;
+  const thr=toNum(mod.threshold_effective ?? mod.threshold);
+  const thrModel=toNum(mod.threshold_model ?? mod.threshold);
+  const thrCfg=toNum(mod.threshold_config);
+  const thrRisk=toNum(mod.threshold_risk);
   const conf=s.confidence!=null?+s.confidence:null;
   const confPass=conf!=null&&thr!=null&&conf>=thr;
   const barTs=s.bar_time||'';
@@ -1555,6 +1578,9 @@ function renderTrading(acct,d){
     </div>
   </div>
   <div style="font-size:.7rem;color:var(--text2);margin-bottom:12px;padding:8px 12px;background:var(--card2);border-radius:var(--rs);border:1px solid var(--bdr)">&#128203; ${q(s.reason)}</div>
+  <div style="font-size:.66rem;color:var(--text3);margin:-6px 0 10px;text-align:right">
+    Thr(model/cfg/risk/effective): ${fmt(thrModel,4)} / ${fmt(thrCfg,4)} / ${fmt(thrRisk,4)} / <b style="color:var(--yellow)">${fmt(thr,4)}</b>
+  </div>
 
   <div class="card" style="margin-bottom:12px">
     <div class="card-ttl">&#9883; 6-Step Decision Pipeline</div>

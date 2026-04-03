@@ -63,6 +63,24 @@ except ImportError:
 
 _OUTPUTS = Path(os.getenv("OUTPUTS_PATH", "outputs"))
 _STATIC_DIR = Path(__file__).resolve().parent.parent / "dashboard" / "static"
+_LIVE_CFG_MAP: dict[str, Path] = {
+    "acc1": Path(os.getenv("ACC1_SETTINGS_PATH", "configs/live_acc1.yaml")),
+    "acc2": Path(os.getenv("ACC2_SETTINGS_PATH", "configs/live_acc2.yaml")),
+}
+_REQUIRED_MODEL_BINDINGS: dict[str, dict[str, str]] = {
+    "acc1": {
+        "model": "outputs/acc1_breakthrough_net66590_dd3953_model.pkl",
+        "scaler": "outputs/acc1_breakthrough_net66590_dd3953_scaler.pkl",
+        "meta": "outputs/acc1_breakthrough_net66590_dd3953_model_meta.json",
+    },
+    "acc2": {
+        "model": "outputs/acc2_breakthrough_net21k_dd2333_model.pkl",
+        "scaler": "outputs/acc2_breakthrough_net21k_dd2333_scaler.pkl",
+        "meta": "outputs/acc2_breakthrough_net21k_dd2333_model_meta.json",
+    },
+}
+_BENCHMARK_VERIFY_FILE = Path(os.getenv("BENCHMARK_VERIFY_FILE", "outputs/wf_exact_recovery_verify_2016501.json"))
+_ACCOUNT_RUNTIME_CFG: dict[str, dict[str, Any]] = {}
 
 _ACCOUNT_CFG: dict[str, dict[str, str]] = {
     "acc1": {
@@ -105,13 +123,39 @@ def _output_path(path_like: str | Path) -> Path:
     return _OUTPUTS / p
 
 
+def _path_matches_required(actual: str | Path, required: str | Path) -> bool:
+    """Allow both exact relative paths and absolute paths ending with the required suffix."""
+    actual_posix = Path(str(actual)).as_posix()
+    required_posix = Path(str(required)).as_posix()
+    return actual_posix == required_posix or actual_posix.endswith(f"/{required_posix}")
+
+
+def _load_benchmark_targets() -> dict[str, Any]:
+    """Load locked benchmark values used for ACC1/ACC2 profile verification."""
+    payload = _safe_json(_output_path(_BENCHMARK_VERIFY_FILE))
+    result: dict[str, Any] = {
+        "source": str(_output_path(_BENCHMARK_VERIFY_FILE)),
+        "acc1": {},
+        "acc2": {},
+    }
+    for acct, key in (("acc1", "acc1_expected"), ("acc2", "acc2_expected")):
+        raw = payload.get(key, {}) if isinstance(payload, dict) else {}
+        if not isinstance(raw, dict):
+            continue
+        result[acct] = {
+            "net_profit": raw.get("net"),
+            "max_drawdown_pct": raw.get("dd"),
+            "profit_factor": raw.get("pf"),
+            "trades": raw.get("trades"),
+            "win_rate": raw.get("wr"),
+        }
+    return result
+
+
 def _apply_live_config_overrides() -> None:
     """Use live YAML configs as source of truth for dashboard artifact filenames."""
-    cfg_map = {
-        "acc1": Path(os.getenv("ACC1_SETTINGS_PATH", "configs/live_acc1.yaml")),
-        "acc2": Path(os.getenv("ACC2_SETTINGS_PATH", "configs/live_acc2.yaml")),
-    }
-    for acct, cfg_path in cfg_map.items():
+    _ACCOUNT_RUNTIME_CFG.clear()
+    for acct, cfg_path in _LIVE_CFG_MAP.items():
         if acct not in _ACCOUNT_CFG:
             continue
         try:
@@ -124,6 +168,44 @@ def _apply_live_config_overrides() -> None:
             _ACCOUNT_CFG[acct]["bt_trades"] = Path(app_cfg.backtest_trades_path).name
             _ACCOUNT_CFG[acct]["signals"] = Path(app_cfg.paper_trade_log_path).name
             _ACCOUNT_CFG[acct]["trades"] = Path(app_cfg.live_closed_trades_path).name
+
+            required_binding = _REQUIRED_MODEL_BINDINGS.get(acct, {})
+            actual_binding = {
+                "model": str(app_cfg.model_path),
+                "scaler": str(app_cfg.scaler_path),
+                "meta": str(app_cfg.model_meta_path),
+            }
+            mismatches = [
+                key
+                for key, required_path in required_binding.items()
+                if not _path_matches_required(actual_binding.get(key, ""), required_path)
+            ]
+            model_threshold_cfg = float(settings.strategy.signal_threshold)
+            risk_threshold = float(settings.risk.min_confidence)
+            _ACCOUNT_RUNTIME_CFG[acct] = {
+                "config_path": str(cfg_path),
+                "model_binding_required": required_binding,
+                "model_binding_actual": actual_binding,
+                "model_binding_ok": len(mismatches) == 0,
+                "model_binding_mismatch": mismatches,
+                "threshold_config": model_threshold_cfg,
+                "risk_min_confidence": risk_threshold,
+                "threshold_effective_config": max(model_threshold_cfg, risk_threshold),
+                "sideway_min_confidence": float(settings.strategy.sideway_min_confidence),
+                "volatile_min_confidence": float(settings.strategy.volatile_min_confidence),
+                "min_strategy_score": float(settings.strategy.min_strategy_score),
+                "sideway_min_strategy_score": float(settings.strategy.sideway_min_strategy_score),
+                "strong_volatility_min_strategy_score": float(settings.strategy.strong_volatility_min_strategy_score),
+                "require_trend_alignment": bool(settings.strategy.require_trend_alignment),
+                "adx_gate_enabled": bool(settings.strategy.adx_gate_enabled),
+                "adx_min_trend": float(settings.strategy.adx_min_trend),
+                "max_open_positions": int(settings.risk.max_open_positions),
+                "kill_switch_enabled": bool(settings.risk.kill_switch_enabled),
+                "daily_loss_limit_pct": float(settings.risk.daily_loss_limit_pct),
+                "max_drawdown_kill_pct": float(settings.risk.max_drawdown_kill_pct),
+                "consecutive_loss_pause_count": int(settings.risk.consecutive_loss_pause_count),
+                "consecutive_loss_cooldown_bars": int(settings.risk.consecutive_loss_cooldown_bars),
+            }
         except Exception as exc:
             logger.warning("Could not apply live config override for %s from %s: %s", acct, cfg_path, exc)
 
@@ -475,7 +557,9 @@ def _build_dashboard_payload() -> dict:
 
 def _build_dashboard_payload_uncached() -> dict:
     accounts: dict[str, Any] = {}
+    benchmarks = _load_benchmark_targets()
     for acct, cfg in _ACCOUNT_CFG.items():
+        runtime_cfg = _ACCOUNT_RUNTIME_CFG.get(acct, {})
         daily    = _safe_json(_output_path(cfg.get("daily", "risk_daily_state.json")))
         peak_bal = float(_safe_json(_output_path(cfg.get("peak", "risk_peak_balance.json"))).get("peak_balance") or 0)
         status = _safe_json(_output_path(cfg["status"]))
@@ -531,13 +615,22 @@ def _build_dashboard_payload_uncached() -> dict:
 
         wf_agg = wf.get("aggregate", {})
         wf_cfg = wf.get("walk_forward", {})
+        model_threshold = meta.get("threshold") or meta.get("decision_threshold")
+        config_threshold = runtime_cfg.get("threshold_config")
+        risk_min_conf = runtime_cfg.get("risk_min_confidence")
+        threshold_candidates = [v for v in (model_threshold, risk_min_conf) if isinstance(v, (int, float))]
+        threshold_effective = max(threshold_candidates) if threshold_candidates else None
 
         accounts[acct] = {
             "label":   cfg["label"],
             "status":  status,
             "model": {
                 "precision":         meta.get("precision"),
-                "threshold":         meta.get("threshold") or meta.get("decision_threshold"),
+                "threshold":         model_threshold,
+                "threshold_model":   model_threshold,
+                "threshold_config":  config_threshold,
+                "threshold_risk":    risk_min_conf,
+                "threshold_effective": threshold_effective,
                 "roc_auc":           meta.get("roc_auc"),
                 "recall":            meta.get("recall"),
                 "f1":                meta.get("f1"),
@@ -547,6 +640,10 @@ def _build_dashboard_payload_uncached() -> dict:
                 "wf_precision_avg":  wf_agg.get("avg_precision"),
                 "wf_win_rate_avg":   wf_agg.get("signal_win_rate"),
                 "wf_n_folds":        wf_cfg.get("n_folds") or len(wf.get("folds", [])),
+                "binding_ok":        runtime_cfg.get("model_binding_ok", True),
+                "binding_mismatch":  runtime_cfg.get("model_binding_mismatch", []),
+                "binding_required":  runtime_cfg.get("model_binding_required", {}),
+                "binding_actual":    runtime_cfg.get("model_binding_actual", {}),
             },
             "backtest": bt,
             "backtest_equity": _build_pnl_series(bt_trades),
@@ -573,9 +670,15 @@ def _build_dashboard_payload_uncached() -> dict:
             "recent_trades":  trades[-50:],
             "recent_signals": signals,
             "pnl_series":     _build_pnl_series(trades),
+            "runtime": runtime_cfg,
+            "benchmark": benchmarks.get(acct, {}),
         }
 
-    return {"ts": datetime.utcnow().isoformat(), "accounts": accounts}
+    return {
+        "ts": datetime.utcnow().isoformat(),
+        "benchmark_source": benchmarks.get("source"),
+        "accounts": accounts,
+    }
 
 
 # ── Background broadcast loop ─────────────────────────────────────────────────
