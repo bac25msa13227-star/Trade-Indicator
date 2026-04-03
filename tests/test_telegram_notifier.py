@@ -5,7 +5,9 @@ import unittest
 from unittest.mock import Mock, patch
 
 from xauusd_ai.config import Settings
+from xauusd_ai.execution.risk import OrderPlan
 from xauusd_ai.notifications.telegram import TelegramNotifier
+from xauusd_ai.strategies.hybrid import TradeDecision
 
 
 class TelegramNotifierTests(unittest.TestCase):
@@ -38,6 +40,41 @@ class TelegramNotifierTests(unittest.TestCase):
                 first_payload = post.call_args_list[0].kwargs["json"]
                 self.assertEqual(first_payload["parse_mode"], "HTML")
                 self.assertIn("[<b>ACC1</b>]", first_payload["text"])
+
+    def test_send_signal_uses_bilingual_template(self) -> None:
+        decision = TradeDecision(
+            should_trade=True,
+            side="buy",
+            confidence=0.7345,
+            reason="unit test reason",
+            entry_price=4622.10,
+            stop_loss=4612.40,
+            take_profit=4646.30,
+        )
+        plan = OrderPlan(
+            symbol="XAUUSDm",
+            side="buy",
+            volume=0.01,
+            entry_price=4622.10,
+            stop_loss=4612.40,
+            take_profit=4646.30,
+            confidence=0.7345,
+            reason="unit test reason",
+        )
+        ok_resp = Mock(ok=True, status_code=200, text="ok")
+        with patch.dict(
+            os.environ,
+            {"TELEGRAM_BOT_TOKEN": "token", "TELEGRAM_CHAT_ID": "chat"},
+            clear=True,
+        ):
+            with patch("xauusd_ai.notifications.telegram.requests.post", return_value=ok_resp) as post:
+                self.notifier.send_signal(decision, plan)
+                self.assertEqual(post.call_count, 1)
+                payload = post.call_args.kwargs["json"]
+                self.assertEqual(payload["parse_mode"], "HTML")
+                self.assertIn("Tín hiệu XAUUSD AI", payload["text"])
+                self.assertIn("Side / Hướng lệnh: BUY (Mua)", payload["text"])
+                self.assertIn("Reason / Lý do:", payload["text"])
 
 
 if __name__ == "__main__":

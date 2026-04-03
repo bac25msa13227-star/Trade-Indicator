@@ -1051,6 +1051,7 @@ def run_live_loop(settings: Settings) -> None:
     # ── Live closed trades log ────────────────────────────────────────────────
     _live_trades_path = Path(settings.app.live_closed_trades_path)
     _live_trades_path.parent.mkdir(parents=True, exist_ok=True)
+    _trade_journal_path = _live_trades_path.with_name(f"trade_journal_{_state_suffix}.jsonl")
     _live_trades_header = "time,ticket,side,volume,open_price,close_price,profit,swap,commission,pnl,is_win,close_type,session_id\n"
     # Preserve history across restarts -- only write header for a brand-new file
     if not _live_trades_path.exists() or _live_trades_path.stat().st_size == 0:
@@ -1123,6 +1124,218 @@ def run_live_loop(settings: Settings) -> None:
                 _trading_metrics.record_trade(pnl=pnl, is_win=is_win, side=pos.get("side", "none"))
             except Exception:
                 pass
+
+    def _shorten_text(value: object, limit: int = 160) -> str:
+        text = str(value or "").strip()
+        if len(text) <= limit:
+            return text
+        return text[: max(limit - 3, 0)].rstrip() + "..."
+
+    def _regime_label(value: object) -> str:
+        mapping = {
+            0: "sideway",
+            1: "normal",
+            2: "strong",
+            3: "extreme",
+        }
+        return mapping.get(_safe_int(value, 1), "unknown")
+
+    def _session_from_iso(ts_value: object) -> str:
+        ts_text = str(ts_value or "").strip()
+        if not ts_text:
+            return "unknown"
+        try:
+            parsed = datetime.datetime.fromisoformat(ts_text.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+            hour = parsed.astimezone(datetime.timezone.utc).hour
+        except Exception:
+            return "unknown"
+        if 0 <= hour < 7:
+            return "asian"
+        if 7 <= hour < 13:
+            return "london"
+        if 13 <= hour < 22:
+            return "new_york"
+        return "off_hours"
+
+    def _build_trade_journal_entry(
+        position: dict,
+        pnl: float,
+        is_win: bool,
+        close_type: str,
+        entry_snapshot: dict[str, object] | None,
+        loss_reasons: list[str] | None = None,
+        loss_features: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        snapshot = entry_snapshot or {}
+        feat = loss_features or {}
+        reasons = [str(r) for r in (loss_reasons or []) if str(r).strip()]
+        close_epoch = _safe_float(position.get("close_time"), time.time())
+        closed_at = datetime.datetime.fromtimestamp(close_epoch, tz=datetime.timezone.utc).isoformat()
+        regime_value = snapshot.get("volatility_regime", feat.get("volatility_regime"))
+        trend_alignment = snapshot.get("trend_alignment", feat.get("trend_alignment"))
+        strategy_score = snapshot.get("strategy_score", feat.get("strategy_score"))
+        ict_score = snapshot.get("ict_score", feat.get("ict_score"))
+        wyckoff_score = snapshot.get("wyckoff_score", feat.get("wyckoff_score"))
+        momentum_score = snapshot.get("momentum_score", feat.get("momentum_score"))
+        entry_reason = str(snapshot.get("reason") or position.get("comment") or "Signal entry (no detail)")
+
+        result_label = "FLAT"
+        if close_type == "SL" and pnl >= 0:
+            result_label = "BREAKEVEN"
+        elif is_win or pnl > 0:
+            result_label = "WIN"
+        elif pnl < 0:
+            result_label = "LOSS"
+
+        if result_label == "WIN":
+            if close_type == "TP":
+                outcome = "TP hit; market moved as expected."
+                outcome_vi = "Giá chạm TP; thị trường đi đúng hướng dự kiến."
+            else:
+                outcome = f"Closed positive via {close_type}."
+                outcome_vi = f"Đóng lệnh có lãi bằng {close_type}."
+            lesson = "Keep this setup profile and continue strict risk discipline."
+            lesson_vi = "Giữ nguyên kiểu setup này và tiếp tục kỷ luật quản trị rủi ro."
+        elif result_label == "BREAKEVEN":
+            outcome = "Protective SL secured breakeven/profit before reversal."
+            outcome_vi = "SL bảo vệ đã giữ hòa vốn/có lãi trước khi đảo chiều."
+            lesson = "Breakeven/trailing logic protected capital effectively."
+            lesson_vi = "Cơ chế hòa vốn/trailing SL đã bảo toàn vốn hiệu quả."
+        elif result_label == "LOSS":
+            if reasons:
+                outcome = " | ".join(reasons[:2])
+                _reason_vi_map = {
+                    "TREND_MISALIGNED": "Lệnh vào ngược hướng xu hướng",
+                    "REGIME_SIDEWAY": "Thị trường sideway dễ bị quét",
+                    "RSI_OVERBOUGHT": "Mua tại vùng quá mua",
+                    "RSI_OVERSOLD": "Bán tại vùng quá bán",
+                    "DAILY_BIAS_BEARISH": "Bias ngày nghiêng giảm",
+                    "DAILY_BIAS_BULLISH": "Bias ngày nghiêng tăng",
+                    "ORDER_FLOW_SELL": "Dòng lệnh nghiêng bán",
+                    "ORDER_FLOW_BUY": "Dòng lệnh nghiêng mua",
+                }
+                outcome_vi = " | ".join(_reason_vi_map.get(code, code) for code in reasons[:2])
+            elif close_type == "SL":
+                outcome = "SL hit before expected continuation."
+                outcome_vi = "Bị chạm SL trước khi giá tiếp diễn theo hướng kỳ vọng."
+            else:
+                outcome = f"Closed at loss via {close_type}."
+                outcome_vi = f"Đóng lệnh thua lỗ bằng {close_type}."
+            if reasons:
+                lesson = f"Avoid repeating: {reasons[0]}"
+                _reason_first_vi = {
+                    "TREND_MISALIGNED": "Không vào lệnh khi trend chưa đồng thuận.",
+                    "REGIME_SIDEWAY": "Giảm tần suất giao dịch trong sideway.",
+                    "RSI_OVERBOUGHT": "Không mua dưới trạng thái quá mua.",
+                    "RSI_OVERSOLD": "Không bán dưới trạng thái quá bán.",
+                    "DAILY_BIAS_BEARISH": "Cần đồng thuận với bias ngày.",
+                    "DAILY_BIAS_BULLISH": "Cần đồng thuận với bias ngày.",
+                    "ORDER_FLOW_SELL": "Cần lọc thêm order flow trước khi vào lệnh.",
+                    "ORDER_FLOW_BUY": "Cần lọc thêm order flow trước khi vào lệnh.",
+                }
+                lesson_vi = _reason_first_vi.get(reasons[0], f"Cảnh báo: tránh lặp lại lỗi {reasons[0]}.")
+            elif _safe_int(trend_alignment, 0) == 0:
+                lesson = "Require trend alignment before entry to reduce whipsaw losses."
+                lesson_vi = "Bắt buộc trend alignment trước khi vào để giảm bị quét."
+            elif _regime_label(regime_value) == "sideway":
+                lesson = "Sideway regime: reduce frequency or demand stronger confluence."
+                lesson_vi = "Pha sideway: giảm tần suất hoặc đợi xác nhận mạnh hơn."
+            else:
+                lesson = "Tighten execution quality before allowing the next entry."
+                lesson_vi = "Nâng chất lượng execution trước khi cho lệnh tiếp theo."
+        else:
+            outcome = f"Flat close via {close_type}."
+            outcome_vi = f"Đóng lệnh hòa vốn bằng {close_type}."
+            lesson = "No edge captured; wait for a cleaner setup."
+            lesson_vi = "Chưa có lợi thế rõ; chờ setup sạch hơn."
+
+        return {
+            "time": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "closed_at": closed_at,
+            "account": _state_suffix,
+            "ticket": _safe_int(position.get("ticket"), 0),
+            "side": str(position.get("side", "") or "").lower(),
+            "close_type": close_type,
+            "result": result_label,
+            "is_win": bool(result_label == "WIN"),
+            "pnl": float(pnl),
+            "entry_price": _safe_float(position.get("open_price"), 0.0),
+            "close_price": _safe_float(position.get("close_price"), 0.0),
+            "volume": _safe_float(position.get("volume"), 0.0),
+            "entry_time": snapshot.get("time"),
+            "entry_confidence": _safe_float(snapshot.get("confidence"), 0.0),
+            "entry_reason": entry_reason,
+            "outcome": outcome,
+            "outcome_vi": outcome_vi,
+            "lesson": lesson,
+            "lesson_vi": lesson_vi,
+            "loss_reasons": reasons,
+            "regime": _regime_label(regime_value),
+            "trend_alignment": _safe_int(trend_alignment, 0),
+            "strategy_score": _safe_float(strategy_score, 0.0),
+            "ict_score": _safe_float(ict_score, 0.0),
+            "wyckoff_score": _safe_float(wyckoff_score, 0.0),
+            "momentum_score": _safe_float(momentum_score, 0.0),
+            "session": _session_from_iso(closed_at),
+        }
+
+    def _append_trade_journal(entry: dict[str, object]) -> None:
+        try:
+            _trade_journal_path.parent.mkdir(parents=True, exist_ok=True)
+            with _trade_journal_path.open("a", encoding="utf-8") as file_handle:
+                file_handle.write(json.dumps(entry, ensure_ascii=False, default=str))
+                file_handle.write("\n")
+        except Exception as _journal_err:
+            LOGGER.warning("Failed to append trade journal: %s", _journal_err)
+
+    def _notify_trade_journal(entry: dict[str, object]) -> None:
+        try:
+            pnl_value = _safe_float(entry.get("pnl"), 0.0)
+            pnl_text = f"{'+' if pnl_value > 0 else ''}{pnl_value:.2f}$"
+            _side_raw = str(entry.get("side", "?")).strip().upper()
+            _side_vi = {"BUY": "Mua", "SELL": "Bán"}.get(_side_raw, _side_raw)
+            _result_raw = str(entry.get("result", "?")).strip().upper()
+            _result_vi = {
+                "WIN": "Thắng",
+                "LOSS": "Thua",
+                "BREAKEVEN": "Hòa",
+                "FLAT": "Hòa",
+            }.get(_result_raw, _result_raw)
+            notifier.send_message(
+                f"📝 <b>Auto Journal / Nhật ký lệnh #{_safe_int(entry.get('ticket'), 0)}</b> "
+                f"({_side_raw}/{_side_vi}) [{_result_raw}/{_result_vi}]\n"
+                f"├ P&amp;L / Lãi lỗ: <b>{pnl_text}</b> | Close / Đóng lệnh: {html.escape(str(entry.get('close_type', 'UNKNOWN')))}\n"
+                f"├ Entry thesis / Luận điểm vào lệnh: {html.escape(_shorten_text(entry.get('entry_reason'), 170))}\n"
+                f"├ Outcome / Kết quả: {html.escape(_shorten_text(entry.get('outcome_vi') or entry.get('outcome'), 120))}\n"
+                f"│ EN: {html.escape(_shorten_text(entry.get('outcome'), 120))}\n"
+                f"├ Lesson / Bài học: {html.escape(_shorten_text(entry.get('lesson_vi') or entry.get('lesson'), 120))}\n"
+                f"└ EN: {html.escape(_shorten_text(entry.get('lesson'), 120))}"
+            )
+        except Exception as _notify_err:
+            LOGGER.warning("Trade journal Telegram notify failed: %s", _notify_err)
+
+    def _record_trade_journal(
+        position: dict,
+        pnl: float,
+        is_win: bool,
+        close_type: str,
+        entry_snapshot: dict[str, object] | None,
+        loss_reasons: list[str] | None = None,
+        loss_features: dict[str, object] | None = None,
+    ) -> None:
+        _entry = _build_trade_journal_entry(
+            position=position,
+            pnl=pnl,
+            is_win=is_win,
+            close_type=close_type,
+            entry_snapshot=entry_snapshot,
+            loss_reasons=loss_reasons,
+            loss_features=loss_features,
+        )
+        _append_trade_journal(_entry)
+        _notify_trade_journal(_entry)
 
     last_seen_bar_time: pd.Timestamp | None = None
     last_learning_time: float = time.time()
@@ -1487,6 +1700,13 @@ def run_live_loop(settings: Settings) -> None:
                         f"\u2514 Profit: {pos.get('profit', 0):.2f}$ | Swap: {pos.get('swap', 0):.2f}$ | Comm: {pos.get('commission', 0):.2f}$"
                     )
                     _append_live_trade(pos, pnl, is_win=False, close_type="SL")
+                    _record_trade_journal(
+                        position=pos,
+                        pnl=pnl,
+                        is_win=False,
+                        close_type="SL",
+                        entry_snapshot=_entry_snapshot,
+                    )
                     _entry_rsi_tracker.pop(ticket, None)
                     _save_rsi_tracker(_entry_rsi_tracker)
                 elif pnl < 0:
@@ -1528,6 +1748,15 @@ def run_live_loop(settings: Settings) -> None:
                         f"\u2514 Nguyen nhan:\n{_reasons_text}"
                     )
                     _append_live_trade(pos, pnl, is_win=False, close_type=_close_type)
+                    _record_trade_journal(
+                        position=pos,
+                        pnl=pnl,
+                        is_win=False,
+                        close_type=_close_type,
+                        entry_snapshot=_entry_snapshot,
+                        loss_reasons=_reasons,
+                        loss_features=_feat,
+                    )
                     # Record loss for circuit breaker
                     risk_manager.record_trade_result(pnl, account_info.get("balance", 0.0) if 'account_info' in dir() else 0.0)
                     _entry_rsi_tracker.pop(ticket, None)
@@ -1542,6 +1771,13 @@ def run_live_loop(settings: Settings) -> None:
                         f"\u2514 Profit: {pos.get('profit', 0):.2f}$ | Swap: {pos.get('swap', 0):.2f}$ | Comm: {pos.get('commission', 0):.2f}$"
                     )
                     _append_live_trade(pos, pnl, is_win=True, close_type=_close_type)
+                    _record_trade_journal(
+                        position=pos,
+                        pnl=pnl,
+                        is_win=True,
+                        close_type=_close_type,
+                        entry_snapshot=_entry_snapshot,
+                    )
                     # Record win for circuit breaker (resets consecutive loss counter)
                     risk_manager.record_trade_result(pnl, account_info.get("balance", 0.0) if 'account_info' in dir() else 0.0)
                     _entry_rsi_tracker.pop(ticket, None)
