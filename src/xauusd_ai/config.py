@@ -47,6 +47,15 @@ class MarketSettings(StrictSettingsModel):
     execution_timeframe: str = "M15"
     bars: dict[str, int] = Field(default_factory=lambda: {"D1": 400, "H1": 1000, "H4": 2000, "M15": 3000})
     timezone: str = "UTC"
+    # Live market session gating (broker-aware from MT5 tick + sessions)
+    enforce_market_open_gate: bool = True
+    market_tick_stale_seconds: int = 300
+    market_preopen_alert_minutes: int = 30
+    market_preclose_alert_minutes: int = 30
+    # Multi-milestone alerts (minutes). If provided, takes priority over single-value fields above.
+    # Example: [1440, 30] => alert 1 day before and 30 minutes before.
+    market_preopen_alert_minutes_list: list[int] = Field(default_factory=lambda: [1440, 30])
+    market_preclose_alert_minutes_list: list[int] = Field(default_factory=lambda: [1440, 30])
 
 
 class StrategyEnabled(StrictSettingsModel):

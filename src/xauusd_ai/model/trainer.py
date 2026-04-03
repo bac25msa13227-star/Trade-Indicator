@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import pickle
 from pathlib import Path
 
@@ -42,6 +43,26 @@ class ModelTrainer:
         self.scaler = StandardScaler()
         self.decision_threshold = settings.strategy.signal_threshold
         self.feature_columns: list[str] = list(FEATURE_COLUMNS)  # updated by load_artifacts for backward compat
+
+    def _aligned_feature_frame(self, frame: pd.DataFrame) -> pd.DataFrame:
+        """Align any dataframe/row to model feature schema.
+
+        Live runtime may load a model whose ``feature_columns`` are larger than
+        current dataset features (e.g. migrated artifacts). For inference we
+        keep bot running by creating missing columns filled with 0.0, then
+        reordering columns exactly as model expects.
+        """
+        missing = [col for col in self.feature_columns if col not in frame.columns]
+        if missing:
+            logging.getLogger(__name__).warning(
+                "ModelTrainer: missing %d feature columns at inference; fill 0.0: %s",
+                len(missing),
+                missing,
+            )
+        aligned = frame.copy()
+        for col in missing:
+            aligned[col] = 0.0
+        return aligned[self.feature_columns]
 
     def train(self, dataset: pd.DataFrame, save_artifacts: bool = True) -> dict[str, float]:
         train_df = dataset[dataset["split"] == "train"]
@@ -343,7 +364,8 @@ class ModelTrainer:
 
     def predict_dataset(self, dataset: pd.DataFrame) -> pd.DataFrame:
         frame = dataset.copy()
-        x_scaled = self.scaler.transform(frame[self.feature_columns])
+        feat_frame = self._aligned_feature_frame(frame)
+        x_scaled = self.scaler.transform(feat_frame)
         x_sel = self._apply_feature_mask(x_scaled)
         if hasattr(self, "_calibrator") and self._calibrator is not None:
             probabilities = self._calibrator.predict_proba(x_sel)[:, 1]
@@ -354,7 +376,7 @@ class ModelTrainer:
         return frame
 
     def score_live_row(self, live_frame: pd.DataFrame) -> dict[str, float]:
-        latest = live_frame.iloc[[-1]][self.feature_columns]
+        latest = self._aligned_feature_frame(live_frame.iloc[[-1]])
         x_scaled = self.scaler.transform(latest)
         x_sel = self._apply_feature_mask(x_scaled)
         if hasattr(self, "_calibrator") and self._calibrator is not None:

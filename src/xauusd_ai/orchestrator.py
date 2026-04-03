@@ -732,6 +732,8 @@ def run_live_loop(settings: Settings) -> None:
     def _maybe_reload_config() -> None:
         """Reload toggleable settings from YAML without restart."""
         nonlocal settings, _config_mtime, _exit_model, news_crawler
+        nonlocal _market_gate_enabled, _market_stale_seconds
+        nonlocal _market_preopen_alert_minutes_list, _market_preclose_alert_minutes_list
         if not _config_path or not Path(_config_path).exists():
             return
         try:
@@ -757,6 +759,22 @@ def run_live_loop(settings: Settings) -> None:
             settings.strategy.force_trade = new_settings.strategy.force_trade
             settings.strategy.blocked_hours_utc = new_settings.strategy.blocked_hours_utc
             settings.strategy.blocked_weekdays_utc = new_settings.strategy.blocked_weekdays_utc
+            settings.market.enforce_market_open_gate = new_settings.market.enforce_market_open_gate
+            settings.market.market_tick_stale_seconds = new_settings.market.market_tick_stale_seconds
+            settings.market.market_preopen_alert_minutes = new_settings.market.market_preopen_alert_minutes
+            settings.market.market_preclose_alert_minutes = new_settings.market.market_preclose_alert_minutes
+            settings.market.market_preopen_alert_minutes_list = new_settings.market.market_preopen_alert_minutes_list
+            settings.market.market_preclose_alert_minutes_list = new_settings.market.market_preclose_alert_minutes_list
+            _market_gate_enabled = bool(settings.market.enforce_market_open_gate)
+            _market_stale_seconds = max(int(settings.market.market_tick_stale_seconds), 30)
+            _market_preopen_alert_minutes_list = _normalize_alert_minutes(
+                settings.market.market_preopen_alert_minutes_list,
+                settings.market.market_preopen_alert_minutes,
+            )
+            _market_preclose_alert_minutes_list = _normalize_alert_minutes(
+                settings.market.market_preclose_alert_minutes_list,
+                settings.market.market_preclose_alert_minutes,
+            )
             # Exit model toggle
             if new_settings.execution.exit_model.enabled and _exit_model is None:
                 try:
@@ -901,6 +919,20 @@ def run_live_loop(settings: Settings) -> None:
             return int(value)
         except (TypeError, ValueError):
             return default
+
+    def _normalize_alert_minutes(values: object, fallback_value: object) -> list[int]:
+        normalized: list[int] = []
+        if isinstance(values, list):
+            for value in values:
+                parsed = _safe_int(value, -1)
+                if parsed > 0:
+                    normalized.append(parsed)
+        fallback = _safe_int(fallback_value, 0)
+        if fallback > 0:
+            normalized.append(fallback)
+        # Descending order for natural "1 day first, then 30m" semantics.
+        unique_sorted = sorted(set(normalized), reverse=True)
+        return unique_sorted or [30]
 
     def _build_entry_snapshot(
         row: pd.Series | dict | None,
@@ -1112,6 +1144,118 @@ def run_live_loop(settings: Settings) -> None:
     _last_closed_check_epoch: float = time.time() - 86400  # look back 24h on startup
     _known_loss_tickets: set[int] = set()
     _accumulated_losses: int = 0
+    _market_gate_enabled = bool(getattr(settings.market, "enforce_market_open_gate", True))
+    _market_stale_seconds = max(int(getattr(settings.market, "market_tick_stale_seconds", 300)), 30)
+    _market_preopen_alert_minutes_list = _normalize_alert_minutes(
+        getattr(settings.market, "market_preopen_alert_minutes_list", None),
+        getattr(settings.market, "market_preopen_alert_minutes", 30),
+    )
+    _market_preclose_alert_minutes_list = _normalize_alert_minutes(
+        getattr(settings.market, "market_preclose_alert_minutes_list", None),
+        getattr(settings.market, "market_preclose_alert_minutes", 30),
+    )
+    _market_alert_tolerance_minutes = max(int(settings.app.poll_seconds // 60) + 1, 2)
+    _market_last_is_open: bool | None = None
+    _market_last_reason: str = ""
+    _market_preopen_notified_keys: set[str] = set()
+    _market_preclose_notified_keys: set[str] = set()
+
+    def _is_in_alert_window(minutes_to_event: int, alert_lead_minutes: int) -> bool:
+        if minutes_to_event <= 0 or alert_lead_minutes <= 0:
+            return False
+        lower_bound = max(alert_lead_minutes - _market_alert_tolerance_minutes, 1)
+        return lower_bound <= minutes_to_event <= alert_lead_minutes
+
+    def _format_alert_lead(alert_minutes: int) -> str:
+        if alert_minutes % 1440 == 0:
+            days = alert_minutes // 1440
+            return f"{days} ngày"
+        if alert_minutes % 60 == 0 and alert_minutes >= 60:
+            hours = alert_minutes // 60
+            return f"{hours} giờ"
+        return f"{alert_minutes} phút"
+
+    def _notify_market_state(state: dict[str, object]) -> None:
+        nonlocal _market_last_is_open, _market_last_reason
+        is_open = bool(state.get("is_open", False))
+        reason = str(state.get("reason", "UNKNOWN"))
+        next_open_utc = str(state.get("next_open_utc") or "")
+        next_close_utc = str(state.get("next_close_utc") or "")
+        mins_to_open = _safe_int(state.get("minutes_to_next_open"), -1)
+        mins_to_close = _safe_int(state.get("minutes_to_next_close"), -1)
+        tick_age = _safe_float(state.get("tick_age_sec"), -1.0)
+
+        if _market_last_is_open is None:
+            status_icon = "🟢" if is_open else "⏸️"
+            status_text = "MỞ" if is_open else "ĐÓNG"
+            base = (
+                f"{status_icon} <b>Market state: {status_text}</b>\n"
+                f"├ Symbol: {settings.market.symbol}\n"
+                f"├ Reason: {reason}"
+            )
+            if tick_age >= 0:
+                base += f"\n├ Tick age: {tick_age:.0f}s"
+            if next_open_utc:
+                base += f"\n└ Next open (UTC): {next_open_utc}"
+            notifier.send_message(base)
+        elif is_open != _market_last_is_open:
+            if is_open:
+                msg = (
+                    f"🟢 <b>Thị trường đã mở lại</b> — {settings.market.symbol}\n"
+                    f"├ Reason: {reason}"
+                )
+                if tick_age >= 0:
+                    msg += f"\n└ Tick age: {tick_age:.0f}s"
+                notifier.send_message(msg)
+                _market_preopen_notified_keys.clear()
+            else:
+                msg = (
+                    f"⏸️ <b>Thị trường đã đóng</b> — {settings.market.symbol}\n"
+                    f"├ Reason: {reason}"
+                )
+                if next_open_utc:
+                    msg += f"\n└ Next open (UTC): {next_open_utc}"
+                notifier.send_message(msg)
+                _market_preclose_notified_keys.clear()
+        elif not is_open and reason != _market_last_reason:
+            msg = (
+                f"⏸️ <b>Market closed reason update</b> — {settings.market.symbol}\n"
+                f"├ Reason: {reason}"
+            )
+            if next_open_utc:
+                msg += f"\n└ Next open (UTC): {next_open_utc}"
+            notifier.send_message(msg)
+
+        if not is_open and next_open_utc:
+            for alert_minutes in _market_preopen_alert_minutes_list:
+                if not _is_in_alert_window(mins_to_open, alert_minutes):
+                    continue
+                key = f"{next_open_utc}|{alert_minutes}"
+                if key in _market_preopen_notified_keys:
+                    continue
+                notifier.send_message(
+                    f"⏳ <b>{settings.market.symbol} mở lại khoảng {_format_alert_lead(alert_minutes)} nữa</b>\n"
+                    f"├ ETA hiện tại: {mins_to_open} phút\n"
+                    f"└ Next open (UTC): {next_open_utc}"
+                )
+                _market_preopen_notified_keys.add(key)
+
+        if is_open and next_close_utc:
+            for alert_minutes in _market_preclose_alert_minutes_list:
+                if not _is_in_alert_window(mins_to_close, alert_minutes):
+                    continue
+                key = f"{next_close_utc}|{alert_minutes}"
+                if key in _market_preclose_notified_keys:
+                    continue
+                notifier.send_message(
+                    f"⏳ <b>{settings.market.symbol} sẽ đóng khoảng {_format_alert_lead(alert_minutes)} nữa</b>\n"
+                    f"├ ETA hiện tại: {mins_to_close} phút\n"
+                    f"└ Next close (UTC): {next_close_utc}"
+                )
+                _market_preclose_notified_keys.add(key)
+
+        _market_last_is_open = is_open
+        _market_last_reason = reason
     # Pre-load already-recorded tickets so we don't re-notify on restart
     if _live_trades_path.exists():
         try:
@@ -1518,6 +1662,12 @@ def run_live_loop(settings: Settings) -> None:
                 open_positions = executor.get_open_positions_count(
                     magic_number=settings.execution.magic_number
                 )
+                market_state = executor.get_market_state(
+                    symbol=settings.market.symbol,
+                    stale_seconds=_market_stale_seconds,
+                )
+                _notify_market_state(market_state)
+                market_is_open = bool(market_state.get("is_open", False))
 
                 # ── Self-learning (theo thời gian, mỗi X phút) ──────────────
                 if (
@@ -1563,7 +1713,7 @@ def run_live_loop(settings: Settings) -> None:
                 risk_manager.tick_cooldown()
 
                 # â”€â”€ Trailing SL â€” dá»‹ch SL cÃ¡c lá»‡nh Ä‘ang má»Ÿ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-                if settings.execution.trailing_sl.enabled and settings.execution.auto_trade and atr_value > 0:
+                if market_is_open and settings.execution.trailing_sl.enabled and settings.execution.auto_trade and atr_value > 0:
                     try:
                         open_pos_list = executor.get_open_positions(
                             magic_number=settings.execution.magic_number
@@ -1584,7 +1734,7 @@ def run_live_loop(settings: Settings) -> None:
                         LOGGER.error("TrailingSL error: %s", trail_err)
 
                 # ── Partial Take Profit — close partial position at 1R ────────────
-                if settings.risk.partial_tp_enabled and settings.execution.auto_trade and atr_value > 0:
+                if market_is_open and settings.risk.partial_tp_enabled and settings.execution.auto_trade and atr_value > 0:
                     try:
                         _sl_dist = atr_value * settings.risk.stop_loss_atr_multiple
                         if _sl_dist > 0:
@@ -1620,7 +1770,7 @@ def run_live_loop(settings: Settings) -> None:
                 # Exit Model: check whether open positions should exit early
                 _check_exit_model(latest_row, frames)
 
-                if settings.execution.dca.enabled and settings.execution.auto_trade and atr_value > 0:
+                if market_is_open and settings.execution.dca.enabled and settings.execution.auto_trade and atr_value > 0:
                     try:
                         dca_state = _load_dca_state()
                         open_pos_list_dca = executor.get_open_positions(
@@ -1708,6 +1858,7 @@ def run_live_loop(settings: Settings) -> None:
                     news_crawler is not None
                     and getattr(_novr_cfg, "news_trade_override", False)
                     and atr_value > 0
+                    and market_is_open
                 ):
                     import datetime as _dt_novr
                     _novr_now = _dt_novr.datetime.now(_dt_novr.timezone.utc)
@@ -1748,6 +1899,28 @@ def run_live_loop(settings: Settings) -> None:
                             stop_loss=_novr_sl,
                             take_profit=_novr_tp,
                         )
+
+                # ── Market session gate (broker state) ───────────────────────────────
+                if (
+                    _market_gate_enabled
+                    and decision.should_trade
+                    and not market_is_open
+                    and not settings.strategy.force_trade
+                ):
+                    _closed_reason = str(market_state.get("reason", "MARKET_CLOSED"))
+                    _next_open = str(market_state.get("next_open_utc") or "")
+                    if _next_open:
+                        _closed_reason = f"{_closed_reason} | next_open={_next_open}"
+                    LOGGER.info("MARKET GATE BLOCKED: %s", _closed_reason)
+                    decision = decision.__class__(
+                        should_trade=False,
+                        side=decision.side,
+                        confidence=decision.confidence,
+                        reason=f"MARKET_CLOSED: {_closed_reason}",
+                        entry_price=decision.entry_price,
+                        stop_loss=decision.stop_loss,
+                        take_profit=decision.take_profit,
+                    )
 
                 # â”€â”€ Position gate â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 position_allowed, position_reason = risk_manager.can_open_position(
@@ -1908,6 +2081,13 @@ def run_live_loop(settings: Settings) -> None:
                     "ict_weight": ict_weight,
                     "wyckoff_weight": wyckoff_weight,
                     "momentum_weight": momentum_weight,
+                    "market_is_open": market_is_open,
+                    "market_state_reason": str(market_state.get("reason", "")),
+                    "market_tick_age_sec": market_state.get("tick_age_sec"),
+                    "market_next_open_utc": market_state.get("next_open_utc"),
+                    "market_next_close_utc": market_state.get("next_close_utc"),
+                    "market_minutes_to_next_open": market_state.get("minutes_to_next_open"),
+                    "market_minutes_to_next_close": market_state.get("minutes_to_next_close"),
                     "signal_threshold": round(settings.strategy.signal_threshold, 4),
                     "model_path": str(settings.app.model_path),
                     "model_meta_path": str(settings.app.model_meta_path),

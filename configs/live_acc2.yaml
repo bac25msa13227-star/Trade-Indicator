@@ -37,6 +37,12 @@ market:
     M5: 500
     M1: 200
   timezone: UTC
+  enforce_market_open_gate: true
+  market_tick_stale_seconds: 300
+  market_preopen_alert_minutes: 30
+  market_preclose_alert_minutes: 30
+  market_preopen_alert_minutes_list: [1440, 30]
+  market_preclose_alert_minutes_list: [1440, 30]
 strategy:
   rsi_period: 14
   macd_fast: 12

@@ -1,0 +1,82 @@
+{
+  "name": "wf_locked_breakthrough_20260401",
+  "description": "Locked profile to reproduce ACC1/ACC2 benchmark metrics exactly on commit baseline.",
+  "base_config": "configs/snapshots/acc2_breakthrough_net21k_dd2333_20260401.yaml",
+  "initial_balance": 200.0,
+  "base_overrides": {
+    "strategy.ict_weight": 0.35,
+    "strategy.wyckoff_weight": 0.35,
+    "strategy.momentum_weight": 0.4,
+    "training.label_horizon": 12,
+    "training.min_return_threshold": 0.0008
+  },
+  "metric_tolerances": {
+    "sum_net_profit": 0.01,
+    "global_max_drawdown_pct": 0.01,
+    "profit_factor_global": 0.0001,
+    "total_trades": 0,
+    "win_rate": 0.0001
+  },
+  "profiles": {
+    "acc1_benchmark": {
+      "expected": {
+        "sum_net_profit": 66590.56,
+        "global_max_drawdown_pct": 39.53,
+        "profit_factor_global": 1.4809,
+        "total_trades": 1054,
+        "win_rate": 0.5901
+      },
+      "candidate": {
+        "threshold": 0.62,
+        "min_strategy_score": 0.1,
+        "sideway_min_strategy_score": 0.1,
+        "strong_volatility_min_strategy_score": 0.35,
+        "risk_min_conf": 0.7,
+        "sideway_min_conf": 0.8,
+        "volatile_min_conf": 0.72,
+        "require_trend_alignment": true,
+        "template": "block_3_17",
+        "risk_per_trade": 0.056,
+        "risk_tier_floor": 0.026,
+        "sideway_risk_multiplier": 1.0,
+        "strong_volatility_risk_multiplier": 0.7,
+        "anti_martingale_factor": 0.2,
+        "consecutive_loss_pause_count": 4,
+        "consecutive_loss_cooldown_bars": 16,
+        "daily_loss_limit_pct": 0.0,
+        "max_total_exposure_pct": 0.08,
+        "max_open_positions": 3
+      }
+    },
+    "acc2_benchmark": {
+      "expected": {
+        "sum_net_profit": 21057.65,
+        "global_max_drawdown_pct": 23.33,
+        "profit_factor_global": 2.1906,
+        "total_trades": 569,
+        "win_rate": 0.645
+      },
+      "candidate": {
+        "threshold": 0.76,
+        "min_strategy_score": 0.4,
+        "sideway_min_strategy_score": 0.15,
+        "strong_volatility_min_strategy_score": 0.35,
+        "risk_min_conf": 0.7,
+        "sideway_min_conf": 0.8,
+        "volatile_min_conf": 0.55,
+        "require_trend_alignment": true,
+        "template": "block_3_17",
+        "risk_per_trade": 0.036,
+        "risk_tier_floor": 0.03,
+        "sideway_risk_multiplier": 0.6,
+        "strong_volatility_risk_multiplier": 0.8,
+        "anti_martingale_factor": 0.5,
+        "consecutive_loss_pause_count": 3,
+        "consecutive_loss_cooldown_bars": 12,
+        "daily_loss_limit_pct": 0.05,
+        "max_total_exposure_pct": 0.2,
+        "max_open_positions": 3
+      }
+    }
+  }
+}

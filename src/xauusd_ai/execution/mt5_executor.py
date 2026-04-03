@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as _dt
 import json as _json
 import os
 import urllib.error as _urlerr
@@ -128,6 +129,158 @@ class MT5Executor:
         if tick is None:
             return 0.0
         return float(tick.ask) if side == "buy" else float(tick.bid)
+
+    def _collect_session_windows(
+        self,
+        symbol: str,
+        now_utc: _dt.datetime,
+        days_ahead: int = 8,
+    ) -> list[tuple[_dt.datetime, _dt.datetime]]:
+        fn = getattr(mt5, "symbol_info_session_trade", None)
+        if fn is None:
+            return []
+        windows: list[tuple[_dt.datetime, _dt.datetime]] = []
+        for day_offset in range(max(1, days_ahead + 1)):
+            day_dt = now_utc + _dt.timedelta(days=day_offset - 1)
+            day_start = _dt.datetime.combine(day_dt.date(), _dt.time.min, tzinfo=_dt.timezone.utc)
+            dow = day_dt.weekday()
+            for idx in range(12):
+                session = fn(symbol, dow, idx)
+                if session is None:
+                    break
+                try:
+                    open_sec = int(session[0])
+                    close_sec = int(session[1])
+                except Exception:
+                    continue
+                if open_sec == close_sec:
+                    continue
+                open_dt = day_start + _dt.timedelta(seconds=open_sec)
+                close_dt = day_start + _dt.timedelta(seconds=close_sec)
+                if close_sec <= open_sec:
+                    close_dt += _dt.timedelta(days=1)
+                windows.append((open_dt, close_dt))
+        windows.sort(key=lambda x: x[0])
+        dedup: list[tuple[_dt.datetime, _dt.datetime]] = []
+        seen: set[tuple[str, str]] = set()
+        for open_dt, close_dt in windows:
+            key = (open_dt.isoformat(), close_dt.isoformat())
+            if key in seen:
+                continue
+            seen.add(key)
+            dedup.append((open_dt, close_dt))
+        return dedup
+
+    def get_market_state(self, symbol: str | None = None, stale_seconds: int = 300) -> dict[str, Any]:
+        """Return broker-aware market open/closed state.
+
+        Uses MT5 bridge `/market/state` when available; otherwise uses local MT5.
+        """
+        symbol = symbol or self.settings.market.symbol
+        stale_seconds = max(int(stale_seconds or 300), 30)
+
+        try:
+            self._ensure_connection()
+        except Exception as exc:
+            return {
+                "symbol": symbol,
+                "is_open": False,
+                "reason": f"CONNECTION_ERROR:{exc}",
+                "stale_seconds": stale_seconds,
+            }
+
+        if mt5 is None:
+            if _BRIDGE_URL:
+                try:
+                    return _bridge_call(
+                        "GET",
+                        f"/market/state?symbol={symbol}&stale_seconds={stale_seconds}",
+                    )
+                except Exception as exc:
+                    return {
+                        "symbol": symbol,
+                        "is_open": False,
+                        "reason": f"BRIDGE_ERROR:{exc}",
+                        "stale_seconds": stale_seconds,
+                    }
+            return {
+                "symbol": symbol,
+                "is_open": False,
+                "reason": "MT5_UNAVAILABLE",
+                "stale_seconds": stale_seconds,
+            }
+
+        now_utc = _dt.datetime.now(_dt.timezone.utc)
+        info = mt5.symbol_info(symbol)
+        if info is None:
+            return {
+                "symbol": symbol,
+                "is_open": False,
+                "reason": f"SYMBOL_INFO_ERROR:{mt5.last_error()}",
+                "stale_seconds": stale_seconds,
+            }
+        tick = mt5.symbol_info_tick(symbol)
+
+        trade_mode = int(getattr(info, "trade_mode", -1))
+        trade_enabled = trade_mode not in (0, 3)  # disabled / close-only
+
+        tick_time_utc: _dt.datetime | None = None
+        tick_age_sec: float | None = None
+        if tick is not None and getattr(tick, "time", 0):
+            tick_time_utc = _dt.datetime.fromtimestamp(int(tick.time), tz=_dt.timezone.utc)
+            tick_age_sec = max(0.0, (now_utc - tick_time_utc).total_seconds())
+        tick_is_fresh = tick_age_sec is not None and tick_age_sec <= stale_seconds
+
+        sessions = self._collect_session_windows(symbol, now_utc, days_ahead=8)
+        schedule_is_open: bool | None = None
+        next_open_utc: _dt.datetime | None = None
+        next_close_utc: _dt.datetime | None = None
+        if sessions:
+            schedule_is_open = False
+            for open_dt, close_dt in sessions:
+                if open_dt <= now_utc < close_dt:
+                    schedule_is_open = True
+                    next_close_utc = close_dt
+                    break
+                if open_dt > now_utc:
+                    next_open_utc = open_dt
+                    break
+
+        is_open = bool(trade_enabled and tick_is_fresh and (schedule_is_open is not False))
+        if not trade_enabled:
+            reason = "TRADE_DISABLED"
+        elif schedule_is_open is False:
+            reason = "OUTSIDE_SESSION"
+        elif not tick_is_fresh:
+            reason = "STALE_TICK"
+        else:
+            reason = "OPEN"
+
+        mins_to_open = None
+        if next_open_utc is not None:
+            mins_to_open = int((next_open_utc - now_utc).total_seconds() // 60)
+        mins_to_close = None
+        if next_close_utc is not None:
+            mins_to_close = int((next_close_utc - now_utc).total_seconds() // 60)
+
+        return {
+            "symbol": symbol,
+            "server_time_utc": now_utc.isoformat(),
+            "is_open": is_open,
+            "reason": reason,
+            "trade_mode": trade_mode,
+            "trade_enabled": trade_enabled,
+            "tick_time_utc": tick_time_utc.isoformat() if tick_time_utc else None,
+            "tick_age_sec": round(float(tick_age_sec), 2) if tick_age_sec is not None else None,
+            "tick_is_fresh": bool(tick_is_fresh),
+            "stale_seconds": stale_seconds,
+            "schedule_available": bool(sessions),
+            "schedule_is_open": schedule_is_open,
+            "next_open_utc": next_open_utc.isoformat() if next_open_utc else None,
+            "next_close_utc": next_close_utc.isoformat() if next_close_utc else None,
+            "minutes_to_next_open": mins_to_open,
+            "minutes_to_next_close": mins_to_close,
+        }
 
     def get_open_positions_count(self, magic_number: int | None = None) -> int:
         """Đếm số lệnh đang mở (theo magic number nếu có)."""

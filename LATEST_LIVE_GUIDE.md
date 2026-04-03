@@ -28,9 +28,51 @@ Quick threshold snapshot:
 
 ## Data source status (kept locally)
 
-Folder:
-
 - `src/xauusd_ai/real_data`
+
+## Locked WF verification (khớp 100%)
+
+Để tái tạo đúng 2 benchmark:
+
+- ACC1: `66,590.56 | DD 39.53% | PF 1.4809 | 1054 | WR 59.01%`
+- ACC2: `21,057.65 | DD 23.33% | PF 2.1906 | 569 | WR 64.50%`
+
+Dùng đúng manifest + script:
+
+- Manifest: `configs/benchmarks/wf_locked_breakthrough_20260401.json`
+- Verify script: `scripts/wf_verify_locked_benchmarks.py`
+
+Chạy verify:
+
+```bash
+PYTHONPATH=src python3 scripts/wf_verify_locked_benchmarks.py
+```
+
+Report sẽ ghi ra:
+
+- `outputs/wf_locked_verify_report.json`
+
+Quan trọng:
+
+- Bộ benchmark này chạy theo đường WF optimizer (train theo từng fold), không đọc trực tiếp live model pkl.
+- Runtime benchmark lock ở feature-set hiện tại (`FEATURE_COLUMNS=59`).
+- Nếu thay đổi feature engineering (ví dụ thêm 25 features mới), benchmark cũ sẽ không còn khớp 100%.
+
+## Market open/close gate (mới)
+
+- Bot gọi trạng thái sàn từ MT5 bridge (`/market/state`) mỗi vòng lặp.
+- Khi sàn đóng: bot tự block lệnh mới (`reason=MARKET_CLOSED:*`) nên không còn spam tín hiệu vào lệnh lúc market closed.
+- Có cảnh báo Telegram:
+  - chuyển trạng thái mở ↔ đóng,
+  - trước mở cửa `1 ngày` và `30 phút`,
+  - trước đóng cửa `1 ngày` và `30 phút`.
+- Thông số trong `market`:
+  - `enforce_market_open_gate`
+  - `market_tick_stale_seconds`
+  - `market_preopen_alert_minutes_list` (ví dụ `[1440, 30]`)
+  - `market_preclose_alert_minutes_list` (ví dụ `[1440, 30]`)
+
+## Cách chạy FULL stack (có MLflow/Grafana/Airflow)
 
 Core multi-timeframe data still available from `2003-05-05` to `2026-03-30`:
 

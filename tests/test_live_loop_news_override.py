@@ -170,6 +170,15 @@ class LiveLoopNewsOverrideTests(unittest.TestCase):
             executor.get_recently_closed_positions.return_value = []
             executor.get_open_positions.return_value = []
             executor.get_current_price.return_value = None
+            executor.get_market_state.return_value = {
+                "is_open": True,
+                "reason": "OPEN",
+                "next_open_utc": None,
+                "next_close_utc": None,
+                "minutes_to_next_open": None,
+                "minutes_to_next_close": None,
+                "tick_age_sec": 1.0,
+            }
             executor.place_order.return_value = {"position": 778899}
 
             risk_manager = _StubRiskManager()
@@ -216,4 +225,3 @@ class LiveLoopNewsOverrideTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
