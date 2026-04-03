@@ -1159,6 +1159,102 @@ def run_live_loop(settings: Settings) -> None:
     _market_last_reason: str = ""
     _market_preopen_notified_keys: set[str] = set()
     _market_preclose_notified_keys: set[str] = set()
+    _sltp_tracker: dict[int, dict[str, float | str]] = {}
+    _sltp_tracker_bootstrapped = False
+    _sltp_notify_eps = 1e-4
+
+    def _price_changed(old_value: float, new_value: float, eps: float = _sltp_notify_eps) -> bool:
+        return abs(float(old_value) - float(new_value)) > eps
+
+    def _track_sltp_state(ticket: int, side: str, sl_value: float, tp_value: float) -> None:
+        _ticket = int(ticket)
+        if _ticket <= 0:
+            return
+        _sltp_tracker[_ticket] = {
+            "side": str(side),
+            "sl": float(sl_value),
+            "tp": float(tp_value),
+        }
+
+    def _notify_sltp_change(
+        *,
+        ticket: int,
+        side: str,
+        old_sl: float,
+        new_sl: float,
+        old_tp: float,
+        new_tp: float,
+        reason: str,
+        entry_price: float | None = None,
+        current_price: float | None = None,
+        rr_now: float | None = None,
+    ) -> None:
+        changed_sl = _price_changed(old_sl, new_sl)
+        changed_tp = _price_changed(old_tp, new_tp)
+        if not changed_sl and not changed_tp:
+            return
+        sl_line = f"├ SL: {old_sl:.2f} → {new_sl:.2f}" if changed_sl else f"├ SL: {new_sl:.2f} (giữ nguyên)"
+        tp_line = f"├ TP: {old_tp:.2f} → {new_tp:.2f}" if changed_tp else f"├ TP: {new_tp:.2f} (giữ nguyên)"
+        tail = []
+        if entry_price is not None and entry_price > 0:
+            tail.append(f"Entry {entry_price:.2f}")
+        if current_price is not None and current_price > 0:
+            tail.append(f"Price {current_price:.2f}")
+        if rr_now is not None:
+            tail.append(f"R {rr_now:.2f}")
+        tail_text = " | ".join(tail)
+        msg = (
+            f"🛡️ <b>SL/TP updated #{int(ticket)}</b> ({str(side).upper()})\n"
+            f"├ Reason: {reason}\n"
+            f"{sl_line}\n"
+            f"{tp_line}"
+        )
+        if tail_text:
+            msg += f"\n└ {tail_text}"
+        try:
+            notifier.send_message(msg)
+        except Exception as _sl_tp_notify_err:
+            LOGGER.warning("SL/TP notify failed ticket=%s: %s", ticket, _sl_tp_notify_err)
+
+    def _sync_sltp_tracker(open_positions_list: list[dict[str, object]], *, source: str = "SYNC") -> None:
+        nonlocal _sltp_tracker_bootstrapped
+        current_tickets: set[int] = set()
+        for pos in open_positions_list:
+            ticket = _safe_int(pos.get("ticket"), 0)
+            if ticket <= 0:
+                continue
+            current_tickets.add(ticket)
+            side = str(pos.get("side", ""))
+            sl_value = _safe_float(pos.get("sl"), 0.0)
+            tp_value = _safe_float(pos.get("tp"), 0.0)
+            if not _sltp_tracker_bootstrapped:
+                _track_sltp_state(ticket, side, sl_value, tp_value)
+                continue
+            prev = _sltp_tracker.get(ticket)
+            if prev is None:
+                _track_sltp_state(ticket, side, sl_value, tp_value)
+                continue
+            old_sl = _safe_float(prev.get("sl"), 0.0)
+            old_tp = _safe_float(prev.get("tp"), 0.0)
+            if _price_changed(old_sl, sl_value) or _price_changed(old_tp, tp_value):
+                _notify_sltp_change(
+                    ticket=ticket,
+                    side=side or str(prev.get("side", "")),
+                    old_sl=old_sl,
+                    new_sl=sl_value,
+                    old_tp=old_tp,
+                    new_tp=tp_value,
+                    reason=source,
+                    entry_price=_safe_float(pos.get("open_price"), 0.0),
+                    current_price=_safe_float(pos.get("current_price"), 0.0),
+                )
+            _track_sltp_state(ticket, side, sl_value, tp_value)
+
+        stale_tickets = [ticket for ticket in list(_sltp_tracker.keys()) if ticket not in current_tickets]
+        for stale_ticket in stale_tickets:
+            _sltp_tracker.pop(stale_ticket, None)
+        if not _sltp_tracker_bootstrapped:
+            _sltp_tracker_bootstrapped = True
 
     def _is_in_alert_window(minutes_to_event: int, alert_lead_minutes: int) -> bool:
         if minutes_to_event <= 0 or alert_lead_minutes <= 0:
@@ -1659,9 +1755,11 @@ def run_live_loop(settings: Settings) -> None:
                 # Fallback: MT5 khong chay trong Docker -> dung peak_balance da luu
                 if account_balance == 0.0 and risk_manager._peak_balance > 0:
                     account_balance = risk_manager._peak_balance
-                open_positions = executor.get_open_positions_count(
+                _open_positions_snapshot = executor.get_open_positions(
                     magic_number=settings.execution.magic_number
                 )
+                open_positions = len(_open_positions_snapshot)
+                _sync_sltp_tracker(_open_positions_snapshot, source="SYNC_DETECT")
                 market_state = executor.get_market_state(
                     symbol=settings.market.symbol,
                     stale_seconds=_market_stale_seconds,
@@ -1715,20 +1813,48 @@ def run_live_loop(settings: Settings) -> None:
                 # â”€â”€ Trailing SL â€” dá»‹ch SL cÃ¡c lá»‡nh Ä‘ang má»Ÿ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 if market_is_open and settings.execution.trailing_sl.enabled and settings.execution.auto_trade and atr_value > 0:
                     try:
-                        open_pos_list = executor.get_open_positions(
-                            magic_number=settings.execution.magic_number
-                        )
+                        open_pos_list = list(_open_positions_snapshot)
                         for pos in open_pos_list:
                             new_sl = risk_manager.compute_trailing_sl(pos, atr_value)
                             if new_sl is not None:
+                                old_sl = _safe_float(pos.get("sl"), 0.0)
+                                old_tp = _safe_float(pos.get("tp"), 0.0)
                                 executor.modify_position_sl(pos["ticket"], new_sl)
+                                rr_now = (
+                                    (pos["current_price"] - pos["open_price"]) / (atr_value * settings.risk.stop_loss_atr_multiple)
+                                    if pos["side"] == "buy" else
+                                    (pos["open_price"] - pos["current_price"]) / (atr_value * settings.risk.stop_loss_atr_multiple)
+                                )
+                                side_value = str(pos.get("side", ""))
+                                entry_price = _safe_float(pos.get("open_price"), 0.0)
+                                moved_to_be = (
+                                    (side_value == "buy" and old_sl + _sltp_notify_eps < entry_price <= new_sl + _sltp_notify_eps)
+                                    or (side_value == "sell" and old_sl - _sltp_notify_eps > entry_price >= new_sl - _sltp_notify_eps)
+                                )
+                                reason_tag = "TRAILING_SL/BREAKEVEN" if moved_to_be else "TRAILING_SL"
+                                _notify_sltp_change(
+                                    ticket=_safe_int(pos.get("ticket"), 0),
+                                    side=side_value,
+                                    old_sl=old_sl,
+                                    new_sl=float(new_sl),
+                                    old_tp=old_tp,
+                                    new_tp=old_tp,
+                                    reason=reason_tag,
+                                    entry_price=entry_price,
+                                    current_price=_safe_float(pos.get("current_price"), 0.0),
+                                    rr_now=rr_now,
+                                )
+                                _track_sltp_state(
+                                    _safe_int(pos.get("ticket"), 0),
+                                    side_value,
+                                    float(new_sl),
+                                    old_tp,
+                                )
                                 LOGGER.info(
                                     "TrailingSL: ticket=%d %s old_sl=%.2f â†’ new_sl=%.2f | price=%.2f R=%.2f",
                                     pos["ticket"], pos["side"],
                                     pos["sl"], new_sl, pos["current_price"],
-                                    (pos["current_price"] - pos["open_price"]) / (atr_value * settings.risk.stop_loss_atr_multiple)
-                                    if pos["side"] == "buy" else
-                                    (pos["open_price"] - pos["current_price"]) / (atr_value * settings.risk.stop_loss_atr_multiple),
+                                    rr_now,
                                 )
                     except Exception as trail_err:
                         LOGGER.error("TrailingSL error: %s", trail_err)

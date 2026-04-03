@@ -142,9 +142,14 @@ body{background:var(--bg);color:var(--text);font-family:var(--f);font-size:14px;
 .tbl td{padding:6px 9px;border-bottom:1px solid rgba(255,255,255,.025);vertical-align:middle}
 .tbl tr:last-child td{border-bottom:none}
 .tbl tbody tr:hover td{background:rgba(255,255,255,.018)}
-.scroll-y{overflow:visible;max-height:none;scrollbar-width:thin;scrollbar-color:var(--card3) transparent}
+.scroll-y{overflow-x:auto;overflow-y:auto;max-height:none;scrollbar-width:thin;scrollbar-color:var(--card3) transparent}
 .scroll-y::-webkit-scrollbar{width:4px}
 .scroll-y::-webkit-scrollbar-thumb{background:var(--card3);border-radius:99px}
+.table-wrap{width:100%;max-width:100%;overflow-x:auto;overflow-y:visible;-webkit-overflow-scrolling:touch}
+.table-wrap .tbl{width:max-content;min-width:100%}
+.reason-cell{max-width:260px;min-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.split-2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+@media(max-width:1200px){.split-2{grid-template-columns:1fr}}
 
 /* ═══ CHARTS ═══ */
 .chart{position:relative;height:220px}
@@ -1045,11 +1050,11 @@ function inferTradePlan(trade, signals){
   const tradeTs = parseTs(trade.time ?? trade.close_time ?? trade.ts ?? trade.open_time);
   const tradeSide = normSide(trade.side ?? trade.direction);
   if(!Number.isFinite(tradeTs) || !tradeSide) return null;
-  const maxLagMs = 24 * 60 * 60 * 1000;
+  const maxLagMs = 7 * 24 * 60 * 60 * 1000;
   let best=null;
+  let bestRank=2;
   let bestDelta=Number.POSITIVE_INFINITY;
   for(const sg of (signals||[])){
-    if(!isTrue(sg.should_trade)) continue;
     if(normSide(sg.direction ?? sg.signal ?? sg.side)!==tradeSide) continue;
     const sigTs = parseTs(sg.time ?? sg.ts ?? sg.bar_time);
     if(!Number.isFinite(sigTs) || sigTs>tradeTs) continue;
@@ -1057,8 +1062,10 @@ function inferTradePlan(trade, signals){
     if(delta>maxLagMs) continue;
     const hasPlan = sg.entry_price!=null || sg.stop_loss!=null || sg.take_profit!=null || sg.sl!=null || sg.tp!=null;
     if(!hasPlan) continue;
-    if(delta<bestDelta){
+    const rank = isTrue(sg.should_trade) ? 0 : 1;
+    if(rank<bestRank || (rank===bestRank && delta<bestDelta)){
       best=sg;
+      bestRank=rank;
       bestDelta=delta;
     }
   }
@@ -1229,6 +1236,9 @@ function renderBars(id,labels,values){
 /* ═══════════════════════════════ RENDER OVERVIEW ═══════════════════════════════ */
 function renderOverview(acct,d){
   const s=d.status||{};const mod=d.model||{};const bt=d.backtest||{};const day=d.daily||{};
+  const wf=d.walkforward||{};
+  const wfAgg=wf.aggregate||{};
+  const wfSim=wfAgg.concurrent_sim||{};
   const bench=d.benchmark||{};
   const trades=d.recent_trades||[];const sig=(d.recent_signals||[]).slice(-1)[0]||{};
   const cbActive=day.killed||day.cooldown_bars>0;
@@ -1306,7 +1316,7 @@ function renderOverview(acct,d){
     </div>
   </div>
 
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+  <div class="split-2" style="margin-bottom:12px">
     <div class="card ${shouldTrade?'glow-green':liveConf&&thr&&liveConf>thr*.85?'glow-yellow':''}">
       <div class="card-ttl">&#9889; Current Live Signal</div>
       <div class="sig-hero">
@@ -1387,6 +1397,13 @@ function renderOverview(acct,d){
         ${statBox('Win Rate',pct(bt.win_rate))}
         ${statBox('Max DD',pctR(bt.max_drawdown_pct),'loss')}
       </div>
+      <div class="dvd"><span>Walkforward Summary</span></div>
+      <div class="g4">
+        ${statBox('Avg Precision',pct(wfAgg.avg_precision))}
+        ${statBox('Avg Win Rate',pct(wfSim.avg_win_rate ?? wfAgg.signal_win_rate),(toNum(wfSim.avg_win_rate ?? wfAgg.signal_win_rate)??0)>=0.5?'win':'loss')}
+        ${statBox('Avg PF',fmt(wfSim.avg_profit_factor))}
+        ${statBox('Avg Max DD',pctR(wfSim.avg_max_drawdown_pct),'loss')}
+      </div>
       <div class="dvd"><span>Locked Benchmark</span></div>
       <div class="g4">
         ${statBox('Net',benchOk?dol(bench.net_profit):'&#8212;',benchOk&&(+bench.net_profit)>=0?'win':'')}
@@ -1399,16 +1416,17 @@ function renderOverview(acct,d){
 
   <div class="card">
     <div class="card-ttl">&#128197; Recent Trades (last 5)</div>
-    <table class="tbl">
+    <div class="table-wrap"><table class="tbl">
       <thead><tr><th>Time</th><th>Side</th><th>PnL</th><th>Close Type</th></tr></thead>
       <tbody>${miniRows||'<tr><td colspan="4" class="dim" style="text-align:center;padding:16px">No trades yet</td></tr>'}</tbody>
-    </table>
+    </table></div>
   </div>`;
 }
 
 /* ═══════════════════════════════ RENDER TRADING ═══════════════════════════════ */
 function renderTrading(acct,d){
   const s=d.status||{};const mod=d.model||{};const day=d.daily||{};
+  const runtime=d.runtime||{};
   const trades=d.recent_trades||[];const signals=d.recent_signals||[];
   const signalRows=signals.slice(-State.signalLimit).reverse();
   const signalOutcomes=buildSignalOutcomes(signalRows, trades);
@@ -1457,7 +1475,11 @@ function renderTrading(acct,d){
   const strategyRaw=toNum(debugRow.strategy_raw_score) ??
     (((ictScore??0)*ictWeight + (wyckoffScore??0)*wyckoffWeight + (momentumScore??0)*momentumWeight)/strategyTotalWeight);
   const regimeBias=toNum(debugRow.regime_bias) ?? (vr===0?0.5:(vr===2?1.2:1.0));
-  const stratRequiredMin=toNum(debugRow.strategy_required_min);
+  const minScoreNormal=toNum(runtime.min_strategy_score) ?? 0.05;
+  const minScoreSideway=toNum(runtime.sideway_min_strategy_score) ?? 0.10;
+  const minScoreStrong=toNum(runtime.strong_volatility_min_strategy_score) ?? 0.35;
+  const fallbackReqMin=vr===0?minScoreSideway:(vr===2?minScoreStrong:minScoreNormal);
+  const stratRequiredMin=toNum(debugRow.strategy_required_min) ?? fallbackReqMin;
   const strategyGateRaw=(debugRow.strategy_gate_pass ?? s.strategy_gate_pass);
   const stratOk=strategyGateRaw!=null
     ? isTrue(strategyGateRaw)
@@ -1514,11 +1536,12 @@ function renderTrading(acct,d){
     const outcome=signalOutcomes[idx]||{label:'N/A',cls:'dim',pnl:null};
     const timeTxt=pickTimeText(sg.time, sg.ts, sg.bar_time);
     const sgScore=toNum(sg.strategy_score);
-    const sgIct=toNum(sg.ict_score);
-    const sgWyckoff=toNum(sg.wyckoff_score);
-    const sgMomentum=toNum(sg.momentum_score);
-    const sgRegimeBias=toNum(sg.regime_bias);
-    const sgReqMin=toNum(sg.strategy_required_min);
+    const sgVr=toNum(sg.volatility_regime);
+    const sgRegimeBias=toNum(sg.regime_bias) ?? (sgVr===0?0.5:(sgVr===2?1.2:1.0));
+    const sgReqMin=toNum(sg.strategy_required_min) ?? (sgVr===0?minScoreSideway:(sgVr===2?minScoreStrong:minScoreNormal));
+    const sgIct=toNum(sg.ict_score ?? sgScore);
+    const sgWyckoff=toNum(sg.wyckoff_score ?? sgScore);
+    const sgMomentum=toNum(sg.momentum_score ?? sgScore);
     const sgGateRaw=sg.strategy_gate_pass;
     const sgGate=sgGateRaw!=null
       ? isTrue(sgGateRaw)
@@ -1537,7 +1560,7 @@ function renderTrading(acct,d){
       <td class="dim">${px(sg.stop_loss||sg.sl)}</td>
       <td class="dim">${px(sg.take_profit||sg.tp)}</td>
       <td class="${outcome.cls}">${outcome.label}${outcome.pnl!=null?` (${dol(outcome.pnl)})`:''}</td>
-      <td class="dim" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${q((sg.reason||'').slice(0,65))}</td>
+      <td class="dim reason-cell">${q((sg.reason||'').slice(0,90))}</td>
     </tr>`;
   }).join('');
 
@@ -1633,17 +1656,17 @@ function renderTrading(acct,d){
     </div>
   </div>
 
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+  <div class="split-2">
     <div class="card">
       <div class="card-ttl">&#128267; Recent Signals (${Math.min(signals.length,State.signalLimit)} shown / ${signals.length})</div>
-      <div class="scroll-y" style="overflow-x:auto"><table class="tbl">
+      <div class="table-wrap scroll-y"><table class="tbl">
         <thead><tr><th>Time</th><th>Side</th><th>Conf</th><th>Score</th><th>ICT</th><th>WYC</th><th>MOM</th><th>Reg×Min</th><th>Gate</th><th>Entry</th><th>SL</th><th>TP</th><th>Outcome</th><th>Reason</th></tr></thead>
         <tbody>${sgRows||'<tr><td colspan="14" class="dim" style="text-align:center;padding:16px">No signals</td></tr>'}</tbody>
       </table></div>
     </div>
     <div class="card">
       <div class="card-ttl">&#128200; Live Trades (${Math.min(trades.length,State.signalLimit)} shown / ${trades.length})</div>
-      <div class="scroll-y" style="overflow-x:auto"><table class="tbl">
+      <div class="table-wrap scroll-y"><table class="tbl">
         <thead><tr><th>Time</th><th>Side</th><th>Entry</th><th>SL</th><th>TP</th><th>Exit</th><th>PnL</th><th>Type</th></tr></thead>
         <tbody>${trRows||'<tr><td colspan="8" class="dim" style="text-align:center;padding:16px">No trades</td></tr>'}</tbody>
       </table></div>
@@ -1690,7 +1713,7 @@ function renderPnl(acct,d){
   </div>
   <div class="card">
     <div class="card-ttl">Trade Log (${trades.length} trades)</div>
-    <div class="scroll-y"><table class="tbl">
+    <div class="table-wrap scroll-y"><table class="tbl">
       <thead><tr><th>Time</th><th>Side</th><th>PnL</th><th>Cumulative</th><th>Close Type</th></tr></thead>
       <tbody>${trRows||'<tr><td colspan="5" class="dim" style="text-align:center;padding:14px">No trades yet</td></tr>'}</tbody>
     </table></div>
@@ -1705,9 +1728,13 @@ function renderPnl(acct,d){
 function renderBacktest(acct,d){
   const bt=d.backtest||{};
   const eq=d.backtest_equity||{labels:[],values:[],individual:[]};
+  const btStart=String(bt.trade_start||'').slice(0,10) || '&#8212;';
+  const btEnd=String(bt.trade_end||'').slice(0,10) || '&#8212;';
+  const btDays=bt.trade_days ?? '?';
+  const btSource=bt.source ? `&nbsp;&#183;&nbsp; ${q(bt.source)}` : '';
   el(`sb-${acct}-backtest`).innerHTML=`
   <div class="card" style="margin-bottom:12px">
-    <div class="card-ttl">Backtest Report &nbsp;<span class="dim" style="font-size:.67rem;text-transform:none">${String(bt.trade_start||'').slice(0,10)} &#8594; ${String(bt.trade_end||'').slice(0,10)} &nbsp;&#183;&nbsp; ${bt.trade_days??'?'} days</span></div>
+    <div class="card-ttl">Backtest Report &nbsp;<span class="dim" style="font-size:.67rem;text-transform:none">${btStart} &#8594; ${btEnd} &nbsp;&#183;&nbsp; ${btDays} days${btSource}</span></div>
     <div class="g4" style="margin-bottom:9px">
       ${statBox('Starting Balance',dol(bt.starting_balance))}
       ${statBox('Ending Balance',dol(bt.ending_balance),'win')}
@@ -1802,7 +1829,7 @@ function renderWalkforward(acct,d){
   </div>
   <div class="card">
     <div class="card-ttl">Per-Fold Results (${folds.length} folds)</div>
-    <div style="overflow-x:auto"><table class="tbl">
+    <div class="table-wrap"><table class="tbl">
       <thead><tr><th>Fold</th><th>Train</th><th>Test</th><th>Thresh</th><th>Prec</th><th>ROC-AUC</th><th>Signals</th><th>Win%</th><th>PF</th><th>Return</th><th>Max DD</th><th>Trades</th></tr></thead>
       <tbody>${fRows||'<tr><td colspan="12" class="dim" style="text-align:center;padding:14px">No fold data</td></tr>'}</tbody>
     </table></div>
