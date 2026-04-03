@@ -285,6 +285,64 @@ body{background:var(--bg);color:var(--text);font-family:var(--f);font-size:14px;
 .t-sell{border-left:3px solid var(--red)}
 .t-warn{border-left:3px solid var(--yellow)}
 .t-danger{border-left:3px solid var(--red);background:rgba(239,68,68,.07)}
+.modal-open{overflow:hidden}
+.pm-backdrop{
+  position:fixed;inset:0;z-index:10020;
+  background:rgba(2,6,10,.72);
+  backdrop-filter:blur(6px);
+  display:flex;align-items:center;justify-content:center;
+  opacity:0;pointer-events:none;
+  transition:opacity .22s ease;
+  padding:16px;
+}
+.pm-backdrop.show{opacity:1;pointer-events:auto}
+.pm-card{
+  width:min(560px,100%);
+  border-radius:18px;
+  border:1px solid rgba(110,249,255,.34);
+  background:linear-gradient(165deg,rgba(8,14,20,.98),rgba(12,19,28,.96));
+  box-shadow:0 20px 60px rgba(0,0,0,.55),0 0 0 1px rgba(110,249,255,.12),0 0 24px rgba(110,249,255,.16);
+  transform:translateY(12px) scale(.985);
+  transition:transform .22s ease,opacity .22s ease;
+}
+.pm-backdrop.show .pm-card{transform:translateY(0) scale(1)}
+.pm-head{display:flex;align-items:center;justify-content:space-between;padding:16px 18px 8px}
+.pm-kicker{font-size:.62rem;letter-spacing:.14em;text-transform:uppercase;color:var(--text3);font-weight:800}
+.pm-x{
+  width:30px;height:30px;border-radius:10px;border:1px solid var(--bdr2);
+  background:rgba(255,255,255,.03);color:var(--text2);cursor:pointer;
+  font-size:1rem;line-height:1;font-family:var(--m);font-weight:700;
+}
+.pm-x:hover{border-color:rgba(110,249,255,.35);color:var(--text)}
+.pm-body{padding:0 18px 16px}
+.pm-title{font-size:1.08rem;font-weight:800;letter-spacing:.01em;margin-bottom:6px}
+.pm-desc{font-size:.8rem;color:var(--text2);line-height:1.55;margin-bottom:12px}
+.pm-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.pm-box{
+  background:rgba(255,255,255,.02);
+  border:1px solid var(--bdr);
+  border-radius:12px;
+  padding:9px 10px;
+}
+.pm-lbl{font-size:.58rem;letter-spacing:.08em;text-transform:uppercase;color:var(--text3);margin-bottom:4px}
+.pm-val{font-family:var(--m);font-size:.9rem;font-weight:800}
+.pm-foot{display:flex;justify-content:flex-end;gap:8px;padding:12px 18px 16px;border-top:1px solid var(--bdr)}
+.pm-btn{
+  border:1px solid var(--bdr2);border-radius:10px;padding:9px 13px;
+  font-size:.76rem;font-weight:800;cursor:pointer;font-family:var(--f);
+  background:rgba(255,255,255,.02);color:var(--text2);
+}
+.pm-btn:hover{color:var(--text);border-color:rgba(110,249,255,.34)}
+.pm-btn.ok{
+  color:var(--text);
+  border-color:rgba(110,249,255,.38);
+  background:linear-gradient(135deg,rgba(110,249,255,.22),rgba(53,255,146,.12));
+}
+.pm-btn.ok:hover{box-shadow:0 0 16px rgba(110,249,255,.22)}
+@media(max-width:700px){
+  .pm-grid{grid-template-columns:1fr}
+  .pm-title{font-size:.97rem}
+}
 
 /* ═══ MOBILE RESPONSIVE ═══ */
 @media(max-width:900px){
@@ -660,6 +718,38 @@ body::after{
 .quick-btn[data-action="compact"].active{
   background:linear-gradient(135deg,rgba(255,200,87,.16),rgba(255,139,71,.10));
   border-color:rgba(255,200,87,.24);
+}
+.profile-row{display:flex;gap:8px;flex-wrap:wrap}
+.profile-btn{
+  border:none;
+  outline:none;
+  cursor:pointer;
+  border-radius:999px;
+  padding:8px 12px;
+  font-family:var(--f);
+  font-size:.76rem;
+  font-weight:800;
+  color:var(--text2);
+  background:rgba(7,13,20,.94);
+  border:1px solid rgba(110,249,255,.12);
+  transition:transform .18s ease,box-shadow .18s ease,background .18s ease,color .18s ease,border-color .18s ease;
+}
+.profile-btn:hover{
+  transform:translateY(-1px);
+  border-color:rgba(110,249,255,.22);
+  color:var(--text);
+}
+.profile-btn.active{
+  background:linear-gradient(135deg,rgba(110,249,255,.20),rgba(53,255,146,.10));
+  color:var(--text);
+  border-color:rgba(110,249,255,.34);
+  box-shadow:var(--gb);
+}
+.profile-btn:disabled,
+.profile-btn.busy{
+  cursor:not-allowed;
+  opacity:.66;
+  transform:none !important;
 }
 .signal-slider-wrap{
   display:flex;
@@ -1802,12 +1892,63 @@ function renderTrading(acct,d){
 function renderPnl(acct,d){
   const trades=d.recent_trades||[];
   const series=d.pnl_series||{labels:[],values:[],individual:[]};
+  const explain=d.pnl_explain||{};
+  const profiles=d.profile_presets||{};
   const W=trades.filter(t=>String(t.is_win||'').toLowerCase()==='true'||t.is_win===true||t.is_win===1||parseFloat(t.pnl??t.profit??0)>0).length;
   const L=trades.length-W;
   const wTrades=trades.filter(t=>String(t.is_win||'').toLowerCase()==='true'||t.is_win===true||parseFloat(t.pnl??t.profit??0)>0);
   const lTrades=trades.filter(t=>+(t.pnl??t.profit??0)<0);
   const avgWin=W>0?wTrades.reduce((a,t)=>a+parseFloat(t.pnl??t.profit??0),0)/W:0;
   const avgLoss=L>0&&lTrades.length>0?lTrades.reduce((a,t)=>a+parseFloat(t.pnl??t.profit??0),0)/lTrades.length:0;
+  const profileOrder=['conservative','balanced','aggressive'].filter(k=>profiles[k]);
+  if(!profileOrder.length){
+    profiles.balanced={
+      label:'Balanced',
+      description:'Baseline profile estimate is unavailable yet.',
+      estimated_trades_per_day:0,
+      estimated_dd_pct:0,
+      effective_threshold_est:toNum((d.model||{}).threshold_effective??(d.model||{}).threshold),
+    };
+    profileOrder.push('balanced');
+  }
+  const serverProfileMode=String(d.profile_active||'').toLowerCase();
+  let activeProfileMode=profiles[serverProfileMode]?serverProfileMode:(State.profileMode?.[acct]||'balanced');
+  if(!profiles[activeProfileMode]) activeProfileMode=profileOrder[0];
+  if(!State.profileMode) State.profileMode={acc1:'balanced',acc2:'balanced'};
+  State.profileMode[acct]=activeProfileMode;
+  const activeProfile=profiles[activeProfileMode]||{};
+  const pfTxt=v=>v==null?'&#8212;':((+v)>=999?'&#8734;':fmt(v,2));
+  const isProfileApplying=!!(State.profileApplyBusy&&State.profileApplyBusy[acct]);
+  const applyingMode=(State.profileApplyMode&&State.profileApplyMode[acct])||'';
+  const profileBtns=profileOrder.map(mode=>{
+    const p=profiles[mode]||{};
+    const rawLabel=String(p.label||mode.toUpperCase());
+    const shownLabel=mode==='balanced'?`${rawLabel} (Base config)`:rawLabel;
+    const lbl=q(shownLabel);
+    const busy=isProfileApplying&&applyingMode===mode;
+    return `<button class="profile-btn ${activeProfileMode===mode?'active':''} ${busy?'busy':''}" data-profile="${mode}" ${isProfileApplying?'disabled':''}>${busy?'Applying...':lbl}</button>`;
+  }).join('');
+
+  const explainRows = rows => (rows||[]).map(row=>{
+    const net=toNum(row.net_pnl);
+    const wr=toNum(row.win_rate);
+    const pf=toNum(row.profit_factor);
+    return `<tr>
+      <td class="dim">${q(row.bucket)}</td>
+      <td class="dim">${row.trades??0}</td>
+      <td class="${(wr??0)>=0.5?'win':'loss'}">${wr==null?'&#8212;':pct(wr)}</td>
+      <td class="${clr(net)}">${dol(net)}</td>
+      <td class="dim">${pfTxt(pf)}</td>
+    </tr>`;
+  }).join('');
+  const sessionRows=explainRows(explain.session);
+  const regimeRows=explainRows(explain.regime);
+  const sideRows=explainRows(explain.side);
+  const estTradesPerDay=toNum(activeProfile.estimated_trades_per_day);
+  const estDd=toNum(activeProfile.estimated_dd_pct);
+  const estThr=toNum(activeProfile.effective_threshold_est);
+  const ddCls=estDd==null?'dim':(estDd<=20?'win':estDd<=28?'muted':'loss');
+
   const trRows=trades.slice().reverse().map((t,i)=>{
     const pnl=t.pnl??t.profit??null;
     const cum=series.values[series.values.length-1-i];
@@ -1826,6 +1967,40 @@ function renderPnl(acct,d){
     ${statBox('Win Rate',pct(d.win_rate))}
     ${statBox('Avg Win','$'+avgWin.toFixed(2),'win')}
     ${statBox('Avg Loss','$'+Math.abs(avgLoss).toFixed(2),'loss')}
+  </div>
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-ttl">&#9881; One-Tap Profile (Runtime Apply)</div>
+    <div class="profile-row">${profileBtns}</div>
+    <div class="g4" style="margin-top:10px">
+      ${statBox('Profile',q(activeProfileMode==='balanced'?`${String(activeProfile.label||'Balanced')} (Base config)`:String(activeProfile.label||activeProfileMode.toUpperCase())))}
+      ${statBox('Est. DD',estDd!=null?`${fmt(estDd,2)}%`:'&#8212;',ddCls)}
+      ${statBox('Est. Trades/Day',estTradesPerDay!=null?fmt(estTradesPerDay,2):'&#8212;')}
+      ${statBox('Threshold Est.',estThr!=null?fmt(estThr,4):'&#8212;')}
+    </div>
+    <div class="ssub" style="margin-top:8px">${q(activeProfile.description||'Profile estimates are derived from recent trade behavior and runtime thresholds.')} Muốn quay về cấu hình cũ: chọn <b>Balanced (Base config)</b>.${isProfileApplying?' Applying runtime profile...':''}</div>
+  </div>
+  <div class="split-2" style="margin-bottom:12px">
+    <div class="card">
+      <div class="card-ttl">&#127766; P&amp;L Explain — Session</div>
+      <div class="table-wrap"><table class="tbl">
+        <thead><tr><th>Bucket</th><th>Trades</th><th>Win Rate</th><th>Net PnL</th><th>PF</th></tr></thead>
+        <tbody>${sessionRows||'<tr><td colspan="5" class="dim" style="text-align:center;padding:14px">No session data</td></tr>'}</tbody>
+      </table></div>
+    </div>
+    <div class="card">
+      <div class="card-ttl">&#127754; P&amp;L Explain — Regime</div>
+      <div class="table-wrap"><table class="tbl">
+        <thead><tr><th>Bucket</th><th>Trades</th><th>Win Rate</th><th>Net PnL</th><th>PF</th></tr></thead>
+        <tbody>${regimeRows||'<tr><td colspan="5" class="dim" style="text-align:center;padding:14px">No regime data</td></tr>'}</tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-ttl">&#8646; P&amp;L Explain — Side</div>
+    <div class="table-wrap"><table class="tbl">
+      <thead><tr><th>Bucket</th><th>Trades</th><th>Win Rate</th><th>Net PnL</th><th>PF</th></tr></thead>
+      <tbody>${sideRows||'<tr><td colspan="5" class="dim" style="text-align:center;padding:14px">No side data</td></tr>'}</tbody>
+    </table></div>
   </div>
   <div class="card" style="margin-bottom:12px">
     <div class="card-ttl">Live Equity Curve</div>
@@ -1965,6 +2140,9 @@ const State={
   data:null,
   acct:'acc1',
   sec:{acc1:'overview',acc2:'overview'},
+  profileMode:{acc1:'balanced',acc2:'balanced'},
+  profileApplyBusy:{acc1:false,acc2:false},
+  profileApplyMode:{acc1:'',acc2:''},
   signalLimit:10,
   mood:'matrix',
   compact:false,
@@ -2028,6 +2206,117 @@ function updateUI(data){
   renderSunnyDeck();
 }
 
+async function _fetchDashboardNow(){
+  const r=await fetch('/api/v1/dashboard',{cache:'no-store'});
+  let payload=null;
+  try{ payload=await r.json(); }catch(_){ payload=null; }
+  if(!r.ok){
+    const detail=(payload&&payload.detail)?String(payload.detail):`HTTP ${r.status}`;
+    throw new Error(detail);
+  }
+  updateUI(payload);
+  return payload;
+}
+
+let _profileModalResolver=null;
+function _closeProfileModal(ok){
+  const modal=el('profile-modal');
+  if(!modal) return;
+  modal.classList.remove('show');
+  modal.setAttribute('aria-hidden','true');
+  document.body.classList.remove('modal-open');
+  const resolve=_profileModalResolver;
+  _profileModalResolver=null;
+  if(resolve) resolve(!!ok);
+}
+
+function showProfileConfirmModal(ctx){
+  const modal=el('profile-modal');
+  if(!modal){
+    const fallbackText=[
+      `Xác nhận áp dụng profile ${String(ctx.label||ctx.mode||'').toUpperCase()} cho ${String(ctx.account||'').toUpperCase()}?`,
+      `Est. DD: ${ctx.estDdText||'n/a'}`,
+      `Est. Trades/Day: ${ctx.estTradesText||'n/a'}`,
+      `Threshold Est.: ${ctx.estThresholdText||'n/a'}`,
+      'Bot sẽ hot-reload runtime ngay và gửi Telegram xác nhận.'
+    ].join('\n');
+    return Promise.resolve(window.confirm(fallbackText));
+  }
+  const ttl=el('pm-title'); if(ttl) ttl.textContent=`Apply ${String(ctx.label||ctx.mode||'Profile')} cho ${String(ctx.account||'').toUpperCase()}?`;
+  const desc=el('pm-desc'); if(desc) desc.textContent=String(ctx.description||'Profile này sẽ đổi runtime config ngay, bot không cần restart.');
+  const vAcc=el('pm-v-account'); if(vAcc) vAcc.textContent=String(ctx.account||'').toUpperCase();
+  const vMode=el('pm-v-profile'); if(vMode) vMode.textContent=String(ctx.label||ctx.mode||'').toUpperCase();
+  const vDD=el('pm-v-dd'); if(vDD) vDD.textContent=String(ctx.estDdText||'n/a');
+  const vTpd=el('pm-v-trades'); if(vTpd) vTpd.textContent=String(ctx.estTradesText||'n/a');
+  const vThr=el('pm-v-threshold'); if(vThr) vThr.textContent=String(ctx.estThresholdText||'n/a');
+
+  modal.classList.add('show');
+  modal.setAttribute('aria-hidden','false');
+  document.body.classList.add('modal-open');
+
+  return new Promise(resolve=>{ _profileModalResolver=resolve; });
+}
+
+async function applyProfileOneTap(mode){
+  const acct=State.acct;
+  const d=State.data?.accounts?.[acct];
+  if(!d) return;
+  if(!State.profileApplyBusy) State.profileApplyBusy={acc1:false,acc2:false};
+  if(!State.profileApplyMode) State.profileApplyMode={acc1:'',acc2:''};
+  if(State.profileApplyBusy[acct]) return;
+
+  const profiles=d.profile_presets||{};
+  const preset=profiles[mode]||{};
+  const ddVal=toNum(preset.estimated_dd_pct);
+  const tradeVal=toNum(preset.estimated_trades_per_day);
+  const thrVal=toNum(preset.effective_threshold_est);
+  const profileLabel=mode==='balanced'?`${String(preset.label||mode)} (Base config)`:String(preset.label||mode);
+  const confirmed=await showProfileConfirmModal({
+    account:acct,
+    mode:mode,
+    label:profileLabel,
+    description:preset.description||'Đổi runtime profile ngay lập tức cho bot đang chạy.',
+    estDdText:ddVal!=null?`${fmt(ddVal,2)}%`:'n/a',
+    estTradesText:tradeVal!=null?fmt(tradeVal,2):'n/a',
+    estThresholdText:thrVal!=null?fmt(thrVal,4):'n/a',
+  });
+  if(!confirmed) return;
+
+  State.profileApplyBusy[acct]=true;
+  State.profileApplyMode[acct]=mode;
+  switchSection(acct,State.sec[acct]);
+
+  try{
+    const resp=await fetch('/api/v1/profile/apply',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        account:acct,
+        profile:mode,
+        source:'dashboard_ui',
+        requested_by:'local_user',
+      }),
+    });
+    let payload={};
+    try{ payload=await resp.json(); }catch(_){ payload={}; }
+    if(!resp.ok){
+      throw new Error(String(payload.detail||`HTTP ${resp.status}`));
+    }
+
+    const tg=payload.telegram_sent?'Telegram xác nhận đã gửi.':'Không gửi được Telegram (kiểm tra token/chat_id).';
+    showAlert('info',`Profile Applied [${acct.toUpperCase()}]`,`${mode.toUpperCase()} · ${tg}`,7000);
+    await _fetchDashboardNow();
+  }catch(err){
+    showAlert('danger',`Apply Failed [${acct.toUpperCase()}]`,String(err?.message||err),8000);
+  }finally{
+    State.profileApplyBusy[acct]=false;
+    State.profileApplyMode[acct]='';
+    if(State.data?.accounts?.[acct]){
+      switchSection(acct,State.sec[acct]);
+    }
+  }
+}
+
 function applyMood(mood){
   State.mood=mood;
   if(mood==='matrix'){
@@ -2071,9 +2360,39 @@ document.addEventListener('click',e=>{
 });
 
 document.addEventListener('click',e=>{
+  if(e.target.closest('[data-profile-modal-confirm]')){
+    _closeProfileModal(true);
+    return;
+  }
+  if(e.target.closest('[data-profile-modal-close]')){
+    _closeProfileModal(false);
+    return;
+  }
+  if(e.target.id==='profile-modal'){
+    _closeProfileModal(false);
+  }
+});
+
+document.addEventListener('keydown',e=>{
+  if(e.key!=='Escape') return;
+  const modal=el('profile-modal');
+  if(modal&&modal.classList.contains('show')){
+    _closeProfileModal(false);
+  }
+});
+
+document.addEventListener('click',e=>{
   const moodBtn=e.target.closest('[data-mood]');
   if(moodBtn){
     applyMood(moodBtn.dataset.mood);
+    return;
+  }
+  const profileBtn=e.target.closest('[data-profile]');
+  if(profileBtn){
+    const mode=profileBtn.dataset.profile;
+    if(mode){
+      void applyProfileOneTap(mode);
+    }
     return;
   }
   const quickBtn=e.target.closest('.quick-btn');
@@ -2294,6 +2613,44 @@ function _stopPoll(){if(_pollTimer){clearInterval(_pollTimer);_pollTimer=null;}}
 _fetchNews();
 setInterval(_fetchNews, 5 * 60 * 1000);
 </script>
+<div id="profile-modal" class="pm-backdrop" aria-hidden="true">
+  <div class="pm-card" role="dialog" aria-modal="true" aria-labelledby="pm-title">
+    <div class="pm-head">
+      <div class="pm-kicker">Runtime Profile Apply</div>
+      <button class="pm-x" type="button" data-profile-modal-close>&times;</button>
+    </div>
+    <div class="pm-body">
+      <div id="pm-title" class="pm-title">Apply profile?</div>
+      <div id="pm-desc" class="pm-desc">This action will update runtime config and hot-reload bot immediately.</div>
+      <div class="pm-grid">
+        <div class="pm-box">
+          <div class="pm-lbl">Account</div>
+          <div id="pm-v-account" class="pm-val">ACC1</div>
+        </div>
+        <div class="pm-box">
+          <div class="pm-lbl">Profile</div>
+          <div id="pm-v-profile" class="pm-val">Balanced</div>
+        </div>
+        <div class="pm-box">
+          <div class="pm-lbl">Estimated DD</div>
+          <div id="pm-v-dd" class="pm-val">n/a</div>
+        </div>
+        <div class="pm-box">
+          <div class="pm-lbl">Estimated Trades/Day</div>
+          <div id="pm-v-trades" class="pm-val">n/a</div>
+        </div>
+        <div class="pm-box" style="grid-column:1/-1">
+          <div class="pm-lbl">Threshold Estimate</div>
+          <div id="pm-v-threshold" class="pm-val">n/a</div>
+        </div>
+      </div>
+    </div>
+    <div class="pm-foot">
+      <button class="pm-btn" type="button" data-profile-modal-close>Cancel</button>
+      <button class="pm-btn ok" type="button" data-profile-modal-confirm>Apply Profile</button>
+    </div>
+  </div>
+</div>
 <div id="toast-ctr"></div>
 </body>
 </html>

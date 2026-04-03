@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import tempfile
 import unittest
@@ -64,10 +65,29 @@ class ApiDashboardJournalTests(unittest.TestCase):
             daily_path.write_text(json.dumps({"daily_loss": 0.0}), encoding="utf-8")
 
             trades_path.write_text(
-                "time,ticket,side,volume,open_price,close_price,profit,swap,commission,pnl,is_win,close_type,session_id\n",
+                "time,ticket,side,volume,open_price,close_price,profit,swap,commission,pnl,is_win,close_type,session_id\n"
+                "2026-04-03T09:30:00+00:00,778899,buy,0.01,2300,2310,10,0,0,10,true,TP,test\n",
                 encoding="utf-8",
             )
-            signals_path.write_text(",".join(api_main._SIGNAL_COLUMNS_V2) + "\n", encoding="utf-8")
+            signal_row = {col: "" for col in api_main._SIGNAL_COLUMNS_V2}
+            signal_row.update(
+                {
+                    "time": "2026-04-03T09:20:00+00:00",
+                    "should_trade": "true",
+                    "side": "buy",
+                    "direction": "buy",
+                    "confidence": "0.81",
+                    "volatility_regime": "1",
+                    "strategy_score": "0.52",
+                }
+            )
+            signals_path.write_text(
+                ",".join(api_main._SIGNAL_COLUMNS_V2)
+                + "\n"
+                + ",".join(str(signal_row.get(col, "")) for col in api_main._SIGNAL_COLUMNS_V2)
+                + "\n",
+                encoding="utf-8",
+            )
             bt_trades_path.write_text(
                 "time,ticket,side,volume,open_price,close_price,profit,swap,commission,pnl,is_win,close_type,session_id\n",
                 encoding="utf-8",
@@ -119,6 +139,60 @@ class ApiDashboardJournalTests(unittest.TestCase):
             recent = payload["accounts"]["acc1"].get("recent_journal", [])
             self.assertEqual(len(recent), 1)
             self.assertEqual(recent[0]["ticket"], 778899)
+            self.assertIn("pnl_explain", payload["accounts"]["acc1"])
+            self.assertIn("profile_presets", payload["accounts"]["acc1"])
+            self.assertEqual(
+                payload["accounts"]["acc1"]["pnl_explain"]["side"][0]["bucket"],
+                "buy",
+            )
+
+    def test_build_pnl_explain_groups_by_session_regime_and_side(self) -> None:
+        trades = [
+            {"time": "2026-04-01T01:15:00+00:00", "side": "buy", "pnl": 15.0},
+            {"time": "2026-04-01T08:10:00+00:00", "side": "sell", "pnl": -8.0},
+            {"time": "2026-04-01T14:40:00+00:00", "side": "buy", "pnl": 12.0},
+        ]
+        signals = [
+            {"time": "2026-04-01T01:00:00+00:00", "side": "buy", "volatility_regime": 0},
+            {"time": "2026-04-01T08:00:00+00:00", "side": "sell", "volatility_regime": 1},
+            {"time": "2026-04-01T14:20:00+00:00", "side": "buy", "volatility_regime": 2},
+        ]
+        explain = api_main._build_pnl_explain(trades, signals)
+        self.assertEqual(len(explain["session"]), 3)
+        self.assertEqual(len(explain["regime"]), 3)
+        self.assertEqual(len(explain["side"]), 2)
+        side_map = {row["bucket"]: row for row in explain["side"]}
+        self.assertEqual(side_map["buy"]["trades"], 2)
+        self.assertAlmostEqual(side_map["buy"]["net_pnl"], 27.0, places=2)
+        self.assertEqual(side_map["sell"]["trades"], 1)
+
+    def test_apply_runtime_profile_writes_override_file(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            override_path = Path(td) / "runtime_profile_override_acc1.json"
+            req = api_main.ApplyProfileRequest(
+                account="acc1",
+                profile="aggressive",
+                source="unit_test",
+                requested_by="tester",
+            )
+            with patch(
+                "xauusd_ai.api.main._runtime_profile_override_path",
+                return_value=override_path,
+            ), patch(
+                "xauusd_ai.api.main._tg_send_account",
+                return_value=True,
+            ):
+                result = asyncio.run(api_main.apply_runtime_profile(req))
+
+            self.assertEqual(result["status"], "accepted")
+            self.assertEqual(result["account"], "acc1")
+            self.assertEqual(result["profile"], "aggressive")
+            self.assertTrue(result["telegram_sent"])
+            self.assertTrue(override_path.exists())
+            payload = json.loads(override_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["account"], "acc1")
+            self.assertEqual(payload["profile"], "aggressive")
+            self.assertEqual(payload["source"], "unit_test")
 
 
 if __name__ == "__main__":
