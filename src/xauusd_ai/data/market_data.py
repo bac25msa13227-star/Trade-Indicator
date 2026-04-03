@@ -61,7 +61,23 @@ class NewsFilter:
         self.settings = settings
 
     def upcoming_events(self) -> list[NewsEvent]:
-        return []
+        try:
+            from xauusd_ai.data.news_features import build_news_calendar
+            now = pd.Timestamp.now(tz="UTC")
+            cal = build_news_calendar(now, now + pd.Timedelta(hours=24))
+            if cal.empty:
+                return []
+            hi = cal[cal["impact"] == "High"]
+            return [
+                NewsEvent(
+                    title=str(row["event"]),
+                    timestamp=row["datetime_utc"].to_pydatetime(),
+                    impact=str(row["impact"]),
+                )
+                for _, row in hi.iterrows()
+            ]
+        except Exception:
+            return []
 
 
 class MarketDataService:
@@ -74,12 +90,18 @@ class MarketDataService:
             raise RuntimeError("MetaTrader5 package is not installed in this environment")
 
         if self.settings.integrations.mt5.enabled:
-            login = os.getenv(self.settings.integrations.mt5.login_env)
-            password = os.getenv(self.settings.integrations.mt5.password_env)
-            server = os.getenv(self.settings.integrations.mt5.server_env)
+            mt5cfg = self.settings.integrations.mt5
+            # Prefer direct config values (login, server) over env vars
+            # to avoid session conflicts when running 2 accounts simultaneously
+            login    = str(mt5cfg.login)    if mt5cfg.login    else os.getenv(mt5cfg.login_env)
+            password = mt5cfg.password      or  os.getenv(mt5cfg.password_env)
+            server   = mt5cfg.server        or  os.getenv(mt5cfg.server_env)
+            path     = mt5cfg.terminal_path or None
             if login and password and server:
-                # Truyền credentials trực tiếp vào initialize() để lấy được historical data
-                if not mt5.initialize(login=int(login), password=password, server=server):
+                kwargs: dict = dict(login=int(login), password=password, server=server)
+                if path:
+                    kwargs["path"] = path
+                if not mt5.initialize(**kwargs):
                     raise RuntimeError(f"MT5 initialize failed: {mt5.last_error()}")
                 return
 
@@ -99,14 +121,15 @@ class MarketDataService:
         }
         timeframe = mt5_timeframe_map[timeframe_name]
         mt5.symbol_select(self.settings.market.symbol, True)
-        # Retry — MT5 cần thời gian download history sau khi khởi động lần đầu
+        # Retry with exponential backoff — MT5 needs time to download history on first start
+        import time as _time
         rates = None
-        for _attempt in range(30):  # 30 × 3s = tối đa 90 giây
+        for _attempt in range(10):
             rates = mt5.copy_rates_from_pos(self.settings.market.symbol, timeframe, 0, bars)
             if rates is not None and len(rates) > 0:
                 break
-            import time as _time
-            _time.sleep(3)
+            _sleep = min(3 * (1.5 ** _attempt), 15)  # 3s, 4.5s, 6.75s, ... max 15s
+            _time.sleep(_sleep)
         if rates is None or len(rates) == 0:
             raise RuntimeError(f"No rates returned for {self.settings.market.symbol} {timeframe_name}")
 

@@ -1,50 +1,124 @@
 from __future__ import annotations
 
 import json
+import logging
 import pickle
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.ensemble import (
+    HistGradientBoostingClassifier,
+    RandomForestClassifier,
+)
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.inspection import permutation_importance
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
 from sklearn.preprocessing import StandardScaler
 
 from xauusd_ai.config import Settings
 from xauusd_ai.features.dataset import FEATURE_COLUMNS
 
+try:
+    from xauusd_ai.infra.mlflow_client import MLflowTracker
+    _MLFLOW_AVAILABLE = True
+except ImportError:
+    _MLFLOW_AVAILABLE = False
+
 
 class ModelTrainer:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, mlflow_tracker=None) -> None:
         self.settings = settings
+        self._mlflow: MLflowTracker | None = mlflow_tracker  # type: ignore[name-defined]
+        # Single HGB model — memory-efficient, good calibration, supports sample_weight directly
         self.model = HistGradientBoostingClassifier(
-            max_iter=500,
-            learning_rate=0.05,
-            max_depth=6,
-            min_samples_leaf=20,
-            class_weight="balanced",
-            early_stopping=False,
-            random_state=42,
+            max_iter=300, learning_rate=0.05, max_depth=5,
+            min_samples_leaf=20, l2_regularization=1.0,
+            max_bins=63, class_weight=None,
+            early_stopping=True, validation_fraction=0.1,
+            n_iter_no_change=20, random_state=42,
         )
+        self._feature_mask = None
+        self._calibrator = None
         self.scaler = StandardScaler()
         self.decision_threshold = settings.strategy.signal_threshold
+        self.feature_columns: list[str] = list(FEATURE_COLUMNS)  # updated by load_artifacts for backward compat
 
-    def train(self, dataset: pd.DataFrame) -> dict[str, float]:
+    def _aligned_feature_frame(self, frame: pd.DataFrame) -> pd.DataFrame:
+        """Align any dataframe/row to model feature schema.
+
+        Live runtime may load a model whose ``feature_columns`` are larger than
+        current dataset features (e.g. migrated artifacts). For inference we
+        keep bot running by creating missing columns filled with 0.0, then
+        reordering columns exactly as model expects.
+        """
+        missing = [col for col in self.feature_columns if col not in frame.columns]
+        if missing:
+            logging.getLogger(__name__).warning(
+                "ModelTrainer: missing %d feature columns at inference; fill 0.0: %s",
+                len(missing),
+                missing,
+            )
+        aligned = frame.copy()
+        for col in missing:
+            aligned[col] = 0.0
+        return aligned[self.feature_columns]
+
+    def train(self, dataset: pd.DataFrame, save_artifacts: bool = True) -> dict[str, float]:
         train_df = dataset[dataset["split"] == "train"]
         test_df = dataset[dataset["split"] == "test"]
 
         threshold = self.settings.strategy.signal_threshold
-        if self.settings.training.optimize_threshold and len(train_df) > 50:
+        if save_artifacts and self.settings.training.optimize_threshold and len(train_df) > 50:
             threshold = self._optimize_threshold(train_df)
         self.decision_threshold = threshold
 
-        x_train = self.scaler.fit_transform(train_df[FEATURE_COLUMNS])
+        x_train = self.scaler.fit_transform(train_df[self.feature_columns])
         y_train = train_df["target"]
-        x_test = self.scaler.transform(test_df[FEATURE_COLUMNS])
+        x_test = self.scaler.transform(test_df[self.feature_columns])
         y_test = test_df["target"]
 
-        self.model.fit(x_train, y_train)
-        probabilities = self.model.predict_proba(x_test)[:, 1]
+        # Dynamic sample weights: 2× positive boost + time-decay
+        pos_count = int(y_train.sum())
+        neg_count = int(len(y_train) - pos_count)
+        if pos_count > 10 and neg_count > 10:
+            pos_w = 2.0 * neg_count / pos_count
+            class_w = np.where(y_train.values == 1, pos_w, 1.0).astype(float)
+            # Time-decay: recent bars weighted higher (half-life at 40%)
+            _n = len(y_train)
+            _decay_half = _n * 0.4
+            time_w = np.exp(np.log(2) * np.arange(_n) / _decay_half)
+            time_w /= time_w.mean()
+            sw = (class_w * time_w).astype(float)
+            sw /= sw.mean()
+        else:
+            sw = None
+
+        # No feature selection mask — use all features
+        self._feature_mask = None
+        x_train_sel = x_train
+        x_test_sel = x_test
+
+        self.model.fit(x_train_sel, y_train, sample_weight=sw)
+
+        # Probability calibration via isotonic regression on validation holdout
+        _val_size = max(int(len(x_train_sel) * 0.15), 50)
+        if _val_size < len(x_train_sel):
+            _cal_x = x_train_sel[-_val_size:]
+            _cal_y = y_train.values[-_val_size:]
+            try:
+                self._calibrator = CalibratedClassifierCV(
+                    self.model, method="isotonic", cv="prefit",
+                )
+                self._calibrator.fit(_cal_x, _cal_y)
+                probabilities = self._calibrator.predict_proba(x_test_sel)[:, 1]
+            except Exception:
+                self._calibrator = None
+                probabilities = self.model.predict_proba(x_test_sel)[:, 1]
+        else:
+            self._calibrator = None
+            probabilities = self.model.predict_proba(x_test_sel)[:, 1]
+
         predictions = (probabilities >= self.decision_threshold).astype(int)
 
         metrics = {
@@ -59,60 +133,186 @@ class ModelTrainer:
             "f1": float(f1_score(y_test, predictions, zero_division=0)),
             "roc_auc": float(roc_auc_score(y_test, probabilities)) if y_test.nunique() > 1 else 0.5,
         }
-        self._save_artifacts()
+        self._last_metrics = metrics
+        if save_artifacts:
+            self._last_roc_auc = metrics.get("roc_auc", 0.0)
+            self._save_artifacts()
+            self._mlflow_log_training(metrics)
         return metrics
 
     def _optimize_threshold(self, train_df: pd.DataFrame) -> float:
-        split_index = int(len(train_df) * (1 - self.settings.training.validation_split))
-        subtrain_df = train_df.iloc[:split_index]
-        validation_df = train_df.iloc[split_index:]
-        if validation_df.empty or subtrain_df.empty:
+        n = len(train_df)
+        if n < 100:
             return self.settings.strategy.signal_threshold
-
-        local_scaler = StandardScaler()
-        local_model = HistGradientBoostingClassifier(
-            max_iter=200, learning_rate=0.1, max_depth=5,
-            min_samples_leaf=20, class_weight="balanced",
-            early_stopping=False, random_state=42,
-        )
-        x_subtrain = local_scaler.fit_transform(subtrain_df[FEATURE_COLUMNS])
-        y_subtrain = subtrain_df["target"]
-        x_validation = local_scaler.transform(validation_df[FEATURE_COLUMNS])
-        y_validation = validation_df["target"]
-        local_model.fit(x_subtrain, y_subtrain)
-        probabilities = local_model.predict_proba(x_validation)[:, 1]
 
         candidates = np.arange(
             self.settings.training.threshold_min,
             self.settings.training.threshold_max + self.settings.training.threshold_step,
             self.settings.training.threshold_step,
         )
-        best_threshold = self.settings.strategy.signal_threshold
-        best_f1 = 0.0
-        for candidate in candidates:
-            predictions = (probabilities >= candidate).astype(int)
-            precision = precision_score(y_validation, predictions, zero_division=0)
-            if precision < self.settings.training.min_precision_floor:
-                continue
-            f1_val = f1_score(y_validation, predictions, zero_division=0)
-            if f1_val > best_f1:
-                best_f1 = f1_val
-                best_threshold = float(candidate)
+        prec_floor = self.settings.training.min_precision_floor
 
-        return best_threshold
+        # Use last 30K rows for speed — still captures recent market regime
+        n_max = min(n, 30000)
+        sub_df_all = train_df.iloc[-n_max:]
+        n2 = len(sub_df_all)
+
+        # 1-fold: train on first 70%, validate on last 30%
+        split_idx = int(n2 * 0.70)
+        sub_df = sub_df_all.iloc[:split_idx]
+        val_df = sub_df_all.iloc[split_idx:]
+        if val_df.empty or sub_df.empty:
+            return self.settings.strategy.signal_threshold
+
+        local_scaler = StandardScaler()
+        local_model = HistGradientBoostingClassifier(
+            max_iter=100, learning_rate=0.1, max_depth=4,
+            min_samples_leaf=30, class_weight=None,
+            early_stopping=False, random_state=42,
+        )
+        x_sub = local_scaler.fit_transform(sub_df[self.feature_columns])
+        y_sub = sub_df["target"]
+        x_val = local_scaler.transform(val_df[self.feature_columns])
+        y_val = val_df["target"]
+        _pos_c = int(y_sub.sum())
+        _neg_c = int(len(y_sub) - _pos_c)
+        if _pos_c > 5 and _neg_c > 5:
+            _pw = 2.0 * _neg_c / _pos_c
+            _sw = np.where(y_sub.values == 1, _pw, 1.0).astype(float)
+            _sw /= _sw.mean()
+        else:
+            _sw = None
+        local_model.fit(x_sub, y_sub, sample_weight=_sw)
+        probabilities = local_model.predict_proba(x_val)[:, 1]
+
+        best_thr = float(self.settings.training.threshold_min)
+        best_score = -float("inf")
+        safe_thr = float(self.settings.training.threshold_max)
+        safe_prec = -1.0
+        base_friction = (
+            float(getattr(self.settings.risk, "spread_cost_rr", 0.10))
+            + float(getattr(self.settings.risk, "slippage_rr", 0.05))
+            + float(getattr(self.settings.risk, "commission_rr", 0.02))
+        )
+        for candidate in candidates:
+            preds = (probabilities >= candidate).astype(int)
+            trade_count = int(preds.sum())
+            if trade_count < 8:
+                continue
+            precision = precision_score(y_val, preds, zero_division=0)
+            recall = recall_score(y_val, preds, zero_division=0)
+            if recall < 0.05:
+                continue
+            if precision > safe_prec:
+                safe_prec = precision
+                safe_thr = float(candidate)
+            selected = val_df.loc[preds == 1]
+            if selected.empty:
+                continue
+            session_mult = pd.to_numeric(selected.get("session_spread_mult", 1.0), errors="coerce").fillna(1.0)
+            realized_rr = pd.to_numeric(selected.get("realized_rr", 0.0), errors="coerce").fillna(0.0)
+            net_rr = realized_rr - (base_friction + (session_mult - 1.0) * float(getattr(self.settings.risk, "spread_cost_rr", 0.10)))
+            gross_profit = float(net_rr[net_rr > 0].sum())
+            gross_loss = float(-net_rr[net_rr < 0].sum())
+            profit_factor = gross_profit / gross_loss if gross_loss > 0 else (2.0 if gross_profit > 0 else 0.0)
+            avg_net_rr = float(net_rr.mean())
+            positive_rr_rate = float((net_rr > 0).mean())
+            trade_density = trade_count / max(len(val_df), 1)
+            if precision < prec_floor and (avg_net_rr <= 0 or profit_factor < 1.05):
+                continue
+            score = (
+                avg_net_rr * np.sqrt(trade_count)
+                + max(profit_factor - 1.0, -1.0) * 0.35
+                + precision * 0.20
+                + positive_rr_rate * 0.15
+                - max(0.0, 0.015 - trade_density) * 4.0
+            )
+            if score > best_score:
+                best_score = score
+                best_thr = float(candidate)
+        if best_score == -float("inf"):
+            best_thr = safe_thr
+
+        return best_thr
+
+    def _mlflow_log_training(self, metrics: dict) -> None:
+        """Log training params + metrics to MLflow if tracker is available."""
+        if self._mlflow is None:
+            return
+        import datetime as _dt
+        _run_name = f"train_{_dt.datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+        try:
+            with self._mlflow.start_run(run_name=_run_name, tags={"source": "live_runner"}):
+                params = {
+                    "max_iter": self.model.max_iter,
+                    "learning_rate": self.model.learning_rate,
+                    "max_depth": self.model.max_depth,
+                    "signal_threshold": self.decision_threshold,
+                    "feature_count": len(self.feature_columns),
+                }
+                self._mlflow.log_params(params)
+                self._mlflow.log_metrics({k: v for k, v in metrics.items() if isinstance(v, float)})
+                # Upload artifacts to MinIO via MLflow
+                model_path = Path(self.settings.app.model_path)
+                scaler_path = Path(self.settings.app.scaler_path)
+                for artifact in [model_path, scaler_path]:
+                    if artifact.exists():
+                        self._mlflow.log_artifact(artifact, artifact_path="artifacts")
+                cal_path = model_path.with_suffix(".cal.pkl")
+                if cal_path.exists():
+                    self._mlflow.log_artifact(cal_path, artifact_path="artifacts")
+        except Exception as exc:  # noqa: BLE001
+            import logging
+            logging.getLogger(__name__).warning("MLflow log_training failed: %s", exc)
+
+    @staticmethod
+    def _atomic_write_pickle(obj: object, dest: Path) -> None:
+        """Write pickle to a temp file in the same dir, then replace dest."""
+        import tempfile, os
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=str(dest.parent), suffix=".tmp")
+        try:
+            with os.fdopen(fd, "wb") as fh:
+                pickle.dump(obj, fh)
+            # os.replace atomically overwrites dest even if held open for reading
+            os.replace(tmp, str(dest))
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
 
     def _save_artifacts(self) -> None:
         model_path = Path(self.settings.app.model_path)
         scaler_path = Path(self.settings.app.scaler_path)
         meta_path = Path(self.settings.app.model_meta_path)
-        model_path.parent.mkdir(parents=True, exist_ok=True)
-        scaler_path.parent.mkdir(parents=True, exist_ok=True)
-        meta_path.parent.mkdir(parents=True, exist_ok=True)
-        with model_path.open("wb") as file_handle:
-            pickle.dump(self.model, file_handle)
-        with scaler_path.open("wb") as file_handle:
-            pickle.dump(self.scaler, file_handle)
-        meta_path.write_text(json.dumps({"decision_threshold": self.decision_threshold}, indent=2), encoding="utf-8")
+        self._atomic_write_pickle(self.model, model_path)
+        self._atomic_write_pickle(self.scaler, scaler_path)
+        # Save calibrator alongside model
+        _cal_path = model_path.with_suffix(".cal.pkl")
+        if hasattr(self, "_calibrator") and self._calibrator is not None:
+            self._atomic_write_pickle(self._calibrator, _cal_path)
+        elif _cal_path.exists():
+            _cal_path.unlink(missing_ok=True)
+        meta_dict: dict = {
+            "decision_threshold": self.decision_threshold,
+            "feature_columns": self.feature_columns,
+        }
+        if self._feature_mask is not None:
+            meta_dict["feature_mask"] = self._feature_mask.tolist()
+        if hasattr(self, "_last_roc_auc"):
+            meta_dict["roc_auc"] = round(float(self._last_roc_auc), 6)
+        if hasattr(self, "_last_metrics") and self._last_metrics:
+            for k in ("precision", "recall", "f1", "accuracy",
+                      "train_rows", "test_rows",
+                      "positive_rate_train", "positive_rate_test"):
+                if k in self._last_metrics:
+                    meta_dict[k] = self._last_metrics[k]
+            # roc_auc fallback: if _last_roc_auc wasn't set (save_artifacts=False path)
+            if "roc_auc" not in meta_dict and "roc_auc" in self._last_metrics:
+                meta_dict["roc_auc"] = round(float(self._last_metrics["roc_auc"]), 6)
+        meta_path.write_text(json.dumps(meta_dict, indent=2), encoding="utf-8")
 
     def load_artifacts(self) -> bool:
         model_path = Path(self.settings.app.model_path)
@@ -120,33 +320,79 @@ class ModelTrainer:
         meta_path = Path(self.settings.app.model_meta_path)
         if not model_path.exists() or not scaler_path.exists():
             return False
-        with model_path.open("rb") as file_handle:
-            self.model = pickle.load(file_handle)
-        with scaler_path.open("rb") as file_handle:
-            self.scaler = pickle.load(file_handle)
+        try:
+            with open(str(model_path), "rb") as file_handle:
+                self.model = pickle.load(file_handle)
+            with open(str(scaler_path), "rb") as file_handle:
+                self.scaler = pickle.load(file_handle)
+        except (AttributeError, ModuleNotFoundError, ImportError, Exception) as _pkl_err:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "load_artifacts: failed to unpickle model/scaler (%s). "
+                "Likely sklearn version mismatch — will retrain.",
+                _pkl_err,
+            )
+            return False
+        # Load calibrator if available
+        _cal_path = model_path.with_suffix(".cal.pkl")
+        if _cal_path.exists():
+            try:
+                with open(str(_cal_path), "rb") as fh:
+                    self._calibrator = pickle.load(fh)
+            except Exception:
+                self._calibrator = None
+        else:
+            self._calibrator = None
         if meta_path.exists():
             metadata = json.loads(meta_path.read_text(encoding="utf-8"))
             self.decision_threshold = float(metadata.get("decision_threshold", self.settings.strategy.signal_threshold))
+            if "feature_mask" in metadata:
+                self._feature_mask = np.array(metadata["feature_mask"], dtype=bool)
+            else:
+                self._feature_mask = None
+            if "feature_columns" in metadata:
+                self.feature_columns = list(metadata["feature_columns"])
+            elif hasattr(self.scaler, "n_features_in_") and self.scaler.n_features_in_ != len(self.feature_columns):
+                # Old model trained with fewer features — slice FEATURE_COLUMNS to match scaler
+                self.feature_columns = list(FEATURE_COLUMNS[:self.scaler.n_features_in_])
         return True
+
+    def _apply_feature_mask(self, x: np.ndarray) -> np.ndarray:
+        if self._feature_mask is not None and x.shape[1] == len(self._feature_mask):
+            return x[:, self._feature_mask]
+        return x
 
     def predict_dataset(self, dataset: pd.DataFrame) -> pd.DataFrame:
         frame = dataset.copy()
-        probabilities = self.model.predict_proba(self.scaler.transform(frame[FEATURE_COLUMNS]))[:, 1]
+        feat_frame = self._aligned_feature_frame(frame)
+        x_scaled = self.scaler.transform(feat_frame)
+        x_sel = self._apply_feature_mask(x_scaled)
+        if hasattr(self, "_calibrator") and self._calibrator is not None:
+            probabilities = self._calibrator.predict_proba(x_sel)[:, 1]
+        else:
+            probabilities = self.model.predict_proba(x_sel)[:, 1]
         frame["probability"] = probabilities
         frame["prediction"] = (probabilities >= self.decision_threshold).astype(int)
         return frame
 
     def score_live_row(self, live_frame: pd.DataFrame) -> dict[str, float]:
-        latest = live_frame.iloc[[-1]][FEATURE_COLUMNS]
-        probability = float(self.model.predict_proba(self.scaler.transform(latest))[:, 1][0])
+        latest = self._aligned_feature_frame(live_frame.iloc[[-1]])
+        x_scaled = self.scaler.transform(latest)
+        x_sel = self._apply_feature_mask(x_scaled)
+        if hasattr(self, "_calibrator") and self._calibrator is not None:
+            probability = float(self._calibrator.predict_proba(x_sel)[:, 1][0])
+        else:
+            probability = float(self.model.predict_proba(x_sel)[:, 1][0])
         prediction = int(probability >= self.decision_threshold)
-        return {"probability": probability, "prediction": prediction}
+        margin = probability - self.decision_threshold
+        return {"probability": probability, "prediction": prediction, "margin": margin}
 
     def train_with_loss_weights(
         self,
         dataset: pd.DataFrame,
         loss_patterns: list[dict],
         weight_factor: float = 2.5,
+        save_artifacts: bool = True,
     ) -> dict[str, float]:
         """
         Retrain với sample_weight tăng cho các hàng tương tự pattern lệnh thua.
@@ -186,15 +432,20 @@ class ModelTrainer:
             threshold = self._optimize_threshold(train_df)
         self.decision_threshold = threshold
 
-        x_train = self.scaler.fit_transform(train_df[FEATURE_COLUMNS])
+        x_train = self.scaler.fit_transform(train_df[self.feature_columns])
         y_train = train_df["target"]
-        x_test = self.scaler.transform(test_df[FEATURE_COLUMNS])
+        x_test = self.scaler.transform(test_df[self.feature_columns])
         y_test = test_df["target"]
 
-        # Fit với sample_weight
-        self.model.fit(x_train, y_train, sample_weight=weights)
+        # No feature selection — use all features
+        self._feature_mask = None
+        x_train_sel = x_train
+        x_test_sel = x_test
 
-        probabilities = self.model.predict_proba(x_test)[:, 1]
+        # Fit with sample_weight
+        self.model.fit(x_train_sel, y_train, sample_weight=weights)
+
+        probabilities = self.model.predict_proba(x_test_sel)[:, 1]
         predictions = (probabilities >= self.decision_threshold).astype(int)
 
         from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
@@ -213,5 +464,9 @@ class ModelTrainer:
             "loss_patterns_count": len(loss_patterns),
             "upweighted_samples": int(weights[weights > 1.0].sum()),
         }
-        self._save_artifacts()
+        # Always update in-memory state so _save_artifacts() has fresh metrics
+        self._last_metrics = metrics
+        self._last_roc_auc = metrics.get("roc_auc", 0.0)
+        if save_artifacts:
+            self._save_artifacts()
         return metrics

@@ -32,17 +32,22 @@ _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; XAUBot/1.0)"}
 
 
 def _fetch_forexfactory() -> list[dict]:
-    """Fetch lịch tin từ ForexFactory JSON API."""
-    for url in [_FF_WEEK_URL, _FF_MONTH_URL]:
-        try:
-            r = requests.get(url, headers=_HEADERS, timeout=_REQUEST_TIMEOUT)
-            r.raise_for_status()
-            data = r.json()
-            if isinstance(data, list) and len(data) > 0:
-                LOGGER.info("NewsCrawler: fetched %d events from %s", len(data), url)
-                return data
-        except Exception as exc:
-            LOGGER.warning("NewsCrawler: fetch from %s failed: %s", url, exc)
+    """Fetch lịch tin từ ForexFactory JSON API (với retry)."""
+    import time as _time
+
+    for attempt in range(3):
+        for url in [_FF_WEEK_URL, _FF_MONTH_URL]:
+            try:
+                r = requests.get(url, headers=_HEADERS, timeout=_REQUEST_TIMEOUT)
+                r.raise_for_status()
+                data = r.json()
+                if isinstance(data, list) and len(data) > 0:
+                    LOGGER.info("NewsCrawler: fetched %d events from %s", len(data), url)
+                    return data
+            except Exception as exc:
+                LOGGER.warning("NewsCrawler: fetch from %s failed (attempt %d): %s", url, attempt + 1, exc)
+        if attempt < 2:
+            _time.sleep(2 ** attempt)  # 1s, 2s backoff
     return []
 
 
@@ -74,6 +79,7 @@ class NewsCrawler:
         news_cfg = getattr(getattr(settings, "integrations", None), "news", None)
         self._cache_hours: int = getattr(news_cfg, "cache_hours", 6)
         self._cache_path = _CACHE_PATH
+        self._last_memory_check: float = 0.0  # avoid repeated file I/O in live trading loop
         self._load_or_fetch()
 
     # ------------------------------------------------------------------
@@ -81,7 +87,16 @@ class NewsCrawler:
     # ------------------------------------------------------------------
 
     def _load_or_fetch(self) -> None:
-        """Load từ cache. Nếu hết hạn hoặc không có → fetch mới."""
+        """Load từ cache. Nếu hết hạn hoặc không có → fetch mới.
+        In-memory guard: skip the file I/O check if called within 5 minutes
+        and we already have events loaded (avoids disk reads every 60s in live loop).
+        """
+        import time as _t
+        now_ts = _t.time()
+        if self._events and (now_ts - self._last_memory_check) < 300.0:
+            return
+        self._last_memory_check = now_ts
+
         if self._cache_path.exists():
             try:
                 stored = json.loads(self._cache_path.read_text(encoding="utf-8"))
@@ -217,3 +232,62 @@ class NewsCrawler:
                 result.append({**ev, "ev_time": ev_time.isoformat(), "diff_minutes": round(diff_min, 1)})
         result.sort(key=lambda x: x["diff_minutes"])
         return result[:limit]
+
+    def get_news_direction(
+        self,
+        now: datetime | None = None,
+        window_minutes: int = 3,
+        currencies: list[str] | None = None,
+        high_impact_only: bool = True,
+    ) -> tuple[int, str, str]:
+        """
+        Tìm sự kiện tin tức vừa ra (trong window_minutes phút qua) và trả về
+        hướng giao dịch vàng dựa trên actual vs estimate.
+
+        Returns:
+            (direction, title, reason)
+            direction: +1 = BUY gold, -1 = SELL gold, 0 = no signal
+        """
+        from xauusd_ai.data.news_features import _direction_from_surprise, _direction_from_title
+
+        if now is None:
+            now = datetime.now(timezone.utc)
+
+        # Chỉ lấy sự kiện đã xảy ra (diff_minutes âˆˆ [-window_minutes, 0])
+        events = self.get_events_in_window(
+            now=now,
+            minutes_before=0,         # Không lấy sự kiện tương lai
+            minutes_after=window_minutes,
+            currencies=currencies,
+            high_impact_only=high_impact_only,
+        )
+
+        for ev in events:
+            diff = ev.get("diff_minutes", 0.0)
+            if diff > 0:   # Tin chưa ra → bỏ qua
+                continue
+
+            title = ev.get("title", "")
+            actual = ev.get("actual") or ev.get("Actual")
+            estimate = ev.get("estimate") or ev.get("Forecast") or ev.get("forecast")
+
+            # Ưu tiên dùng actual vs estimate (nếu có)
+            if actual not in (None, "", "—", "N/A") and estimate not in (None, "", "—", "N/A"):
+                try:
+                    direction = _direction_from_surprise(title, actual, estimate)
+                    reason = f"actual={actual} vs est={estimate}"
+                except Exception:
+                    direction = _direction_from_title(title)
+                    reason = f"title-based (parse error)"
+            else:
+                direction = _direction_from_title(title)
+                reason = "direction from title (no actual/estimate)"
+
+            if direction != 0:
+                LOGGER.info(
+                    "NewsDirection: '%s' → %s | %s | diff=%.1fmin",
+                    title, "BUY" if direction > 0 else "SELL", reason, diff,
+                )
+                return direction, title, reason
+
+        return 0, "", ""

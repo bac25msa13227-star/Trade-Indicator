@@ -1,4 +1,4 @@
-﻿"""News Features cho XAUUSD AI Trading Model
+"""News Features cho XAUUSD AI Trading Model
 ============================================
 Tạo 5 features từ lịch tin tức kinh tế, với 3 lớp nguồn dữ liệu:
 
@@ -73,6 +73,8 @@ _FOMC_DATES = [
     "2025-07-30", "2025-09-17", "2025-11-05", "2025-12-17",
     "2026-01-28", "2026-03-18", "2026-04-29", "2026-06-17",
     "2026-07-29", "2026-09-16", "2026-11-04", "2026-12-16",
+    "2027-01-27", "2027-03-17", "2027-04-28", "2027-06-16",
+    "2027-07-28", "2027-09-22", "2027-11-03", "2027-12-15",
 ]
 
 _EVENT_GOLD_DIRECTION: dict[str, int] = {
@@ -89,14 +91,9 @@ _EVENT_GOLD_DIRECTION: dict[str, int] = {
     "New Home Sales": -1, "Consumer Confidence": -1, "Consumer Sentiment": -1,
     "Michigan": -1, "FOMC": -1, "Federal Reserve": -1, "Fed Funds": -1,
     "Interest Rate": -1, "Powell": -1,
-    "Trade Balance": +1, "Current Account": +1,
+    # Better trade balance / current account = stronger USD = Gold DOWN
+    "Trade Balance": -1, "Current Account": -1,
 }
-
-_INVERTED_EVENTS = frozenset([
-    "jobless claims", "initial claims", "unemployment claims",
-    "unemployment rate", "trade balance", "current account",
-])
-
 
 def _direction_from_title(title: str) -> int:
     t = title.lower()
@@ -107,6 +104,12 @@ def _direction_from_title(title: str) -> int:
 
 
 def _direction_from_surprise(title: str, actual, estimate) -> int:
+    """Map (actual vs estimate) to gold direction.
+    Convention in _EVENT_GOLD_DIRECTION: positive (+1) = event surprises → gold UP,
+    negative (-1) = event surprises → gold DOWN.
+    If actual > estimate (positive surprise): return base.
+    If actual < estimate (negative surprise): return -base.
+    """
     try:
         a, e = float(actual), float(estimate)
     except (TypeError, ValueError):
@@ -116,9 +119,7 @@ def _direction_from_surprise(title: str, actual, estimate) -> int:
     base = _direction_from_title(title)
     if base == 0:
         return 0
-    is_inv = any(kw in title.lower() for kw in _INVERTED_EVENTS)
-    pos = a > e
-    return (base if pos else -base) if not is_inv else (base if pos else -base)
+    return base if (a > e) else -base
 
 
 def _first_friday(year: int, month: int, hour_utc: int = 13, minute_utc: int = 30) -> datetime:
@@ -143,7 +144,21 @@ def _weekday_skip(dt: datetime) -> datetime:
 
 #  Layer 1: Finnhub 
 
+# Process-level flag: set True after first 401/403, with cooldown to retry later
+_finnhub_disabled: bool = False
+_finnhub_disabled_at: float = 0.0
+_FINNHUB_COOLDOWN_SEC = 3600  # retry after 1 hour
+
+
 def _get_finnhub_key() -> str | None:
+    global _finnhub_disabled
+    if _finnhub_disabled:
+        import time as _t
+        if (_t.time() - _finnhub_disabled_at) > _FINNHUB_COOLDOWN_SEC:
+            _finnhub_disabled = False
+            LOGGER.info("Finnhub: cooldown expired, re-enabling")
+        else:
+            return None
     key = os.environ.get("FINNHUB_API_KEY", "").strip()
     return key if key else None
 
@@ -179,6 +194,7 @@ def _save_finnhub_cache(year: int, events: list[dict]) -> None:
 
 
 def _fetch_finnhub_year(key: str, year: int) -> list[dict]:
+    global _finnhub_disabled, _finnhub_disabled_at
     quarters = [
         (f"{year}-01-01", f"{year}-03-31"),
         (f"{year}-04-01", f"{year}-06-30"),
@@ -200,8 +216,15 @@ def _fetch_finnhub_year(key: str, year: int) -> list[dict]:
                 impact  = str(ev.get("impact", "") or "").lower()
                 if "US" in country and impact in ("high", "medium"):
                     all_events.append(ev)
-            LOGGER.info("Finnhub: fetched %s%s", from_d, to_d)
+            LOGGER.info("Finnhub: fetched %s – %s", from_d, to_d)
         except Exception as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            if status in (401, 403):
+                LOGGER.warning("Finnhub key invalid/quota exceeded (%s) — disabling for %ds", status, _FINNHUB_COOLDOWN_SEC)
+                _finnhub_disabled = True
+                import time as _t
+                _finnhub_disabled_at = _t.time()
+                return all_events  # stop retrying remaining quarters
             LOGGER.warning("Finnhub fetch failed %s%s: %s", from_d, to_d, exc)
     return all_events
 
@@ -215,11 +238,11 @@ def _finnhub_to_df(events: list[dict]) -> pd.DataFrame:
             continue
         raw_time = str(ev.get("time", "") or "")
         try:
-            ev_time = (pd.Timestamp(raw_time + " 13:30:00", tz="UTC")
-                       if len(raw_time) == 10
-                       else pd.Timestamp(raw_time, tz="UTC"))
-            if ev_time.tzinfo is None:
-                ev_time = ev_time.tz_localize("UTC")
+            if len(raw_time) == 10:  # date-only, e.g. "2026-04-03" — default 13:30 UTC (US data release)
+                ev_time = pd.Timestamp(raw_time + " 13:30:00", tz="UTC")
+            else:
+                _ts = pd.Timestamp(raw_time)
+                ev_time = _ts.tz_convert("UTC") if _ts.tzinfo is not None else _ts.tz_localize("UTC")
         except Exception:
             continue
         actual, estimate = ev.get("actual"), ev.get("estimate")
@@ -259,6 +282,8 @@ def fetch_finnhub_calendar(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFra
         else:
             LOGGER.info("Finnhub: fetching year %d from API...", year)
             raw = _fetch_finnhub_year(key, year)
+            if _finnhub_disabled:
+                break  # 403/401 received — stop trying remaining years
             if raw:
                 _save_finnhub_cache(year, raw)
             df_y = _finnhub_to_df(raw)
@@ -275,7 +300,27 @@ def fetch_finnhub_calendar(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFra
 
 #  Layer 2: ForexFactory 
 
+_FF_CACHE_FILE = _CACHE_DIR / "forexfactory_live.json"
+_FF_CACHE_TTL_SEC = 3600  # re-fetch every 1 hour
+
+
 def _fetch_forexfactory_live() -> pd.DataFrame:
+    # Check disk cache first
+    try:
+        if _FF_CACHE_FILE.exists():
+            cache_data = json.loads(_FF_CACHE_FILE.read_text(encoding="utf-8"))
+            cached_at = cache_data.get("cached_at", "")
+            if cached_at:
+                age = (datetime.now(timezone.utc) - datetime.fromisoformat(cached_at)).total_seconds()
+                if age < _FF_CACHE_TTL_SEC:
+                    df = pd.DataFrame(cache_data.get("rows", []))
+                    if not df.empty:
+                        df["datetime_utc"] = pd.to_datetime(df["datetime_utc"], utc=True)
+                        LOGGER.debug("ForexFactory: cache hit (%d events, age=%.0fs)", len(df), age)
+                        return df
+    except Exception:
+        pass
+
     rows: list[dict] = []
     for url in [_FF_WEEK_URL, _FF_MONTH_URL]:
         try:
@@ -292,12 +337,14 @@ def _fetch_forexfactory_live() -> pd.DataFrame:
                 ev_time = None
                 for k in ("date", "datetime", "time"):
                     raw = ev.get(k)
-                    if raw:
-                        try:
-                            ev_time = pd.Timestamp(raw, tz="UTC")
-                            break
-                        except Exception:
-                            pass
+                    if not raw:
+                        continue
+                    try:
+                        _ts = pd.Timestamp(raw)
+                        ev_time = _ts.tz_convert("UTC") if _ts.tzinfo is not None else _ts.tz_localize("UTC")
+                        break
+                    except Exception:
+                        pass
                 if ev_time is None:
                     continue
                 rows.append({
@@ -315,9 +362,22 @@ def _fetch_forexfactory_live() -> pd.DataFrame:
         return pd.DataFrame()
     df = pd.DataFrame(rows)
     df["datetime_utc"] = pd.to_datetime(df["datetime_utc"], utc=True)
-    return df.sort_values("datetime_utc").drop_duplicates(
+    df = df.sort_values("datetime_utc").drop_duplicates(
         subset=["datetime_utc", "event"]
     ).reset_index(drop=True)
+    # Save to disk cache
+    try:
+        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        cache_rows = df.copy()
+        cache_rows["datetime_utc"] = cache_rows["datetime_utc"].astype(str)
+        _FF_CACHE_FILE.write_text(
+            json.dumps({"cached_at": datetime.now(timezone.utc).isoformat(),
+                        "rows": cache_rows.to_dict(orient="records")}, default=str),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        LOGGER.debug("ForexFactory cache save failed: %s", exc)
+    return df
 
 
 #  Layer 3: Rule-based 
@@ -467,39 +527,60 @@ def attach_news_features(
             df[col] = val
         return df
 
-    bar_ns  = df["time"].values.astype("int64")
-    hi_ns   = hi["datetime_utc"].values.astype("int64")
+    # Use epoch SECONDS (datetime64[s]) for all comparisons to avoid the
+    # pandas 2.x datetime64[us] vs datetime64[ns] ambiguity.
+    # datetime64[s].astype("int64") always returns epoch seconds — unambiguous
+    # regardless of numpy/pandas version.
+    def _to_epoch_s(s: pd.Series) -> np.ndarray:
+        if s.dt.tz is not None:
+            s = s.dt.tz_convert("UTC").dt.tz_localize(None)
+        return s.values.astype("datetime64[s]").astype("int64")
+
+    bar_s   = _to_epoch_s(df["time"])
+    hi_s    = _to_epoch_s(hi["datetime_utc"])
     hi_gold = hi["gold_direction"].fillna(0).astype(int).values
 
-    NS    = int(3_600_000_000_000)
-    ns_la = int(lookahead_hours * NS)
-    ns_bo = int(blackout_hours  * NS)
-    ns_2h = int(2 * NS)
-    ns_48 = int(48 * NS)
+    SPH   = int(3600)  # seconds per hour
+    s_la  = int(lookahead_hours * SPH)
+    s_bo  = int(blackout_hours  * SPH)
+    s_2h  = int(2 * SPH)
+    s_48  = int(48 * SPH)
 
-    idx_n  = np.searchsorted(hi_ns, bar_ns, side="right")
+    idx_n  = np.searchsorted(hi_s, bar_s, side="right")
     idx_p  = idx_n - 1
 
-    valid_n  = idx_n < len(hi_ns)
-    clamp_n  = np.minimum(idx_n, len(hi_ns) - 1)
-    diff_n   = np.where(valid_n, hi_ns[clamp_n] - bar_ns, ns_48 + NS)
-    hours_ahead  = np.clip(diff_n.astype(float) / NS, 0.0, 48.0)
-    in_la        = valid_n & (diff_n <= ns_la)
+    valid_n  = idx_n < len(hi_s)
+    clamp_n  = np.minimum(idx_n, len(hi_s) - 1)
+    diff_n   = np.where(valid_n, hi_s[clamp_n] - bar_s, s_48 + SPH)
+    hours_ahead  = np.clip(diff_n.astype(float) / SPH, 0.0, 48.0)
+    in_la        = valid_n & (diff_n <= s_la)
     gold_pre     = np.where(in_la, hi_gold[clamp_n], 0)
 
     valid_p  = idx_p >= 0
     clamp_p  = np.maximum(idx_p, 0)
-    diff_p   = np.where(valid_p, bar_ns - hi_ns[clamp_p], ns_48 + NS)
-    hours_since  = np.clip(diff_p.astype(float) / NS, 0.0, 48.0)
-    in_post      = valid_p & (diff_p <= ns_2h)
+    diff_p   = np.where(valid_p, bar_s - hi_s[clamp_p], s_48 + SPH)
+    hours_since  = np.clip(diff_p.astype(float) / SPH, 0.0, 48.0)
+    in_post      = valid_p & (diff_p <= s_2h)
     gold_post    = np.where(in_post, hi_gold[clamp_p], 0)
 
-    df["news_impact_ahead"]  = np.where(in_la, 2, 0).astype(int)
+    # ── Medium impact lookahead (news_impact_ahead = 1) ──────────────────────
+    med = nc[nc["impact"] == "Medium"].reset_index(drop=True)
+    med_in_la = np.zeros(len(df), dtype=bool)
+    if not med.empty:
+        med_s     = _to_epoch_s(med["datetime_utc"])
+        idx_n_m   = np.searchsorted(med_s, bar_s, side="right")
+        valid_n_m = idx_n_m < len(med_s)
+        clamp_n_m = np.minimum(idx_n_m, len(med_s) - 1)
+        diff_n_m  = np.where(valid_n_m, med_s[clamp_n_m] - bar_s, s_48 + SPH)
+        med_in_la = valid_n_m & (diff_n_m <= s_la)
+
+    # 2 = High impact ahead, 1 = Medium ahead (only if no High in window), 0 = clear
+    df["news_impact_ahead"]  = np.where(in_la, 2, np.where(med_in_la, 1, 0)).astype(int)
     df["news_hours_ahead"]   = hours_ahead.round(2)
     df["news_hours_since"]   = hours_since.round(2)
     df["news_surprise_gold"] = np.where(gold_post != 0, gold_post, gold_pre).astype(int)
     df["news_is_blackout"]   = (
-        (valid_n & (diff_n <= ns_bo)) | (valid_p & (diff_p <= ns_bo))
+        (valid_n & (diff_n <= s_bo)) | (valid_p & (diff_p <= s_bo))
     ).astype(int)
 
     src_cnt = nc["source"].value_counts().to_dict() if "source" in nc.columns else {}

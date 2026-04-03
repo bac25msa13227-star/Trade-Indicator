@@ -1,0 +1,11 @@
+# Minimal MLflow tracking server — built from local base (no Docker Hub pull)
+FROM xauusd-backend:latest
+
+RUN pip install --no-cache-dir \
+        mlflow==2.13.0 \
+        boto3 \
+        psycopg2-binary
+
+EXPOSE 5000
+
+CMD ["mlflow", "server", "--host", "0.0.0.0", "--port", "5000"]

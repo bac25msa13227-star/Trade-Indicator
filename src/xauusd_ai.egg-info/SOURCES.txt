@@ -15,6 +15,8 @@ src/xauusd_ai/backtesting/engine.py
 src/xauusd_ai/dashboard/__init__.py
 src/xauusd_ai/dashboard/app.py
 src/xauusd_ai/data/market_data.py
+src/xauusd_ai/data/news_crawler.py
+src/xauusd_ai/data/news_features.py
 src/xauusd_ai/execution/mt5_executor.py
 src/xauusd_ai/execution/risk.py
 src/xauusd_ai/features/dataset.py

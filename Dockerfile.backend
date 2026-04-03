@@ -16,9 +16,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Cài dependencies trước (layer cache — chỉ rebuild khi requirements đổi)
-COPY requirements-core.txt ./
+COPY requirements-core.txt requirements-infra.txt ./
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements-core.txt
+    && pip install --no-cache-dir -r requirements-core.txt \
+    && pip install --no-cache-dir -r requirements-infra.txt
 
 # Cài package (editable-mode không dùng được trong Docker, dùng thường)
 COPY pyproject.toml README.md ./

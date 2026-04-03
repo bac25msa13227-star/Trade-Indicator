@@ -39,8 +39,10 @@ if (Get-Process -Id $botProc.Id -ErrorAction SilentlyContinue) {
 
 # ── 3. Khoi dong Dashboard ───────────────────────────────
 Write-Host "`n[3/3] Khoi dong Dashboard (port 8501)..." -ForegroundColor Yellow
-$dashProc = Start-Process -FilePath "python" `
-    -ArgumentList "-m streamlit run src/xauusd_ai/dashboard/app.py --server.port 8501 --server.headless true" `
+$streamlitExe = if (Test-Path "$Root\.venv\Scripts\streamlit.exe") { "$Root\.venv\Scripts\streamlit.exe" } else { "python" }
+$streamlitArgs = if ($streamlitExe -eq "python") { "-m streamlit run src/xauusd_ai/dashboard/app.py --server.port 8501 --server.headless true" } else { "run src/xauusd_ai/dashboard/app.py --server.port 8501 --server.headless true" }
+$dashProc = Start-Process -FilePath $streamlitExe `
+    -ArgumentList $streamlitArgs `
     -WorkingDirectory $Root -NoNewWindow -PassThru
 $waited = 0
 while (-not (Test-Port 8501) -and $waited -lt 20) { Start-Sleep -Seconds 1; $waited++ }
@@ -102,8 +104,9 @@ if (Get-Process -Id $botProc.Id -ErrorAction SilentlyContinue) {
 
 # ── 3. Khởi động Streamlit Dashboard ─────────────────────
 Write-Host "`n[3/3] Khoi dong Dashboard Streamlit (port 8501)..." -ForegroundColor Yellow
-$dashArgs = "-m streamlit run src/xauusd_ai/dashboard/app.py --server.port 8501 --server.headless true"
-$dashProc = Start-Process -FilePath $Python -ArgumentList $dashArgs -WorkingDirectory $Root -NoNewWindow -PassThru
+$streamlitExe2 = if (Test-Path "$Root\.venv\Scripts\streamlit.exe") { "$Root\.venv\Scripts\streamlit.exe" } else { $Python }
+$dashArgs = if ($streamlitExe2 -eq $Python) { "-m streamlit run src/xauusd_ai/dashboard/app.py --server.port 8501 --server.headless true" } else { "run src/xauusd_ai/dashboard/app.py --server.port 8501 --server.headless true" }
+$dashProc = Start-Process -FilePath $streamlitExe2 -ArgumentList $dashArgs -WorkingDirectory $Root -NoNewWindow -PassThru
 # Doi streamlit san sang
 $maxWait = 20
 $waited  = 0

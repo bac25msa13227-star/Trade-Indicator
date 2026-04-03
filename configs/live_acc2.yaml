@@ -1,0 +1,433 @@
+app:
+  poll_seconds: 60
+  model_path: outputs/acc2_breakthrough_net21k_dd2333_model.pkl
+  scaler_path: outputs/acc2_breakthrough_net21k_dd2333_scaler.pkl
+  model_meta_path: outputs/acc2_breakthrough_net21k_dd2333_model_meta.json
+  training_report_path: outputs/exp_acc2_2003_training_report.json
+  training_plot_path: outputs/exp_acc2_2003_training_metrics.png
+  backtest_report_path: outputs/exp_acc2_2003_backtest_report.json
+  backtest_trades_path: outputs/exp_acc2_2003_backtest_trades.csv
+  backtest_equity_plot_path: outputs/exp_acc2_2003_backtest_equity.png
+  backtest_trades_plot_path: outputs/exp_acc2_2003_backtest_trades_plot.png
+  walkforward_report_path: outputs/exp_acc2_2003_walkforward_report.json
+  walkforward_trades_path: outputs/exp_acc2_2003_walkforward_trades.csv
+  paper_trade_log_path: outputs/paper_trade_signals_acc2.csv
+  live_learning_log_path: outputs/live_learning_log_acc2.jsonl
+  live_closed_trades_path: outputs/live_closed_trades_acc2.csv
+  dashboard_host: 0.0.0.0
+  dashboard_port: 8501
+  log_level: INFO
+market:
+  symbol: XAUUSDm
+  training_symbol: GC=F
+  training_data_source: csv_folder
+  live_data_source: yfinance
+  csv_folder_path: src/xauusd_ai/real_data
+  csv_timeframe: M15
+  higher_timeframe: D1
+  mid_timeframe: H1
+  structure_timeframe: H4
+  execution_timeframe: M5
+  bars:
+    D1: 100
+    H1: 500
+    H4: 200
+    M30: 300
+    M15: 300
+    M5: 500
+    M1: 200
+  timezone: UTC
+  enforce_market_open_gate: true
+  market_tick_stale_seconds: 300
+  market_preopen_alert_minutes: 30
+  market_preclose_alert_minutes: 30
+  market_preopen_alert_minutes_list: [1440, 30]
+  market_preclose_alert_minutes_list: [1440, 30]
+strategy:
+  rsi_period: 14
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  liquidity_lookback: 15
+  swing_lookback: 20
+  volatility_window: 20
+  signal_threshold: 0.76
+  sideways_volatility_threshold: 0.003
+  strong_volatility_threshold: 0.016
+  news_block_minutes: 0
+  rsi_long_threshold: 52
+  rsi_short_threshold: 48
+  ict_weight: 0.4
+  wyckoff_weight: 0.35
+  momentum_weight: 0.25
+  min_strategy_score: 0.4
+  sideway_min_strategy_score: 0.15
+  strong_volatility_min_strategy_score: 0.35
+  require_trend_alignment: true
+  force_trade: false
+  blocked_hours_utc:
+  - 3
+  - 15
+  - 17
+  - 22
+  - 23
+  blocked_weekdays_utc: []
+  blocked_weekday_hours_utc: {}
+  regime_shutdown_rules:
+  - name: monday_early_sell_flow_conflict
+    weekdays_utc:
+    - Monday
+    hours_utc:
+    - 1
+    - 2
+    sides:
+    - sell
+    volatility_regimes:
+    - 1
+    trend_alignment_values:
+    - 0
+    trend_strength_max: -0.24
+    execution_quality_min: 0.0
+  - name: thursday_pm_sell_flow_conflict
+    weekdays_utc:
+    - Thursday
+    hours_utc:
+    - 16
+    - 17
+    - 18
+    sides:
+    - sell
+    volatility_regimes:
+    - 1
+    execution_quality_min: 0.0
+  - name: wed_thu_early_buy_trap
+    weekdays_utc:
+    - Wednesday
+    - Thursday
+    hours_utc:
+    - 3
+    - 4
+    - 5
+    sides:
+    - buy
+    trend_strength_max: -0.4
+    execution_quality_max: 0.3
+  - name: monday_0100_buy_low_adx_trap
+    weekdays_utc:
+    - Monday
+    hours_utc:
+    - 1
+    sides:
+    - buy
+    volatility_regimes:
+    - 1
+    trend_alignment_values:
+    - 0
+    adx_max: 36.0
+    execution_quality_min: 0.0
+  - name: tuesday_1600_buy_regime1_misaligned
+    weekdays_utc:
+    - Tuesday
+    hours_utc:
+    - 16
+    sides:
+    - buy
+    volatility_regimes:
+    - 1
+    trend_alignment_values:
+    - 0
+  - name: tuesday_1900_sell_sideways_trap
+    weekdays_utc:
+    - Tuesday
+    hours_utc:
+    - 19
+    sides:
+    - sell
+    volatility_regimes:
+    - 0
+  - name: thursday_0000_sell_sideways_trap
+    weekdays_utc:
+    - Thursday
+    hours_utc:
+    - 0
+    sides:
+    - sell
+    volatility_regimes:
+    - 0
+  - name: friday_0300_sell_sideways_trap
+    weekdays_utc:
+    - Friday
+    hours_utc:
+    - 3
+    sides:
+    - sell
+    volatility_regimes:
+    - 0
+  - name: tue_wed_thu_sideways_buy_exhaustion
+    weekdays_utc:
+    - Tuesday
+    - Wednesday
+    - Thursday
+    hours_utc:
+    - 7
+    - 8
+    - 11
+    - 12
+    - 13
+    sides:
+    - buy
+    volatility_regimes:
+    - 0
+    trend_alignment_values:
+    - 1
+    trend_strength_min: 0.4
+    execution_quality_min: 0.25
+  silver_bullet_enabled: true
+  silver_bullet_windows_utc:
+  - - 3
+    - 4
+  - - 10
+    - 11
+  - - 14
+    - 15
+  silver_bullet_confidence_boost: 0.03
+  adx_gate_enabled: true
+  adx_min_trend: 18.0
+  sideway_min_confidence: 0.8
+  volatile_min_confidence: 0.55
+risk:
+  mode: fixed_fractional
+  risk_per_trade: 0.036
+  risk_tier_floor: 0.03
+  max_open_positions: 3
+  stop_loss_atr_multiple: 1.5
+  take_profit_rr: 3.5
+  volatile_take_profit_rr: 5.0
+  sideway_take_profit_rr: 2.5
+  min_confidence: 0.7
+  fixed_lot: 0.01
+  max_risk_fraction: 0.065
+  sideway_risk_multiplier: 0.6
+  normal_risk_multiplier: 1.0
+  strong_volatility_risk_multiplier: 0.8
+  daily_loss_limit_pct: 0.05
+  max_drawdown_kill_pct: 0.15
+  consecutive_loss_pause_count: 3
+  consecutive_loss_cooldown_bars: 12
+  anti_martingale_factor: 0.5
+  anti_martingale_max_reductions: 3
+  max_total_exposure_pct: 0.2
+  reentry_guard_enabled: true
+  reentry_cooldown_bars_after_sl: 1
+  reentry_min_distance_atr: 0.35
+  partial_tp_enabled: true
+  partial_tp_rr: 1.5
+  partial_tp_pct: 0.5
+  risk_throttle_rules:
+  - name: friday_1200_buy_regime1_misaligned
+    risk_multiplier: 0.25
+    weekdays_utc:
+    - Friday
+    hours_utc:
+    - 12
+    sides:
+    - buy
+    volatility_regimes:
+    - 1
+    trend_alignment_values:
+    - 0
+  - name: friday_1300_sell_regime1_misaligned
+    risk_multiplier: 0.25
+    weekdays_utc:
+    - Friday
+    hours_utc:
+    - 13
+    sides:
+    - sell
+    volatility_regimes:
+    - 1
+    trend_alignment_values:
+    - 0
+  - name: monday_0200_sell_regime1_bad_exec
+    risk_multiplier: 0.4
+    weekdays_utc:
+    - Monday
+    hours_utc:
+    - 2
+    sides:
+    - sell
+    volatility_regimes:
+    - 1
+    trend_alignment_values:
+    - 0
+    adx_min: 25.0
+    execution_quality_max: -0.2
+  - name: thursday_1800_sell_regime1_bad_exec
+    risk_multiplier: 0.35
+    weekdays_utc:
+    - Thursday
+    hours_utc:
+    - 18
+    sides:
+    - sell
+    volatility_regimes:
+    - 1
+    trend_alignment_values:
+    - 0
+    execution_quality_max: -0.05
+  - name: wednesday_0100_sell_sideways_drift
+    risk_multiplier: 0.25
+    weekdays_utc:
+    - Wednesday
+    hours_utc:
+    - 1
+    sides:
+    - sell
+    volatility_regimes:
+    - 0
+    trend_alignment_values:
+    - 1
+  - name: thursday_1400_buy_regime1_midday_fade
+    risk_multiplier: 0.25
+    weekdays_utc:
+    - Thursday
+    hours_utc:
+    - 14
+    sides:
+    - buy
+    volatility_regimes:
+    - 1
+    trend_alignment_values:
+    - 1
+    probability_max: 0.6
+  - name: monday_1400_sell_sideways_soften
+    risk_multiplier: 0.35
+    weekdays_utc:
+    - Monday
+    hours_utc:
+    - 14
+    sides:
+    - sell
+    volatility_regimes:
+    - 0
+    trend_alignment_values:
+    - 1
+  - name: tuesday_0000_sell_sideways_soften
+    risk_multiplier: 0.35
+    weekdays_utc:
+    - Tuesday
+    hours_utc:
+    - 0
+    sides:
+    - sell
+    volatility_regimes:
+    - 0
+    trend_alignment_values:
+    - 1
+  - name: wednesday_0400_sell_sideways_soften
+    risk_multiplier: 0.35
+    weekdays_utc:
+    - Wednesday
+    hours_utc:
+    - 4
+    sides:
+    - sell
+    volatility_regimes:
+    - 0
+    trend_alignment_values:
+    - 1
+  - name: monday_0200_sell_regime1_low_adx
+    risk_multiplier: 0.35
+    weekdays_utc:
+    - Monday
+    hours_utc:
+    - 2
+    sides:
+    - sell
+    volatility_regimes:
+    - 1
+    trend_alignment_values:
+    - 1
+    adx_max: 22.0
+execution:
+  auto_trade: true
+  deviation: 20
+  magic_number: 20260316
+  comment: xauusd-ai-live-acc2-freeze
+  paper_trade_max_loops: 0
+  paper_data_source: yfinance
+  close_opposite_on_signal: true
+  trailing_sl:
+    enabled: true
+    breakeven_at_rr: 0.5
+    activation_rr: 1.0
+    trail_atr_multiple: 1.0
+  dca:
+    enabled: false
+    max_dca_count: 2
+    trigger_atr_multiple: 1.5
+    lot_multiplier: 1.5
+    max_total_risk_pct: 0.03
+  exit_model:
+    enabled: false
+    exit_model_path: outputs/exit_model_acc2.pkl
+    exit_scaler_path: outputs/exit_scaler_acc2.pkl
+    exit_model_meta_path: outputs/exit_model_meta_acc2.json
+    exit_threshold: 0.65
+    min_unrealized_rr: 0.8
+    exit_min_hold_bars: 4
+    exit_label_horizon: 8
+    exit_label_threshold_rr: 0.5
+    max_entry_samples: 8000
+    also_cut_losses: false
+    min_loss_rr: -0.5
+training:
+  train_start_date: '2003-05-05'
+  train_end_date: '2025-12-31'
+  test_start_date: '2026-01-01'
+  test_end_date: '2026-03-30'
+  train_split: 0.7
+  use_sltp_label: true
+  sltp_label_max_horizon: 192
+  label_tp_rr: 2.0
+  label_horizon: 36
+  min_return_threshold: 0.001
+  retrain_on_startup: false
+  live_learning_enabled: false
+  live_learning_interval_minutes: 60
+  live_learning_min_new_bars: 12
+  live_learning_min_rows: 500
+  min_self_learning_roc_auc: 0.53
+  save_dataset: true
+  dataset_path: outputs/training_dataset_acc2.csv
+  optimize_threshold: false
+  validation_split: 0.15
+  threshold_min: 0.4
+  threshold_max: 0.78
+  threshold_step: 0.01
+  min_precision_floor: 0.45
+  backtest_initial_balance: 200.0
+  walkforward_train_size: 30000
+  walkforward_test_size: 4000
+  walkforward_step_size: 4000
+  walkforward_max_combinations: 30
+  walkforward_max_folds_per_combination: 8
+notifications:
+  telegram_enabled: true
+  verbose_message: true
+integrations:
+  mt5:
+    enabled: true
+    login_env: MT5_LOGIN_ACC2
+    password_env: MT5_PASSWORD_ACC2
+    server_env: MT5_SERVER_ACC2
+    login: 433326057
+    password: 07032001bB@
+    server: Exness-MT5Trial7
+    terminal_path: C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe
+  telegram:
+    token_env: TELEGRAM_BOT_TOKEN_ACC2
+    chat_id_env: TELEGRAM_CHAT_ID_ACC2
+  news:
+    enabled: false
+    provider: stub

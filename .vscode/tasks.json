@@ -1,0 +1,285 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Check Docker Status",
+			"type": "shell",
+			"command": "docker image ls && docker ps -a",
+			"isBackground": false
+		},
+		{
+			"label": "Check Docker Status2",
+			"type": "shell",
+			"command": "docker image ls; docker ps -a",
+			"isBackground": false
+		},
+		{
+			"label": "DockerCheck3",
+			"type": "shell",
+			"command": "docker image ls | Out-File C:\\Temp\\imgs.txt -Encoding utf8 -Force; docker ps -a | Out-File C:\\Temp\\containers.txt -Encoding utf8 -Force; Write-Host 'DONE'",
+			"isBackground": false
+		},
+		{
+			"label": "Start Prometheus MLflow",
+			"type": "shell",
+			"command": "Set-Location 'C:\\Users\\Administrator\\Documents\\Trade-Indicator'; docker compose up -d prometheus; Write-Host '--- prometheus started ---'; docker compose up -d mlflow; Write-Host '--- mlflow started ---'; docker ps --format 'table {{.Names}}`t{{.Status}}`t{{.Ports}}'",
+			"isBackground": false
+		},
+		{
+			"label": "DockerStatus4",
+			"type": "shell",
+			"command": "docker ps --format 'table {{.Names}}`t{{.Status}}`t{{.Ports}}' | Out-File C:\\Temp\\status.txt -Encoding utf8 -Force; Write-Host 'written'; Get-Content C:\\Temp\\status.txt",
+			"isBackground": false
+		},
+		{
+			"label": "CheckImages5",
+			"type": "shell",
+			"command": "docker image inspect grafana/grafana:10.4.2 --format '{{.Id}}' 2>&1; docker image inspect ghcr.io/mlflow/mlflow:v2.13.0 --format '{{.Id}}' 2>&1; docker ps --format 'table {{.Names}}`t{{.Status}}' | Out-File C:\\Temp\\status2.txt -Force -Encoding utf8; Write-Host 'DONE'; Get-Content C:\\Temp\\status2.txt",
+			"isBackground": false
+		},
+		{
+			"label": "BuildMLflowStartPrometheus",
+			"type": "shell",
+			"command": "Set-Location 'C:\\Users\\Administrator\\Documents\\Trade-Indicator'; Write-Host '=== Starting Prometheus ==='; docker compose up -d prometheus; $exit1 = $LASTEXITCODE; Write-Host \"prometheus exit: $exit1\"; Write-Host '=== Building MLflow image (pip install) ==='; docker compose build mlflow; $exit2 = $LASTEXITCODE; Write-Host \"mlflow build exit: $exit2\"; Write-Host '=== Done ==='",
+			"isBackground": false
+		},
+		{
+			"label": "BuildMLflow2",
+			"type": "shell",
+			"command": "Set-Location 'C:\\Users\\Administrator\\Documents\\Trade-Indicator'; docker compose build mlflow 2>&1 | Tee-Object -FilePath 'C:\\Temp\\mlflow_build.txt' -Append; Write-Host \"EXIT: $LASTEXITCODE\"; Get-Content 'C:\\Temp\\mlflow_build.txt' | Select-Object -Last 10",
+			"isBackground": false
+		},
+		{
+			"label": "RebuildBackendStartApi",
+			"type": "shell",
+			"command": "Set-Location 'C:\\Users\\Administrator\\Documents\\Trade-Indicator'; Write-Host '=== Rebuilding xauusd-backend with infra packages ==='; docker compose build api 2>&1 | Tee-Object -FilePath 'outputs\\build_backend.log' -Append; $e=$LASTEXITCODE; Write-Host \"Build exit: $e\"; if ($e -eq 0) { Write-Host '=== Starting api service ==='; docker compose up -d api; } else { Write-Host 'BUILD FAILED - check outputs\\build_backend.log' }",
+			"isBackground": false
+		},
+		{
+			"label": "BuildApi",
+			"type": "shell",
+			"command": "Set-Location 'C:\\Users\\Administrator\\Documents\\Trade-Indicator'; $env:DOCKER_BUILDKIT='1'; Write-Host '=== Building xauusd-api (from local xauusd-backend:latest) ==='; docker build -f Dockerfile.api -t xauusd-api:latest . 2>&1 | Tee-Object -FilePath 'outputs\\build_api.log' -Append; $e=$LASTEXITCODE; Write-Host \"Build exit: $e\"; if ($e -eq 0) { Write-Host 'SUCCESS - starting api...'; docker compose up -d api; Write-Host 'API started!'; docker ps --format 'table {{.Names}}`t{{.Status}}`t{{.Ports}}' } else { Write-Host 'FAILED'; Get-Content 'outputs\\build_api.log' | Select-Object -Last 20 }",
+			"isBackground": false
+		},
+		{
+			"label": "ApiImageBuild2026",
+			"type": "shell",
+			"command": "Set-Location 'C:\\Users\\Administrator\\Documents\\Trade-Indicator'; Write-Host 'BUILD API START'; docker build -f Dockerfile.api -t xauusd-api:latest . 2>&1; Write-Host \"EXIT $LASTEXITCODE\"",
+			"isBackground": false
+		},
+		{
+			"label": "CheckBuildStatus",
+			"type": "shell",
+			"command": "docker images --format '{{.Repository}}:{{.Tag}}\\t{{.Size}}\\t{{.CreatedAt}}' | Sort-Object; Write-Host '---CONTAINERS---'; docker ps -a --format '{{.Names}}\\t{{.Status}}\\t{{.Ports}}'",
+			"isBackground": false
+		},
+		{
+			"label": "StartGrafana",
+			"type": "shell",
+			"command": "docker compose up -d grafana; Write-Host '---STATUS---'; docker ps --format '{{.Names}}\\t{{.Status}}\\t{{.Ports}}'",
+			"isBackground": false
+		},
+		{
+			"label": "CheckStatus2026",
+			"type": "shell",
+			"command": "docker images --format 'table {{.Repository}}\\t{{.Tag}}\\t{{.Size}}'; Write-Host '---CONTAINERS---'; docker ps --format 'table {{.Names}}\\t{{.Status}}\\t{{.Ports}}'",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "BuildApi2026b",
+			"type": "shell",
+			"command": "Set-Location 'C:\\Users\\Administrator\\Documents\\Trade-Indicator'; Write-Host 'BUILD API START'; docker build -f Dockerfile.api -t xauusd-api:latest . 2>&1; Write-Host \"EXIT $LASTEXITCODE\"",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "CheckNewImages",
+			"type": "shell",
+			"command": "docker images xauusd-api; docker images xauusd-mlflow",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "StartApi2026",
+			"type": "shell",
+			"command": "Set-Location 'C:\\Users\\Administrator\\Documents\\Trade-Indicator'; Write-Host 'STARTING API'; docker compose up -d api; Write-Host \"EXIT $LASTEXITCODE\"",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "BuildMlflow2026b",
+			"type": "shell",
+			"command": "Set-Location 'C:\\Users\\Administrator\\Documents\\Trade-Indicator'; Write-Host 'BUILD MLFLOW START'; docker build -f Dockerfile.mlflow -t xauusd-mlflow:latest . 2>&1; Write-Host \"EXIT $LASTEXITCODE\"",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "CheckApiStatus",
+			"type": "shell",
+			"command": "docker ps --format 'table {{.Names}}\\t{{.Status}}\\t{{.Ports}}' ; Write-Host '---'; docker inspect xauusd-api --format '{{.State.Status}} {{.State.Error}}'",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "StartMlflow2026",
+			"type": "shell",
+			"command": "Set-Location 'C:\\Users\\Administrator\\Documents\\Trade-Indicator'; Write-Host 'STARTING MLFLOW'; docker compose up -d mlflow 2>&1; Write-Host \"--- COMPOSE EXIT $LASTEXITCODE ---\"; Start-Sleep 5; docker ps --format 'table {{.Names}}\\t{{.Status}}\\t{{.Ports}}'",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "GetTunnelURL",
+			"type": "shell",
+			"command": "python C:\\Users\\Administrator\\Documents\\Trade-Indicator\\scripts\\get_tunnel_url.py",
+			"isBackground": false
+		},
+		{
+			"label": "CheckSignalCols",
+			"type": "shell",
+			"command": "python -c \"import csv,json; r=list(csv.DictReader(open('outputs/paper_trade_signals_acc2.csv'))); print('COLS:',list(r[0].keys()) if r else []); print('LAST:',json.dumps(dict(list(r[-1].items())[:10])) if r else '')\"",
+			"isBackground": false
+		},
+		{
+			"label": "CheckDashboard2026",
+			"type": "shell",
+			"command": "docker exec xauusd-api python -c \"import urllib.request as u, json; r=u.urlopen('http://localhost:8000/api/v1/dashboard',timeout=15); d=json.loads(r.read()); m=d.get('model',{}); print('=== MODEL PERFORMANCE ==='); print('precision=', m.get('precision')); print('recall=', m.get('recall')); print('f1=', m.get('f1')); print('roc_auc=', m.get('roc_auc')); print('threshold=', m.get('threshold')); print('=== KEYS ==='); print(list(d.keys()))\" 2>&1",
+			"isBackground": false
+		},
+		{
+			"label": "CheckDashboard2026b",
+			"type": "shell",
+			"command": "docker exec xauusd-api python /app/outputs/check_dashboard.py 2>&1",
+			"isBackground": false
+		},
+		{
+			"label": "CheckMainFile",
+			"type": "shell",
+			"command": "docker exec xauusd-api python -c \"import xauusd_ai.api.main as m; import inspect; print(inspect.getfile(m))\" 2>&1",
+			"isBackground": false
+		},
+		{
+			"label": "CheckApiLogs2026",
+			"type": "shell",
+			"command": "docker logs xauusd-api 2>&1 | Select-Object -Last 25",
+			"isBackground": false
+		},
+		{
+			"label": "CheckCodeInContainer",
+			"type": "shell",
+			"command": "docker exec xauusd-api grep -n 'run_in_executor\\|wait_for\\|init_tables' /app/src/xauusd_ai/api/main.py | head -10 2>&1",
+			"isBackground": false
+		},
+		{
+			"label": "CheckCode2026",
+			"type": "shell",
+			"command": "docker exec xauusd-api python /app/outputs/check_code.py 2>&1",
+			"isBackground": false
+		},
+		{
+			"label": "TopApi2026",
+			"type": "shell",
+			"command": "docker top xauusd-api 2>&1",
+			"isBackground": false
+		},
+		{
+			"label": "GetTunnelUrl2026",
+			"type": "shell",
+			"command": "docker logs xauusd-cloudflared 2>&1 | Select-String -Pattern 'trycloudflare|https://' | Select-Object -Last 5",
+			"isBackground": false
+		},
+		{
+			"label": "CheckLiveContainers",
+			"type": "shell",
+			"command": "docker ps -a --format 'table {{.Names}}\\t{{.Status}}' | Tee-Object -FilePath C:\\Temp\\containers.txt; Write-Host 'DONE'; Get-Content C:\\Temp\\containers.txt"
+		},
+		{
+			"label": "CheckContainers2026c",
+			"type": "shell",
+			"command": "docker ps -a --format 'table {{.Names}}\\t{{.Status}}' > C:\\Temp\\containers_now.txt 2>&1; Get-Content C:\\Temp\\containers_now.txt"
+		},
+		{
+			"label": "CheckAcc1CsvAndLogs",
+			"type": "shell",
+			"command": "Write-Host '=ACC1 CONTAINER='; docker inspect trade-indicator-live-acc1-1 --format '{{.State.Status}} {{.State.StartedAt}}' 2>&1; Write-Host '=CSV='; (Get-Item 'outputs\\live_closed_trades_acc1.csv').LastWriteTime; (Get-Content 'outputs\\live_closed_trades_acc1.csv').Count; Write-Host '=LAST LOG='; docker logs trade-indicator-live-acc1-1 --tail 10 2>&1 | Select-Object -Last 10"
+		},
+		{
+			"label": "CheckLiveContainersForCP",
+			"type": "shell",
+			"command": "docker ps -a --format '{{.Names}}\\t{{.Status}}'"
+		},
+		{
+			"label": "CpFilesToContainers",
+			"type": "shell",
+			"command": "Write-Host 'START COPY'; docker cp 'C:\\Users\\Administrator\\Documents\\Trade-Indicator\\src\\xauusd_ai\\execution\\mt5_executor.py' 'trade-indicator-live-acc1-1:/app/src/xauusd_ai/execution/mt5_executor.py'; Write-Host \"cp mt5_executor acc1: $LASTEXITCODE\"; docker cp 'C:\\Users\\Administrator\\Documents\\Trade-Indicator\\src\\xauusd_ai\\orchestrator.py' 'trade-indicator-live-acc1-1:/app/src/xauusd_ai/orchestrator.py'; Write-Host \"cp orchestrator acc1: $LASTEXITCODE\"; docker cp 'C:\\Users\\Administrator\\Documents\\Trade-Indicator\\src\\xauusd_ai\\execution\\mt5_executor.py' 'trade-indicator-live-1:/app/src/xauusd_ai/execution/mt5_executor.py'; Write-Host \"cp mt5_executor live: $LASTEXITCODE\"; docker cp 'C:\\Users\\Administrator\\Documents\\Trade-Indicator\\src\\xauusd_ai\\orchestrator.py' 'trade-indicator-live-1:/app/src/xauusd_ai/orchestrator.py'; Write-Host \"cp orchestrator live: $LASTEXITCODE\"; Write-Host 'DONE COPY'"
+		},
+		{
+			"label": "RestartLiveContainers",
+			"type": "shell",
+			"command": "Write-Host 'RESTARTING CONTAINERS...'; docker restart trade-indicator-live-acc1-1; Write-Host \"restart acc1: $LASTEXITCODE\"; docker restart trade-indicator-live-1; Write-Host \"restart live: $LASTEXITCODE\"; Start-Sleep 8; docker ps --format 'table {{.Names}}\\t{{.Status}}' | Select-String 'live|acc'"
+		},
+		{
+			"label": "ForceRestartAcc1",
+			"type": "shell",
+			"command": "Write-Host 'FORCE STOP acc1...'; docker stop -t 5 trade-indicator-live-acc1-1 2>&1; Write-Host \"stop acc1: $LASTEXITCODE\"; Write-Host 'CLEAR PYCACHE acc1...'; docker run --rm -v trade-indicator_live:/app/src --entrypoint sh trade-indicator-live-acc1-1 -c 'find /app/src/xauusd_ai/execution /app/src/xauusd_ai -maxdepth 1 -name __pycache__ -exec rm -rf {} + 2>/dev/null; echo DONE' 2>&1; Write-Host 'START acc1...'; docker start trade-indicator-live-acc1-1 2>&1; Write-Host \"start acc1: $LASTEXITCODE\""
+		},
+		{
+			"label": "ForceRestartLive1",
+			"type": "shell",
+			"command": "Write-Host 'STOP live-1...'; docker stop -t 5 trade-indicator-live-1 2>&1; Write-Host \"stop: $LASTEXITCODE\"; Write-Host 'CLEAR PYCACHE inside live-1...'; docker exec trade-indicator-live-acc1-1 find /app/src/xauusd_ai/execution /app/src/xauusd_ai -maxdepth 1 -name '__pycache__' -exec rm -rf '{}' ';' 2>&1; Write-Host 'CLEAR PYCACHE inside acc1...'; docker exec trade-indicator-live-1 find /app/src/xauusd_ai/execution /app/src/xauusd_ai -maxdepth 1 -name '__pycache__' -exec rm -rf '{}' ';' 2>&1; Write-Host 'START live-1...'; docker start trade-indicator-live-1 2>&1; Write-Host \"start: $LASTEXITCODE\""
+		},
+		{
+			"label": "DeployTrainerRestartBots",
+			"type": "shell",
+			"command": "Set-Location 'C:\\Users\\Administrator\\Documents\\Trade-Indicator'; Write-Host '=DEPLOY TRAINER.PY='; docker cp src/xauusd_ai/model/trainer.py trade-indicator-live-acc1-1:/app/src/xauusd_ai/model/trainer.py 2>&1; Write-Host \"cp acc1: $LASTEXITCODE\"; docker cp src/xauusd_ai/model/trainer.py trade-indicator-live-1:/app/src/xauusd_ai/model/trainer.py 2>&1; Write-Host \"cp acc2: $LASTEXITCODE\"; Write-Host '=CLEAR PYCACHE='; docker exec trade-indicator-live-acc1-1 sh -c 'find /app/src/xauusd_ai/model -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null; echo done' 2>&1; docker exec trade-indicator-live-1 sh -c 'find /app/src/xauusd_ai/model -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null; echo done' 2>&1; Write-Host '=RESTART='; docker restart trade-indicator-live-acc1-1 2>&1; Write-Host \"restart acc1: $LASTEXITCODE\"; docker restart trade-indicator-live-1 2>&1; Write-Host \"restart acc2: $LASTEXITCODE\"; Start-Sleep 90; Write-Host '=LOGS ACC1='; docker logs trade-indicator-live-acc1-1 --tail 15 2>&1; Write-Host '=LOGS ACC2='; docker logs trade-indicator-live-1 --tail 10 2>&1; Write-Host '=STATUS='; docker ps --format 'table {{.Names}}\\t{{.Status}}' 2>&1",
+			"isBackground": false
+		},
+		{
+			"label": "CheckBotStatus2026b",
+			"type": "shell",
+			"command": "Write-Host '=STATUS='; docker ps --format 'table {{.Names}}\\t{{.Status}}'; Write-Host '=ACC1 LAST LOGS='; docker logs trade-indicator-live-acc1-1 2>&1 | Select-Object -Last 10; Write-Host '=ACC2 LAST LOGS='; docker logs trade-indicator-live-1 2>&1 | Select-Object -Last 5",
+			"isBackground": false
+		},
+		{
+			"label": "StopAllDockerWrite",
+			"type": "shell",
+			"command": "docker stop $(docker ps -q) 2>&1 | Out-Null; Start-Sleep 3; docker ps -a --format '{{.Names}}\\t{{.Status}}' | Out-File C:\\Temp\\stopped.txt -Encoding UTF8; Get-Content C:\\Temp\\stopped.txt",
+			"isBackground": false
+		},
+		{
+			"label": "RestartBots2026",
+			"type": "shell",
+			"command": "Write-Host 'RESTARTING ACC1...'; docker stop trade-indicator-live-acc1-1 2>&1; Start-Sleep 3; docker start trade-indicator-live-acc1-1 2>&1; Write-Host \"ACC1: $LASTEXITCODE\"; Write-Host 'RESTARTING ACC2...'; docker stop trade-indicator-live-1 2>&1; Start-Sleep 3; docker start trade-indicator-live-1 2>&1; Write-Host \"ACC2: $LASTEXITCODE\"; Start-Sleep 25; Write-Host '=== ACC1 LOGS ==='; docker logs trade-indicator-live-acc1-1 --tail 5 2>&1; Write-Host '=== ACC2 LOGS ==='; docker logs trade-indicator-live-1 --tail 5 2>&1"
+		},
+		{
+			"label": "CheckBotLogsKS",
+			"type": "shell",
+			"command": "Write-Host '=ACC1 LIVE LOGS='; docker logs trade-indicator-live-acc1-1 --tail 8 2>&1; Write-Host '=ACC2 LIVE LOGS='; docker logs trade-indicator-live-1 --tail 8 2>&1; Write-Host '=STATUS='; docker ps --format '{{.Names}} | {{.Status}}'"
+		},
+		{
+			"label": "CheckBotLogsNew",
+			"type": "shell",
+			"command": "Write-Host '=ACC1 NEW LOGS (since 01:50)='; docker logs trade-indicator-live-acc1-1 --since '2026-03-30T01:50:00' 2>&1 | Select-Object -Last 10; Write-Host '=ACC2 NEW LOGS (since 01:50)='; docker logs trade-indicator-live-1 --since '2026-03-30T01:50:00' 2>&1 | Select-Object -Last 10"
+		},
+		{
+			"label": "CheckBotLogs5m",
+			"type": "shell",
+			"command": "Write-Host '=ACC1 LATEST='; docker logs trade-indicator-live-acc1-1 --since 5m 2>&1 | Select-Object -Last 6; Write-Host '=ACC2 LATEST='; docker logs trade-indicator-live-1 --since 5m 2>&1 | Select-Object -Last 6"
+		},
+		{
+			"label": "CheckBotLogsFinal",
+			"type": "shell",
+			"command": "Write-Host '=ACC1 LATEST='; docker logs trade-indicator-live-acc1-1 --tail 10 2>&1 | Select-Object -Last 5; Write-Host '=ACC2 LATEST='; docker logs trade-indicator-live-1 --tail 6 2>&1 | Select-Object -Last 5"
+		},
+		{
+			"label": "CheckAcc2Decision",
+			"type": "shell",
+			"command": "docker logs trade-indicator-live-1 --tail 30 2>&1 | Select-Object -Last 30"
+		},
+		{
+			"label": "RestartAcc1NewCreds",
+			"type": "shell",
+			"command": "Write-Host 'Restarting ACC1 with new MT5 credentials...'; docker stop trade-indicator-live-acc1-1 2>&1; Start-Sleep 3; docker start trade-indicator-live-acc1-1 2>&1; Write-Host \"ACC1 restart: $LASTEXITCODE\"; Start-Sleep 20; Write-Host '=== ACC1 STARTUP LOGS ==='; docker logs trade-indicator-live-acc1-1 --tail 15 2>&1"
+		}
+	]
+}
