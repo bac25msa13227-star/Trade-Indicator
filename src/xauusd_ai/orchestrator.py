@@ -728,12 +728,16 @@ def run_live_loop(settings: Settings) -> None:
     _config_mtime: float = _cp.stat().st_mtime if _cp and _cp.exists() else 0.0
     _tunnel_url_mtime: float = 0.0
     _tunnel_url_sent: str = ""  # track last URL sent to avoid duplicate notifications
+    _profile_base: dict[str, float | int] = {}
+    _runtime_profile_mode: str = "balanced"
+    _profile_override_mtime: float = 0.0
 
     def _maybe_reload_config() -> None:
         """Reload toggleable settings from YAML without restart."""
         nonlocal settings, _config_mtime, _exit_model, news_crawler
         nonlocal _market_gate_enabled, _market_stale_seconds
         nonlocal _market_preopen_alert_minutes_list, _market_preclose_alert_minutes_list
+        nonlocal _profile_base, _runtime_profile_mode
         if not _config_path or not Path(_config_path).exists():
             return
         try:
@@ -748,7 +752,12 @@ def run_live_loop(settings: Settings) -> None:
             settings.execution.dca.enabled = new_settings.execution.dca.enabled
             settings.execution.close_opposite_on_signal = new_settings.execution.close_opposite_on_signal
             settings.risk.risk_per_trade = new_settings.risk.risk_per_trade
+            settings.risk.min_confidence = new_settings.risk.min_confidence
             settings.risk.max_open_positions = new_settings.risk.max_open_positions
+            settings.risk.max_risk_fraction = new_settings.risk.max_risk_fraction
+            settings.risk.max_total_exposure_pct = new_settings.risk.max_total_exposure_pct
+            settings.risk.consecutive_loss_pause_count = new_settings.risk.consecutive_loss_pause_count
+            settings.risk.consecutive_loss_cooldown_bars = new_settings.risk.consecutive_loss_cooldown_bars
             settings.risk.take_profit_rr = new_settings.risk.take_profit_rr
             settings.risk.stop_loss_atr_multiple = new_settings.risk.stop_loss_atr_multiple
             settings.risk.reentry_guard_enabled = new_settings.risk.reentry_guard_enabled
@@ -756,6 +765,8 @@ def run_live_loop(settings: Settings) -> None:
             settings.risk.reentry_min_distance_atr = new_settings.risk.reentry_min_distance_atr
             settings.strategy.signal_threshold = new_settings.strategy.signal_threshold
             settings.strategy.min_strategy_score = new_settings.strategy.min_strategy_score
+            settings.strategy.sideway_min_confidence = new_settings.strategy.sideway_min_confidence
+            settings.strategy.volatile_min_confidence = new_settings.strategy.volatile_min_confidence
             settings.strategy.force_trade = new_settings.strategy.force_trade
             settings.strategy.blocked_hours_utc = new_settings.strategy.blocked_hours_utc
             settings.strategy.blocked_weekdays_utc = new_settings.strategy.blocked_weekdays_utc
@@ -798,6 +809,9 @@ def run_live_loop(settings: Settings) -> None:
             elif not new_settings.integrations.news.enabled:
                 news_crawler = None
             settings.integrations.news.enabled = new_settings.integrations.news.enabled
+            _profile_base = _capture_profile_base()
+            if _runtime_profile_mode != "balanced":
+                _apply_runtime_profile_mode(_runtime_profile_mode, source="config_reload", notify=False)
             LOGGER.info("Config hot-reloaded from %s", _config_path)
             notifier.send_message("🔄 <b>Config reloaded</b> — thay đổi đã áp dụng (không cần restart)")
         except Exception as exc:
@@ -836,6 +850,174 @@ def run_live_loop(settings: Settings) -> None:
     _ENTRY_SNAPSHOT_FILE = Path(f"outputs/entry_snapshot_tracker_{_state_suffix}.json")
     # Re-entry guard state after SL, per side.
     _REENTRY_GUARD_FILE = Path(f"outputs/reentry_guard_{_state_suffix}.json")
+    _PROFILE_OVERRIDE_FILE = Path(f"outputs/runtime_profile_override_{_state_suffix}.json")
+
+    def _capture_profile_base() -> dict[str, float | int]:
+        return {
+            "signal_threshold": float(settings.strategy.signal_threshold),
+            "risk_min_confidence": float(settings.risk.min_confidence),
+            "risk_per_trade": float(settings.risk.risk_per_trade),
+            "max_risk_fraction": float(settings.risk.max_risk_fraction),
+            "max_total_exposure_pct": float(settings.risk.max_total_exposure_pct),
+            "max_open_positions": int(settings.risk.max_open_positions),
+            "min_strategy_score": float(settings.strategy.min_strategy_score),
+            "sideway_min_confidence": float(settings.strategy.sideway_min_confidence),
+            "volatile_min_confidence": float(settings.strategy.volatile_min_confidence),
+            "cooldown_count": int(settings.risk.consecutive_loss_pause_count),
+            "cooldown_bars": int(settings.risk.consecutive_loss_cooldown_bars),
+        }
+
+    def _clamp(value: float, lo: float, hi: float) -> float:
+        return max(lo, min(hi, value))
+
+    def _apply_runtime_profile_mode(mode: str, source: str = "runtime_override", notify: bool = True) -> bool:
+        nonlocal _runtime_profile_mode
+        mode_norm = str(mode or "").strip().lower()
+        if mode_norm not in {"conservative", "balanced", "aggressive"}:
+            return False
+        if not _profile_base:
+            return False
+
+        base = _profile_base
+        if mode_norm == "balanced":
+            settings.strategy.signal_threshold = float(base["signal_threshold"])
+            settings.risk.min_confidence = float(base["risk_min_confidence"])
+            settings.risk.risk_per_trade = float(base["risk_per_trade"])
+            settings.risk.max_risk_fraction = float(base["max_risk_fraction"])
+            settings.risk.max_total_exposure_pct = float(base["max_total_exposure_pct"])
+            settings.risk.max_open_positions = int(base["max_open_positions"])
+            settings.strategy.min_strategy_score = float(base["min_strategy_score"])
+            settings.strategy.sideway_min_confidence = float(base["sideway_min_confidence"])
+            settings.strategy.volatile_min_confidence = float(base["volatile_min_confidence"])
+            settings.risk.consecutive_loss_pause_count = int(base["cooldown_count"])
+            settings.risk.consecutive_loss_cooldown_bars = int(base["cooldown_bars"])
+        else:
+            profile_map = {
+                "conservative": {
+                    "threshold_delta": 0.05,
+                    "min_conf_delta": 0.05,
+                    "risk_mult": 0.65,
+                    "max_risk_mult": 0.7,
+                    "exposure_mult": 0.72,
+                    "max_pos_delta": -1,
+                    "strategy_mult": 1.20,
+                    "side_conf_delta": 0.04,
+                    "vol_conf_delta": 0.04,
+                    "cooldown_mult": 1.35,
+                },
+                "aggressive": {
+                    "threshold_delta": -0.05,
+                    "min_conf_delta": -0.05,
+                    "risk_mult": 1.35,
+                    "max_risk_mult": 1.25,
+                    "exposure_mult": 1.30,
+                    "max_pos_delta": 1,
+                    "strategy_mult": 0.85,
+                    "side_conf_delta": -0.05,
+                    "vol_conf_delta": -0.04,
+                    "cooldown_mult": 0.75,
+                },
+            }
+            rule = profile_map[mode_norm]
+            settings.strategy.signal_threshold = _clamp(
+                float(base["signal_threshold"]) + float(rule["threshold_delta"]),
+                0.50,
+                0.99,
+            )
+            settings.risk.min_confidence = _clamp(
+                float(base["risk_min_confidence"]) + float(rule["min_conf_delta"]),
+                0.50,
+                0.99,
+            )
+            settings.risk.risk_per_trade = _clamp(
+                float(base["risk_per_trade"]) * float(rule["risk_mult"]),
+                0.001,
+                0.20,
+            )
+            settings.risk.max_risk_fraction = _clamp(
+                float(base["max_risk_fraction"]) * float(rule["max_risk_mult"]),
+                0.005,
+                0.35,
+            )
+            settings.risk.max_total_exposure_pct = _clamp(
+                float(base["max_total_exposure_pct"]) * float(rule["exposure_mult"]),
+                0.01,
+                0.80,
+            )
+            settings.risk.max_open_positions = max(
+                1,
+                int(round(float(base["max_open_positions"]) + float(rule["max_pos_delta"]))),
+            )
+            settings.strategy.min_strategy_score = _clamp(
+                float(base["min_strategy_score"]) * float(rule["strategy_mult"]),
+                0.01,
+                1.00,
+            )
+            settings.strategy.sideway_min_confidence = _clamp(
+                float(base["sideway_min_confidence"]) + float(rule["side_conf_delta"]),
+                0.50,
+                0.99,
+            )
+            settings.strategy.volatile_min_confidence = _clamp(
+                float(base["volatile_min_confidence"]) + float(rule["vol_conf_delta"]),
+                0.50,
+                0.99,
+            )
+            settings.risk.consecutive_loss_pause_count = max(
+                1,
+                int(round(float(base["cooldown_count"]) * float(rule["cooldown_mult"]))),
+            )
+            settings.risk.consecutive_loss_cooldown_bars = max(
+                1,
+                int(round(float(base["cooldown_bars"]) * float(rule["cooldown_mult"]))),
+            )
+
+        _runtime_profile_mode = mode_norm
+        LOGGER.info(
+            "Runtime profile applied (%s) source=%s | thr=%.4f risk_conf=%.4f risk_per_trade=%.4f max_pos=%d",
+            mode_norm,
+            source,
+            settings.strategy.signal_threshold,
+            settings.risk.min_confidence,
+            settings.risk.risk_per_trade,
+            settings.risk.max_open_positions,
+        )
+        if notify:
+            notifier.send_message(
+                "🧭 <b>Runtime profile applied</b>\n"
+                f"├ Profile: <b>{mode_norm.capitalize()}</b> (source: {html.escape(str(source))})\n"
+                f"├ Threshold: {settings.strategy.signal_threshold:.4f} | Min confidence: {settings.risk.min_confidence:.4f}\n"
+                f"├ Risk/trade: {settings.risk.risk_per_trade:.4f} | Max positions: {settings.risk.max_open_positions}\n"
+                "└ Hot-reload: applied without restarting bot."
+            )
+        return True
+
+    def _maybe_reload_profile_override() -> None:
+        nonlocal _profile_override_mtime
+        if not _PROFILE_OVERRIDE_FILE.exists():
+            return
+        try:
+            cur_mtime = _PROFILE_OVERRIDE_FILE.stat().st_mtime
+            if cur_mtime <= _profile_override_mtime:
+                return
+            _profile_override_mtime = cur_mtime
+            raw = json.loads(_PROFILE_OVERRIDE_FILE.read_text(encoding="utf-8"))
+            mode = str(raw.get("profile", "")).strip().lower()
+            source = str(raw.get("source", "api")).strip() or "api"
+            _apply_runtime_profile_mode(mode, source=source, notify=True)
+        except Exception as exc:
+            LOGGER.warning("Runtime profile override reload failed: %s", exc)
+
+    _profile_base = _capture_profile_base()
+    if _PROFILE_OVERRIDE_FILE.exists():
+        try:
+            _profile_override_mtime = _PROFILE_OVERRIDE_FILE.stat().st_mtime
+            _startup_raw = json.loads(_PROFILE_OVERRIDE_FILE.read_text(encoding="utf-8"))
+            _startup_mode = str(_startup_raw.get("profile", "")).strip().lower()
+            _startup_source = str(_startup_raw.get("source", "startup_override")).strip() or "startup_override"
+            _apply_runtime_profile_mode(_startup_mode, source=_startup_source, notify=True)
+        except Exception as _startup_profile_exc:
+            LOGGER.warning("Runtime profile startup load failed: %s", _startup_profile_exc)
 
     def _load_rsi_tracker() -> dict[int, float]:
         try:
@@ -1949,6 +2131,7 @@ def run_live_loop(settings: Settings) -> None:
             try:
                 # ── Hot-reload config if YAML file changed ─────────────────────
                 _maybe_reload_config()
+                _maybe_reload_profile_override()
 
                 # ── Tunnel URL watcher: notify Telegram when URL changes ───────
                 _tuf = Path("outputs/tunnel_url.txt")
@@ -2451,6 +2634,7 @@ def run_live_loop(settings: Settings) -> None:
                     "market_minutes_to_next_open": market_state.get("minutes_to_next_open"),
                     "market_minutes_to_next_close": market_state.get("minutes_to_next_close"),
                     "signal_threshold": round(settings.strategy.signal_threshold, 4),
+                    "runtime_profile_mode": _runtime_profile_mode,
                     "model_path": str(settings.app.model_path),
                     "model_meta_path": str(settings.app.model_meta_path),
                     "model_decision_threshold": round(
