@@ -1493,7 +1493,7 @@ function renderOverview(acct,d){
 function renderTrading(acct,d){
   const s=d.status||{};const mod=d.model||{};const day=d.daily||{};
   const runtime=d.runtime||{};
-  const trades=d.recent_trades||[];const signals=d.recent_signals||[];
+  const trades=d.recent_trades||[];const signals=d.recent_signals||[];const journal=d.recent_journal||[];
   const signalRows=signals.slice(-State.signalLimit).reverse();
   const signalOutcomes=buildSignalOutcomes(signalRows, trades);
   const lastSig=signals.slice(-1)[0]||{};
@@ -1640,6 +1640,26 @@ function renderTrading(acct,d){
     </tr>`;
   }).join('');
 
+  const journalRows=journal.slice(-State.signalLimit).reverse().map(j=>{
+    const jTime=pickTimeText(j.time, j.closed_at, j.close_time, j.ts);
+    const jResult=String(j.result||'').toUpperCase();
+    const jCls=jResult==='WIN'?'win':jResult==='LOSS'?'loss':(jResult==='BREAKEVEN'?'muted':'dim');
+    const jPnl=toNum(j.pnl);
+    const jOutcome=((j.outcome||'')+'').trim() || (
+      Array.isArray(j.loss_reasons) ? j.loss_reasons.join(' | ') : ''
+    );
+    return `<tr>
+      <td class="dim">${jTime}</td>
+      <td class="dim">${q(j.ticket)}</td>
+      <td>${badge(j.side)}</td>
+      <td class="${jCls}">${q(jResult||'N/A')}</td>
+      <td class="${clr(jPnl)}">${dol(jPnl)}</td>
+      <td class="dim reason-cell">${q(((j.entry_reason||'')+'').slice(0,120))}</td>
+      <td class="dim reason-cell">${q((jOutcome+'').slice(0,130))}</td>
+      <td class="dim reason-cell">${q(((j.lesson||'')+'').slice(0,130))}</td>
+    </tr>`;
+  }).join('');
+
   el(`sb-${acct}-trading`).innerHTML=`
   <div class="live-bar ${s.should_trade?'glow-green':'glow-red'}" style="margin-bottom:12px">
     <div class="lb-item">
@@ -1767,6 +1787,14 @@ function renderTrading(acct,d){
         <tbody>${trRows||'<tr><td colspan="8" class="dim" style="text-align:center;padding:16px">No trades</td></tr>'}</tbody>
       </table></div>
     </div>
+  </div>
+
+  <div class="card" style="margin-top:12px">
+    <div class="card-ttl">&#128221; Auto Journal (${Math.min(journal.length,State.signalLimit)} shown / ${journal.length})</div>
+    <div class="table-wrap scroll-y"><table class="tbl">
+      <thead><tr><th>Time</th><th>Ticket</th><th>Side</th><th>Result</th><th>PnL</th><th>Entry Thesis</th><th>Outcome</th><th>Lesson</th></tr></thead>
+      <tbody>${journalRows||'<tr><td colspan="8" class="dim" style="text-align:center;padding:16px">No journal entries</td></tr>'}</tbody>
+    </table></div>
   </div>`;
 }
 

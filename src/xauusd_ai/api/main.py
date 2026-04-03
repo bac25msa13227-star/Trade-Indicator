@@ -88,6 +88,7 @@ _ACCOUNT_CFG: dict[str, dict[str, str]] = {
         "status": "live_status_acc1.json",
         "trades": "live_closed_trades_acc1.csv",
         "trades_fallback": "live_closed_trades.csv",
+        "journal": "trade_journal_acc1.jsonl",
         "signals": "paper_trade_signals_acc1.csv",
         "meta": "acc1_live_model_meta.json",
         "wf": "walkforward_report_acc1.json",
@@ -101,6 +102,7 @@ _ACCOUNT_CFG: dict[str, dict[str, str]] = {
         "status": "live_status_acc2.json",
         "trades": "live_closed_trades_acc2.csv",
         "trades_fallback": "live_closed_trades_acc2.csv",
+        "journal": "trade_journal_acc2.jsonl",
         "signals": "paper_trade_signals_acc2.csv",
         "meta": "acc2_live_model_meta.json",
         "wf": "walkforward_report_acc2.json",
@@ -213,6 +215,10 @@ def _apply_live_config_overrides() -> None:
             _ACCOUNT_CFG[acct]["bt_trades"] = Path(app_cfg.backtest_trades_path).name
             _ACCOUNT_CFG[acct]["signals"] = Path(app_cfg.paper_trade_log_path).name
             _ACCOUNT_CFG[acct]["trades"] = Path(app_cfg.live_closed_trades_path).name
+            _account_suffix = Path(app_cfg.live_closed_trades_path).stem.replace("live_closed_trades_", "").strip("_") or acct
+            _ACCOUNT_CFG[acct]["journal"] = str(
+                Path(app_cfg.live_closed_trades_path).with_name(f"trade_journal_{_account_suffix}.jsonl")
+            )
 
             required_binding = _REQUIRED_MODEL_BINDINGS.get(acct, {})
             actual_binding = {
@@ -431,6 +437,29 @@ def _safe_csv_tail(path: Path, n: int = 30, *, account: str | None = None) -> li
                     mapped = _normalize_trade_row(mapped)
             result.append({k: (v if v != "" else None) for k, v in mapped.items()})
         return result
+    except Exception:
+        return []
+
+
+def _safe_jsonl_tail(path: Path, n: int = 30) -> list[dict]:
+    try:
+        if not path.exists():
+            return []
+        from collections import deque as _deque
+
+        rows: _deque[dict] = _deque(maxlen=n)
+        with open(path, "r", encoding="utf-8", errors="replace") as file_handle:
+            for line in file_handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    payload = _json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(payload, dict):
+                    rows.append(payload)
+        return list(rows)
     except Exception:
         return []
 
@@ -952,6 +981,7 @@ def _build_dashboard_payload_uncached() -> dict:
         if not trades_path.exists():
             trades_path = _output_path(cfg["trades_fallback"])
         trades = _safe_csv_tail(trades_path, 200, account=acct)
+        journal = _safe_jsonl_tail(_output_path(cfg["journal"]), 200) if cfg.get("journal") else []
         signals = _safe_csv_tail(_output_path(cfg["signals"]), 600, account=acct)
 
         bt_trades: list[dict[str, Any]] = []
@@ -1060,6 +1090,7 @@ def _build_dashboard_payload_uncached() -> dict:
             "win_rate":       win_rate,
             "total_pnl":      total_pnl,
             "recent_trades":  trades[-50:],
+            "recent_journal": journal[-50:],
             "recent_signals": signals,
             "pnl_series":     _build_pnl_series(trades),
             "runtime": runtime_cfg,

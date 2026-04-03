@@ -318,6 +318,154 @@ class LiveLoopGuardAndSnapshotTests(unittest.TestCase):
 
             self._cleanup_output_state(account_tag)
 
+    def test_auto_journal_is_written_and_notified_for_closed_loss(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            temp_dir = Path(td)
+            account_tag = "journal_case_unit"
+            self._cleanup_output_state(account_tag)
+
+            settings = self._make_settings(temp_dir, account_tag)
+            settings.risk.reentry_guard_enabled = False
+
+            now_ts = pd.Timestamp("2026-03-30T02:00:00Z")
+            frames = self._make_frames(now_ts)
+            live_frame = self._make_live_frame(now_ts)
+
+            data_service = MagicMock()
+            data_service.fetch_multi_timeframe_data.return_value = frames
+
+            trainer = MagicMock()
+            trainer.load_artifacts.return_value = True
+            trainer.score_live_row.return_value = {"probability": 0.34, "side": "sell"}
+
+            strategy = MagicMock()
+            strategy.build_trade_decision.return_value = TradeDecision(
+                should_trade=False,
+                side="sell",
+                confidence=0.34,
+                reason="unit_test_no_entry",
+                entry_price=2301.0,
+                stop_loss=2308.0,
+                take_profit=2290.0,
+            )
+
+            notifier = MagicMock()
+
+            closed_loss = {
+                "ticket": 900777,
+                "side": "buy",
+                "volume": 0.01,
+                "open_price": 2305.0,
+                "close_price": 2296.0,
+                "profit": -9.0,
+                "swap": 0.0,
+                "commission": 0.0,
+                "close_time": float(time.time()),
+                "reason": 4,
+            }
+
+            executor = MagicMock()
+            executor.get_account_info.return_value = {"balance": 1000.0}
+            executor.get_open_positions_count.return_value = 0
+            _closed_seq = iter([[], [closed_loss], []])
+            executor.get_recently_closed_positions.side_effect = lambda *args, **kwargs: next(_closed_seq, [])
+            executor.get_open_positions.return_value = []
+            executor.get_current_price.return_value = None
+            executor.get_market_state.return_value = {
+                "is_open": True,
+                "reason": "OPEN",
+                "next_open_utc": None,
+                "next_close_utc": None,
+                "minutes_to_next_open": None,
+                "minutes_to_next_close": None,
+                "tick_age_sec": 1.0,
+            }
+            executor.place_order.return_value = {"position": 111222}
+
+            risk_manager = _StubRiskManager()
+            self_learner = MagicMock()
+            self_learner.LOSS_RETRAIN_THRESHOLD = 3
+            self_learner._accumulated_losses = 0
+            self_learner.log_loss_analysis.return_value = {
+                "features": {
+                    "atr": 10.1,
+                    "rsi": 61.0,
+                    "strategy_score": -0.22,
+                    "trend_alignment": 0,
+                    "volatility_regime": 0,
+                    "ict_score": -0.4,
+                    "wyckoff_score": -0.2,
+                    "momentum_score": -0.3,
+                },
+                "reasons": ["TREND_MISALIGNED", "REGIME_SIDEWAY"],
+            }
+
+            snapshot_file = Path("outputs") / f"entry_snapshot_tracker_{account_tag}.json"
+            snapshot_file.parent.mkdir(parents=True, exist_ok=True)
+            snapshot_file.write_text(
+                json.dumps(
+                    {
+                        "900777": {
+                            "time": "2026-03-30T01:30:00+00:00",
+                            "side": "buy",
+                            "confidence": 0.79,
+                            "reason": "Trend follow buy near pullback",
+                            "entry_price": 2305.0,
+                            "stop_loss": 2296.0,
+                            "take_profit": 2323.0,
+                            "strategy_score": 0.41,
+                            "ict_score": 0.5,
+                            "wyckoff_score": 0.2,
+                            "momentum_score": 0.4,
+                            "trend_alignment": 1,
+                            "volatility_regime": 1,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch(
+                "xauusd_ai.orchestrator._bootstrap_with_learner",
+                return_value=(
+                    data_service,
+                    trainer,
+                    strategy,
+                    notifier,
+                    executor,
+                    risk_manager,
+                    self_learner,
+                ),
+            ), patch(
+                "xauusd_ai.orchestrator.build_live_feature_frame",
+                return_value=live_frame,
+            ), patch(
+                "xauusd_ai.orchestrator.time.sleep",
+                side_effect=KeyboardInterrupt,
+            ):
+                with self.assertRaises(KeyboardInterrupt):
+                    run_live_loop(settings)
+
+            journal_path = temp_dir / f"trade_journal_{account_tag}.jsonl"
+            self.assertTrue(journal_path.exists())
+            journal_lines = [line for line in journal_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(len(journal_lines), 1)
+            payload = json.loads(journal_lines[0])
+            self.assertEqual(payload.get("ticket"), 900777)
+            self.assertEqual(payload.get("result"), "LOSS")
+            self.assertEqual(payload.get("close_type"), "SL")
+            self.assertTrue(str(payload.get("lesson", "")).strip())
+
+            self.assertTrue(
+                any(
+                    "Auto Journal" in str(call.args[0])
+                    for call in notifier.send_message.call_args_list
+                    if call.args
+                )
+            )
+
+            self._cleanup_output_state(account_tag)
+
 
 if __name__ == "__main__":
     unittest.main()
