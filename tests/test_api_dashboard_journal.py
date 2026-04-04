@@ -141,6 +141,7 @@ class ApiDashboardJournalTests(unittest.TestCase):
             self.assertEqual(recent[0]["ticket"], 778899)
             self.assertIn("pnl_explain", payload["accounts"]["acc1"])
             self.assertIn("profile_presets", payload["accounts"]["acc1"])
+            self.assertIn("regime_session_matrix", payload["accounts"]["acc1"])
             self.assertEqual(
                 payload["accounts"]["acc1"]["pnl_explain"]["side"][0]["bucket"],
                 "buy",
@@ -165,6 +166,26 @@ class ApiDashboardJournalTests(unittest.TestCase):
         self.assertEqual(side_map["buy"]["trades"], 2)
         self.assertAlmostEqual(side_map["buy"]["net_pnl"], 27.0, places=2)
         self.assertEqual(side_map["sell"]["trades"], 1)
+
+    def test_regime_session_matrix_includes_rolling_windows(self) -> None:
+        trades = [
+            {"time": "2026-04-01T01:15:00+00:00", "side": "buy", "pnl": 12.0},
+            {"time": "2026-04-02T09:10:00+00:00", "side": "sell", "pnl": -6.0},
+            {"time": "2026-04-03T14:40:00+00:00", "side": "buy", "pnl": 9.0},
+        ]
+        signals = [
+            {"time": "2026-04-01T01:10:00+00:00", "side": "buy", "volatility_regime": 0, "should_trade": True},
+            {"time": "2026-04-02T09:00:00+00:00", "side": "sell", "volatility_regime": 1, "should_trade": True},
+            {"time": "2026-04-03T14:30:00+00:00", "side": "buy", "volatility_regime": 2, "should_trade": True},
+        ]
+        matrix = api_main._build_regime_session_matrix(trades, signals, windows_days=[7, 30])
+        self.assertIn("rolling_7d", matrix)
+        self.assertIn("rolling_30d", matrix)
+        rows_7d = matrix["rolling_7d"]["rows"]
+        self.assertEqual(len(rows_7d), 9)
+        asian_sideway = [r for r in rows_7d if r["session"] == "Asian" and r["regime"] == "sideway"][0]
+        self.assertGreaterEqual(asian_sideway["trades"], 1)
+        self.assertIn("recall", asian_sideway)
 
     def test_apply_runtime_profile_writes_override_file(self) -> None:
         with tempfile.TemporaryDirectory() as td:

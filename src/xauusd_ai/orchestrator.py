@@ -731,6 +731,12 @@ def run_live_loop(settings: Settings) -> None:
     _profile_base: dict[str, float | int] = {}
     _runtime_profile_mode: str = "balanced"
     _profile_override_mtime: float = 0.0
+    _auto_rollback_last_ts: float = 0.0
+    _auto_rollback_count: int = 0
+    _auto_rollback_last_reason: str = ""
+    _auto_rollback_last_from: str = ""
+    _data_health_last_alert_ts: dict[str, float] = {}
+    _last_data_health_report: dict[str, object] = {"active_alerts": [], "metrics": {}}
 
     def _maybe_reload_config() -> None:
         """Reload toggleable settings from YAML without restart."""
@@ -776,6 +782,23 @@ def run_live_loop(settings: Settings) -> None:
             settings.market.market_preclose_alert_minutes = new_settings.market.market_preclose_alert_minutes
             settings.market.market_preopen_alert_minutes_list = new_settings.market.market_preopen_alert_minutes_list
             settings.market.market_preclose_alert_minutes_list = new_settings.market.market_preclose_alert_minutes_list
+            settings.admin.canary.enabled = new_settings.admin.canary.enabled
+            settings.admin.canary.volume_fraction = new_settings.admin.canary.volume_fraction
+            settings.admin.canary.min_lot = new_settings.admin.canary.min_lot
+            settings.admin.auto_rollback.enabled = new_settings.admin.auto_rollback.enabled
+            settings.admin.auto_rollback.rollback_profile = new_settings.admin.auto_rollback.rollback_profile
+            settings.admin.auto_rollback.daily_dd_trigger_pct = new_settings.admin.auto_rollback.daily_dd_trigger_pct
+            settings.admin.auto_rollback.consecutive_losses_trigger = new_settings.admin.auto_rollback.consecutive_losses_trigger
+            settings.admin.auto_rollback.cooldown_seconds = new_settings.admin.auto_rollback.cooldown_seconds
+            settings.admin.data_health.enabled = new_settings.admin.data_health.enabled
+            settings.admin.data_health.alert_cooldown_seconds = new_settings.admin.data_health.alert_cooldown_seconds
+            settings.admin.data_health.missing_bar_gap_factor = new_settings.admin.data_health.missing_bar_gap_factor
+            settings.admin.data_health.stale_tick_alert_seconds = new_settings.admin.data_health.stale_tick_alert_seconds
+            settings.admin.data_health.spread_spike_multiplier = new_settings.admin.data_health.spread_spike_multiplier
+            settings.admin.data_health.spread_spike_abs_points = new_settings.admin.data_health.spread_spike_abs_points
+            settings.admin.data_health.spread_lookback_bars = new_settings.admin.data_health.spread_lookback_bars
+            settings.admin.data_health.bridge_feed_divergence_points = new_settings.admin.data_health.bridge_feed_divergence_points
+            settings.admin.data_health.only_when_market_open = new_settings.admin.data_health.only_when_market_open
             _market_gate_enabled = bool(settings.market.enforce_market_open_gate)
             _market_stale_seconds = max(int(settings.market.market_tick_stale_seconds), 30)
             _market_preopen_alert_minutes_list = _normalize_alert_minutes(
@@ -1018,6 +1041,307 @@ def run_live_loop(settings: Settings) -> None:
             _apply_runtime_profile_mode(_startup_mode, source=_startup_source, notify=True)
         except Exception as _startup_profile_exc:
             LOGGER.warning("Runtime profile startup load failed: %s", _startup_profile_exc)
+
+    def _persist_runtime_profile_override(mode: str, source: str) -> None:
+        nonlocal _profile_override_mtime
+        try:
+            _PROFILE_OVERRIDE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            tmp = _PROFILE_OVERRIDE_FILE.with_suffix(".tmp")
+            tmp.write_text(
+                json.dumps(
+                    {
+                        "account": _account_tag,
+                        "profile": mode,
+                        "source": source,
+                        "requested_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            tmp.replace(_PROFILE_OVERRIDE_FILE)
+            _profile_override_mtime = _PROFILE_OVERRIDE_FILE.stat().st_mtime
+        except Exception as exc:
+            LOGGER.warning("Persist runtime profile override failed: %s", exc)
+
+    def _timeframe_seconds(tf: str) -> int:
+        tf_norm = str(tf or "").strip().upper()
+        mapping = {
+            "M1": 60,
+            "M5": 300,
+            "M15": 900,
+            "M30": 1800,
+            "H1": 3600,
+            "H4": 14400,
+            "D1": 86400,
+        }
+        return int(mapping.get(tf_norm, 300))
+
+    def _clone_order_plan_with_volume(plan: object, volume: float) -> object:
+        return type(plan)(
+            symbol=plan.symbol,
+            side=plan.side,
+            volume=volume,
+            entry_price=plan.entry_price,
+            stop_loss=plan.stop_loss,
+            take_profit=plan.take_profit,
+            confidence=plan.confidence,
+            reason=plan.reason,
+        )
+
+    def _apply_canary_volume(plan: object) -> tuple[object, dict[str, object]]:
+        cfg = settings.admin.canary
+        if not bool(cfg.enabled):
+            return plan, {
+                "enabled": False,
+                "applied": False,
+                "volume_fraction": 1.0,
+                "original_volume": _safe_float(getattr(plan, "volume", 0.0), 0.0),
+                "effective_volume": _safe_float(getattr(plan, "volume", 0.0), 0.0),
+            }
+        fraction = _clamp(_safe_float(cfg.volume_fraction, 1.0), 0.01, 1.0)
+        original = _safe_float(getattr(plan, "volume", 0.0), 0.0)
+        if original <= 0:
+            return plan, {
+                "enabled": True,
+                "applied": False,
+                "volume_fraction": fraction,
+                "original_volume": original,
+                "effective_volume": original,
+            }
+        effective = round(original * fraction / 0.01) * 0.01
+        min_lot = max(_safe_float(cfg.min_lot, 0.01), 0.01)
+        effective = max(min_lot, min(original, effective))
+        applied = abs(effective - original) > 1e-9
+        if not applied:
+            return plan, {
+                "enabled": True,
+                "applied": False,
+                "volume_fraction": fraction,
+                "original_volume": original,
+                "effective_volume": effective,
+            }
+        plan_adj = _clone_order_plan_with_volume(plan, effective)
+        return plan_adj, {
+            "enabled": True,
+            "applied": True,
+            "volume_fraction": fraction,
+            "original_volume": original,
+            "effective_volume": effective,
+        }
+
+    def _compute_daily_dd_pct(balance: float) -> float:
+        if balance <= 0:
+            return 0.0
+        daily_loss = max(_safe_float(getattr(risk_manager, "_daily_loss", 0.0), 0.0), 0.0)
+        return max(0.0, (daily_loss / max(balance, 1e-6)) * 100.0)
+
+    def _maybe_auto_rollback(balance: float) -> None:
+        nonlocal _auto_rollback_last_ts, _auto_rollback_count, _auto_rollback_last_reason, _auto_rollback_last_from
+        cfg = settings.admin.auto_rollback
+        if not bool(cfg.enabled):
+            return
+        rollback_mode = str(cfg.rollback_profile or "balanced").strip().lower()
+        if rollback_mode not in {"conservative", "balanced", "aggressive"}:
+            rollback_mode = "balanced"
+        if _runtime_profile_mode == rollback_mode:
+            return
+
+        cooldown_sec = max(_safe_int(cfg.cooldown_seconds, 1800), 60)
+        now_ts = time.time()
+        if now_ts - _auto_rollback_last_ts < cooldown_sec:
+            return
+
+        reasons: list[str] = []
+        daily_dd_pct = _compute_daily_dd_pct(balance)
+        daily_dd_trigger = _safe_float(cfg.daily_dd_trigger_pct, 0.0)
+        if daily_dd_trigger and daily_dd_trigger > 0 and daily_dd_pct >= daily_dd_trigger:
+            reasons.append(f"daily_dd={daily_dd_pct:.2f}% >= {daily_dd_trigger:.2f}%")
+        consec_trigger = _safe_int(cfg.consecutive_losses_trigger, 0)
+        consec_losses = _safe_int(getattr(risk_manager, "_consecutive_losses", 0), 0)
+        if consec_trigger > 0 and consec_losses >= consec_trigger:
+            reasons.append(f"consecutive_losses={consec_losses} >= {consec_trigger}")
+        if not reasons:
+            return
+
+        reason_text = " | ".join(reasons)
+        from_mode = _runtime_profile_mode
+        applied = _apply_runtime_profile_mode(rollback_mode, source=f"auto_rollback:{reason_text}", notify=True)
+        if not applied:
+            return
+        _auto_rollback_last_ts = now_ts
+        _auto_rollback_count += 1
+        _auto_rollback_last_reason = reason_text
+        _auto_rollback_last_from = from_mode
+        _persist_runtime_profile_override(rollback_mode, source="auto_rollback")
+        notifier.send_message(
+            "🛑 <b>Auto Rollback Triggered</b>\n"
+            f"├ From profile: <b>{from_mode.capitalize()}</b>\n"
+            f"├ To profile: <b>{rollback_mode.capitalize()}</b>\n"
+            f"├ Trigger: {html.escape(reason_text)}\n"
+            f"└ Count: {_auto_rollback_count}"
+        )
+
+    def _emit_data_health_alert(key: str, title: str, detail: str, severity: str = "warn") -> None:
+        nonlocal _data_health_last_alert_ts
+        cfg = settings.admin.data_health
+        cooldown = max(_safe_int(cfg.alert_cooldown_seconds, 900), 30)
+        now_ts = time.time()
+        last_ts = _data_health_last_alert_ts.get(key, 0.0)
+        if now_ts - last_ts < cooldown:
+            return
+        _data_health_last_alert_ts[key] = now_ts
+        icon = "⚠️" if severity == "warn" else "🚨"
+        notifier.send_message(
+            f"{icon} <b>Data Health: {html.escape(title)}</b>\n"
+            f"└ {html.escape(detail)}"
+        )
+
+    def _build_data_health_report(
+        execution_frame: pd.DataFrame,
+        latest_row: pd.Series,
+        market_state: dict[str, object],
+        market_is_open: bool,
+    ) -> dict[str, object]:
+        cfg = settings.admin.data_health
+        report: dict[str, object] = {
+            "enabled": bool(cfg.enabled),
+            "active_alerts": [],
+            "metrics": {},
+        }
+        if not bool(cfg.enabled):
+            return report
+
+        alerts: list[dict[str, object]] = []
+        metrics: dict[str, object] = {}
+
+        # Missing bar detection
+        expected_gap = _timeframe_seconds(settings.market.execution_timeframe)
+        bar_gap_sec = 0.0
+        if len(execution_frame) >= 2:
+            try:
+                _t_last = pd.to_datetime(execution_frame.iloc[-1]["time"], utc=True)
+                _t_prev = pd.to_datetime(execution_frame.iloc[-2]["time"], utc=True)
+                bar_gap_sec = max((_t_last - _t_prev).total_seconds(), 0.0)
+            except Exception:
+                bar_gap_sec = 0.0
+        metrics["bar_gap_sec"] = round(bar_gap_sec, 2)
+        metrics["expected_bar_gap_sec"] = expected_gap
+        gap_factor = max(_safe_float(cfg.missing_bar_gap_factor, 1.8), 1.0)
+        if bar_gap_sec > expected_gap * gap_factor:
+            alerts.append(
+                {
+                    "key": "missing_bars",
+                    "title": "MISSING_BARS",
+                    "detail": f"bar gap {bar_gap_sec:.0f}s > expected {expected_gap}s × {gap_factor:.2f}",
+                    "severity": "warn",
+                }
+            )
+
+        # Stale tick detection
+        tick_age = _safe_float(market_state.get("tick_age_sec"), 0.0)
+        metrics["tick_age_sec"] = round(tick_age, 2)
+        stale_threshold = max(_safe_int(cfg.stale_tick_alert_seconds, 300), 30)
+        if tick_age >= stale_threshold and (market_is_open or not bool(cfg.only_when_market_open)):
+            alerts.append(
+                {
+                    "key": "stale_tick",
+                    "title": "STALE_TICK",
+                    "detail": f"tick age {tick_age:.0f}s >= {stale_threshold}s",
+                    "severity": "warn",
+                }
+            )
+
+        # Spread spike detection (uses feed spread_points)
+        spread_now = _safe_float(latest_row.get("spread_points"), 0.0)
+        spread_source: object = None
+        if isinstance(execution_frame, pd.DataFrame):
+            spread_source = execution_frame["spread_points"] if "spread_points" in execution_frame.columns else None
+        elif isinstance(execution_frame, pd.Series):
+            spread_source = execution_frame.get("spread_points")
+        else:
+            try:
+                spread_source = execution_frame.get("spread_points")  # type: ignore[attr-defined]
+            except Exception:
+                spread_source = None
+        spread_num = pd.to_numeric(spread_source, errors="coerce")
+        if isinstance(spread_num, pd.Series):
+            spread_col = spread_num.fillna(0.0)
+        else:
+            spread_scalar = _safe_float(spread_num, 0.0)
+            frame_len = 1
+            try:
+                frame_len = max(int(len(execution_frame)), 1)
+            except Exception:
+                frame_len = 1
+            spread_col = pd.Series([spread_scalar] * frame_len, dtype="float64")
+        lookback = max(_safe_int(cfg.spread_lookback_bars, 50), 5)
+        spread_base = float(spread_col.tail(lookback).median()) if not spread_col.empty else 0.0
+        spread_mult = max(_safe_float(cfg.spread_spike_multiplier, 2.5), 1.0)
+        spread_abs = max(_safe_float(cfg.spread_spike_abs_points, 1.5), 0.0)
+        spread_limit = max(spread_abs, spread_base * spread_mult)
+        metrics["spread_now"] = round(spread_now, 4)
+        metrics["spread_base"] = round(spread_base, 4)
+        metrics["spread_limit"] = round(spread_limit, 4)
+        if spread_now > spread_limit and spread_limit > 0:
+            alerts.append(
+                {
+                    "key": "spread_spike",
+                    "title": "SPREAD_SPIKE",
+                    "detail": f"spread {spread_now:.3f} > limit {spread_limit:.3f} (base {spread_base:.3f})",
+                    "severity": "warn",
+                }
+            )
+
+        # Bridge vs feed divergence
+        divergence_thr = max(_safe_float(cfg.bridge_feed_divergence_points, 1.5), 0.0)
+        bridge_bid = 0.0
+        bridge_ask = 0.0
+        bridge_error = ""
+        try:
+            tick = executor.get_tick(settings.market.symbol)
+            bridge_bid = _safe_float(tick.get("bid"), 0.0)
+            bridge_ask = _safe_float(tick.get("ask"), 0.0)
+            bridge_error = str(tick.get("error", "") or "")
+        except Exception as exc:
+            bridge_error = str(exc)
+        feed_close = _safe_float(latest_row.get("close"), 0.0)
+        bridge_mid = 0.0
+        if bridge_bid > 0 and bridge_ask > 0:
+            bridge_mid = (bridge_bid + bridge_ask) / 2.0
+        elif bridge_bid > 0:
+            bridge_mid = bridge_bid
+        elif bridge_ask > 0:
+            bridge_mid = bridge_ask
+        divergence = abs(bridge_mid - feed_close) if bridge_mid > 0 and feed_close > 0 else 0.0
+        metrics["bridge_mid"] = round(bridge_mid, 4) if bridge_mid > 0 else 0.0
+        metrics["feed_close"] = round(feed_close, 4) if feed_close > 0 else 0.0
+        metrics["bridge_feed_divergence"] = round(divergence, 4)
+        metrics["bridge_error"] = bridge_error
+        if (
+            divergence_thr > 0
+            and divergence >= divergence_thr
+            and (market_is_open or not bool(cfg.only_when_market_open))
+        ):
+            alerts.append(
+                {
+                    "key": "bridge_feed_divergence",
+                    "title": "BRIDGE_FEED_DIVERGENCE",
+                    "detail": f"|bridge-feed| {divergence:.3f} >= {divergence_thr:.3f}",
+                    "severity": "critical",
+                }
+            )
+
+        for alert in alerts:
+            _emit_data_health_alert(
+                key=str(alert.get("key", "health")),
+                title=str(alert.get("title", "DATA_HEALTH")),
+                detail=str(alert.get("detail", "")),
+                severity=str(alert.get("severity", "warn")),
+            )
+        report["active_alerts"] = alerts
+        report["metrics"] = metrics
+        return report
 
     def _load_rsi_tracker() -> dict[int, float]:
         try:
@@ -2185,6 +2509,7 @@ def run_live_loop(settings: Settings) -> None:
                 )
                 _notify_market_state(market_state)
                 market_is_open = bool(market_state.get("is_open", False))
+                _maybe_auto_rollback(account_balance)
 
                 # ── Self-learning (theo thời gian, mỗi X phút) ──────────────
                 if (
@@ -2221,6 +2546,13 @@ def run_live_loop(settings: Settings) -> None:
                 # Save fresh context for between-poll close checks
                 _last_row_ctx = latest_row
                 _last_frames_ctx = frames
+                _data_health_report = _build_data_health_report(
+                    execution_frame=execution_frame,
+                    latest_row=latest_row,
+                    market_state=market_state,
+                    market_is_open=market_is_open,
+                )
+                _last_data_health_report = _data_health_report
 
                 # â”€â”€ Loss Learning â€” phÃ¡t hiá»‡n vÃ  phÃ¢n tÃ­ch lá»‡nh thua â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 # -- Loss Learning: detect & notify closed trades immediately
@@ -2635,6 +2967,20 @@ def run_live_loop(settings: Settings) -> None:
                     "market_minutes_to_next_close": market_state.get("minutes_to_next_close"),
                     "signal_threshold": round(settings.strategy.signal_threshold, 4),
                     "runtime_profile_mode": _runtime_profile_mode,
+                    "canary_enabled": bool(settings.admin.canary.enabled),
+                    "canary_volume_fraction": round(_safe_float(settings.admin.canary.volume_fraction, 1.0), 4),
+                    "auto_rollback_enabled": bool(settings.admin.auto_rollback.enabled),
+                    "auto_rollback_count": _auto_rollback_count,
+                    "auto_rollback_last_reason": _auto_rollback_last_reason,
+                    "auto_rollback_last_from": _auto_rollback_last_from,
+                    "auto_rollback_last_ts": datetime.datetime.fromtimestamp(
+                        _auto_rollback_last_ts,
+                        tz=datetime.timezone.utc,
+                    ).isoformat() if _auto_rollback_last_ts > 0 else None,
+                    "risk_daily_loss": round(_safe_float(getattr(risk_manager, "_daily_loss", 0.0), 0.0), 4),
+                    "risk_daily_dd_pct": round(_compute_daily_dd_pct(account_balance), 4),
+                    "risk_consecutive_losses": _safe_int(getattr(risk_manager, "_consecutive_losses", 0), 0),
+                    "data_health": _last_data_health_report,
                     "model_path": str(settings.app.model_path),
                     "model_meta_path": str(settings.app.model_meta_path),
                     "model_decision_threshold": round(
@@ -2671,6 +3017,13 @@ def run_live_loop(settings: Settings) -> None:
 
                 # ── Đặt lệnh thật ──────────────────────────────────────────────────────────
                 if decision.should_trade:
+                    _canary_report = {
+                        "enabled": bool(settings.admin.canary.enabled),
+                        "applied": False,
+                        "volume_fraction": _safe_float(settings.admin.canary.volume_fraction, 1.0),
+                        "original_volume": _safe_float(getattr(order_plan, "volume", 0.0), 0.0),
+                        "effective_volume": _safe_float(getattr(order_plan, "volume", 0.0), 0.0),
+                    }
                     # ── Rebase entry/SL/TP về giá real-time từ MT5 bridge ──────────────────
                     # Nguyên nhân lệch: live_data_source=yfinance có delay ~15 phút.
                     # live_row["close"] = bear M5 bar ~15 phút trước → lệch 10-20 USD.
@@ -2709,6 +3062,18 @@ def run_live_loop(settings: Settings) -> None:
                                 )
                     except Exception as _rebase_err:
                         LOGGER.warning("Price rebase failed (using yfinance price): %s", _rebase_err)
+
+                    try:
+                        order_plan, _canary_report = _apply_canary_volume(order_plan)
+                        if bool(_canary_report.get("applied")):
+                            LOGGER.info(
+                                "Canary deploy volume applied: %.2f -> %.2f (fraction=%.3f)",
+                                _safe_float(_canary_report.get("original_volume"), 0.0),
+                                _safe_float(_canary_report.get("effective_volume"), 0.0),
+                                _safe_float(_canary_report.get("volume_fraction"), 1.0),
+                            )
+                    except Exception as _canary_err:
+                        LOGGER.warning("Canary volume apply failed: %s", _canary_err)
 
                     try:
                         notifier.send_signal(decision, order_plan)
@@ -2768,6 +3133,13 @@ def run_live_loop(settings: Settings) -> None:
                         except Exception as order_err:
                             LOGGER.error("MT5 order failed: %s", order_err)
                 else:
+                    _canary_report = {
+                        "enabled": bool(settings.admin.canary.enabled),
+                        "applied": False,
+                        "volume_fraction": _safe_float(settings.admin.canary.volume_fraction, 1.0),
+                        "original_volume": _safe_float(getattr(order_plan, "volume", 0.0), 0.0),
+                        "effective_volume": _safe_float(getattr(order_plan, "volume", 0.0), 0.0),
+                    }
                     LOGGER.info(
                         "No trade: %s | conf=%.3f | bal=%.2f open=%d/%d atr=%.2f",
                         decision.reason, decision.confidence, account_balance, open_positions, max_allowed, atr_value,

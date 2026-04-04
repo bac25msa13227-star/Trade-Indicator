@@ -209,7 +209,7 @@ training:
   live_learning_min_new_bars: 12
   live_learning_min_rows: 500
   min_self_learning_roc_auc: 0.53
-  optimize_threshold: false          # Giữ threshold 0.70 cố định cho acc1 live
+  optimize_threshold: false          # Giữ threshold 0.62 cố định theo benchmark ACC1
 
 notifications:
   telegram_enabled: true
@@ -243,3 +243,26 @@ integrations:
     news_trade_window_minutes: 3       # Thực hiện trong 3 phút đầu sau khi tin ra
     news_trade_atr_sl_mult: 1.5        # SL = 1.5 × ATR (đủ rộng tránh spike)
     news_trade_atr_tp_mult: 3.5        # TP = 3.5 × ATR  →  RR ≈ 1:2.3
+
+admin:
+  canary:
+    enabled: false
+    volume_fraction: 0.20
+    min_lot: 0.01
+  auto_rollback:
+    enabled: false
+    rollback_profile: balanced
+    daily_dd_trigger_pct: 3.0
+    consecutive_losses_trigger: 4
+    cooldown_seconds: 1800
+  data_health:
+    enabled: true
+    alert_cooldown_seconds: 900
+    missing_bar_gap_factor: 1.8
+    stale_tick_alert_seconds: 300
+    spread_spike_multiplier: 2.5
+    spread_spike_abs_points: 1.5
+    spread_lookback_bars: 50
+    bridge_feed_divergence_points: 1.5
+    only_when_market_open: true
+  regime_session_matrix_windows_days: [7, 30]
