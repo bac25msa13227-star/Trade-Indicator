@@ -1396,6 +1396,7 @@ function renderOverview(acct,d){
   const wfAgg=wf.aggregate||{};
   const wfSim=wfAgg.concurrent_sim||{};
   const bench=d.benchmark||{};
+  const runtime=d.runtime||{};
   const trades=d.recent_trades||[];const sig=(d.recent_signals||[]).slice(-1)[0]||{};
   const cbActive=day.killed||day.cooldown_bars>0;
   const cbTxt=day.killed?'KILL SWITCH':day.cooldown_bars>0?`Cooldown ${day.cooldown_bars}b`:'NORMAL';
@@ -1411,6 +1412,19 @@ function renderOverview(acct,d){
   const bindingOk = mod.binding_ok!==false;
   const bindingMismatch = Array.isArray(mod.binding_mismatch)?mod.binding_mismatch:[];
   const benchOk = bench.net_profit!=null && bench.max_drawdown_pct!=null;
+  const canaryEnabled=isTrue(s.canary_enabled ?? runtime.canary_enabled);
+  const canaryFraction=toNum(s.canary_volume_fraction ?? runtime.canary_volume_fraction);
+  const rollbackEnabled=isTrue(s.auto_rollback_enabled ?? runtime.auto_rollback_enabled);
+  const rollbackCount=toNum(s.auto_rollback_count) ?? 0;
+  const rollbackReason=String(s.auto_rollback_last_reason||'').trim();
+  const health=(s.data_health&&typeof s.data_health==='object')?s.data_health:{};
+  const healthAlerts=Array.isArray(health.active_alerts)?health.active_alerts:[];
+  const healthMetrics=(health.metrics&&typeof health.metrics==='object')?health.metrics:{};
+  const healthState=healthAlerts.length?`ALERT ×${healthAlerts.length}`:'HEALTHY';
+  const healthStateCls=healthAlerts.length?'loss':'win';
+  const tickAge=toNum(healthMetrics.tick_age_sec ?? s.market_tick_age_sec);
+  const bridgeDiv=toNum(healthMetrics.bridge_feed_divergence);
+  const spreadNow=toNum(healthMetrics.spread_now);
   const confColor=confPass?'var(--green)':'var(--red)';
   const vr=s.volatility_regime!=null?+s.volatility_regime:-1;
   const vrNames=['Low','Normal','High','Extreme'];
@@ -1469,6 +1483,29 @@ function renderOverview(acct,d){
       <div class="slbl">Circuit Breaker</div>
       <div class="sval-sm" style="padding-top:4px"><span class="${cbActive?'bdg bdg-warn':'bdg bdg-ok'}">${cbTxt}</span></div>
       <div class="ssub">${day.consecutive_losses||0} consec losses</div>
+    </div>
+  </div>
+
+  <div class="g4" style="margin-bottom:12px">
+    <div class="sb" style="border-left:3px solid ${canaryEnabled?'var(--yellow)':'var(--bdr)'}">
+      <div class="slbl">Canary Deploy</div>
+      <div class="sval-sm"><span class="${canaryEnabled?'bdg bdg-y':'bdg bdg-n'}">${canaryEnabled?'ACTIVE':'OFF'}</span></div>
+      <div class="ssub">Volume ${canaryFraction!=null?fmt(canaryFraction,2):'1.00'}x</div>
+    </div>
+    <div class="sb" style="border-left:3px solid ${rollbackEnabled?'var(--accent)':'var(--bdr)'}">
+      <div class="slbl">Auto Rollback</div>
+      <div class="sval-sm"><span class="${rollbackEnabled?'bdg bdg-ok':'bdg bdg-n'}">${rollbackEnabled?'ENABLED':'OFF'}</span></div>
+      <div class="ssub">Count ${rollbackCount} ${rollbackReason?`· ${q(rollbackReason).slice(0,44)}`:''}</div>
+    </div>
+    <div class="sb" style="border-left:3px solid ${healthAlerts.length?'var(--red)':'var(--green)'}">
+      <div class="slbl">Data Health</div>
+      <div class="sval-sm ${healthStateCls}">${healthState}</div>
+      <div class="ssub">tick ${tickAge!=null?fmt(tickAge,1)+'s':'—'} · spread ${spreadNow!=null?fmt(spreadNow,3):'—'}</div>
+    </div>
+    <div class="sb" style="border-left:3px solid ${(bridgeDiv!=null&&bridgeDiv>1.5)?'var(--red)':'var(--bdr)'}">
+      <div class="slbl">Bridge vs Feed</div>
+      <div class="sval-sm ${(bridgeDiv!=null&&bridgeDiv>1.5)?'loss':''}">${bridgeDiv!=null?fmt(bridgeDiv,3):'—'}</div>
+      <div class="ssub">Divergence points</div>
     </div>
   </div>
 
@@ -1893,6 +1930,7 @@ function renderPnl(acct,d){
   const trades=d.recent_trades||[];
   const series=d.pnl_series||{labels:[],values:[],individual:[]};
   const explain=d.pnl_explain||{};
+  const matrix=d.regime_session_matrix||{};
   const profiles=d.profile_presets||{};
   const W=trades.filter(t=>String(t.is_win||'').toLowerCase()==='true'||t.is_win===true||t.is_win===1||parseFloat(t.pnl??t.profit??0)>0).length;
   const L=trades.length-W;
@@ -1944,6 +1982,27 @@ function renderPnl(acct,d){
   const sessionRows=explainRows(explain.session);
   const regimeRows=explainRows(explain.regime);
   const sideRows=explainRows(explain.side);
+  const matrixRows = payload => (payload?.rows||[]).map(row=>{
+    const net=toNum(row.net_pnl);
+    const wr=toNum(row.win_rate);
+    const pf=toNum(row.profit_factor);
+    const dd=toNum(row.max_drawdown_pct);
+    const recall=toNum(row.recall);
+    return `<tr>
+      <td class="dim">${q(row.session||'')}</td>
+      <td class="dim">${q(row.regime||'')}</td>
+      <td class="dim">${row.trades??0}</td>
+      <td class="${(wr??0)>=0.5?'win':'loss'}">${wr==null?'&#8212;':pct(wr)}</td>
+      <td class="${(pf??0)>=1?'win':'loss'}">${pf==null?'&#8212;':(pf>=999?'&#8734;':fmt(pf,2))}</td>
+      <td class="${(dd??0)>20?'loss':(dd??0)>10?'muted':'win'}">${dd==null?'&#8212;':fmt(dd,2)+'%'}</td>
+      <td class="${(recall??0)>=0.5?'win':'muted'}">${recall==null?'&#8212;':pct(recall)}</td>
+      <td class="${clr(net)}">${dol(net)}</td>
+    </tr>`;
+  }).join('');
+  const m7=matrixRows(matrix.rolling_7d);
+  const m30=matrixRows(matrix.rolling_30d);
+  const leaks7=(matrix.rolling_7d?.leakage_hotspots||[]).slice(0,3).map(r=>`${r.session}/${r.regime}: ${dol(r.net_pnl)}`).join(' · ');
+  const leaks30=(matrix.rolling_30d?.leakage_hotspots||[]).slice(0,3).map(r=>`${r.session}/${r.regime}: ${dol(r.net_pnl)}`).join(' · ');
   const estTradesPerDay=toNum(activeProfile.estimated_trades_per_day);
   const estDd=toNum(activeProfile.estimated_dd_pct);
   const estThr=toNum(activeProfile.effective_threshold_est);
@@ -2001,6 +2060,24 @@ function renderPnl(acct,d){
       <thead><tr><th>Bucket</th><th>Trades</th><th>Win Rate</th><th>Net PnL</th><th>PF</th></tr></thead>
       <tbody>${sideRows||'<tr><td colspan="5" class="dim" style="text-align:center;padding:14px">No side data</td></tr>'}</tbody>
     </table></div>
+  </div>
+  <div class="split-2" style="margin-bottom:12px">
+    <div class="card">
+      <div class="card-ttl">&#128202; Regime × Session Matrix — Rolling 7D</div>
+      <div class="table-wrap"><table class="tbl">
+        <thead><tr><th>Session</th><th>Regime</th><th>Trades</th><th>WR</th><th>PF</th><th>DD</th><th>Recall</th><th>Net</th></tr></thead>
+        <tbody>${m7||'<tr><td colspan="8" class="dim" style="text-align:center;padding:14px">No data for 7D</td></tr>'}</tbody>
+      </table></div>
+      <div class="ssub" style="margin-top:8px">Leak hotspots: ${q(leaks7||'None')}</div>
+    </div>
+    <div class="card">
+      <div class="card-ttl">&#128200; Regime × Session Matrix — Rolling 30D</div>
+      <div class="table-wrap"><table class="tbl">
+        <thead><tr><th>Session</th><th>Regime</th><th>Trades</th><th>WR</th><th>PF</th><th>DD</th><th>Recall</th><th>Net</th></tr></thead>
+        <tbody>${m30||'<tr><td colspan="8" class="dim" style="text-align:center;padding:14px">No data for 30D</td></tr>'}</tbody>
+      </table></div>
+      <div class="ssub" style="margin-top:8px">Leak hotspots: ${q(leaks30||'None')}</div>
+    </div>
   </div>
   <div class="card" style="margin-bottom:12px">
     <div class="card-ttl">Live Equity Curve</div>

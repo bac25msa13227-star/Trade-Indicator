@@ -285,6 +285,49 @@ class ExecutionSettings(StrictSettingsModel):
     exit_model: ExitModelSettings = Field(default_factory=ExitModelSettings)
 
 
+class CanaryDeploySettings(StrictSettingsModel):
+    enabled: bool = False
+    # 0.10-0.20 is typical canary volume range before full promote.
+    volume_fraction: float = 0.20
+    min_lot: float = 0.01
+
+
+class AutoRollbackSettings(StrictSettingsModel):
+    enabled: bool = False
+    rollback_profile: str = "balanced"
+    # Trigger rollback when daily loss exceeds N% of balance (0 = disabled)
+    daily_dd_trigger_pct: float = 0.0
+    # Trigger rollback when consecutive losses >= N (0 = disabled)
+    consecutive_losses_trigger: int = 0
+    # Prevent spam rollback notifications
+    cooldown_seconds: int = 1800
+
+
+class DataHealthMonitorSettings(StrictSettingsModel):
+    enabled: bool = True
+    alert_cooldown_seconds: int = 900
+    # Missing bar if actual gap > expected_tf_seconds * factor
+    missing_bar_gap_factor: float = 1.8
+    # Alert stale tick beyond this age (seconds)
+    stale_tick_alert_seconds: int = 300
+    # Spread spike alert threshold:
+    # current_spread > max(abs_points, median_spread * multiplier)
+    spread_spike_multiplier: float = 2.5
+    spread_spike_abs_points: float = 1.5
+    spread_lookback_bars: int = 50
+    # Bridge vs feed divergence alert in price points (USD)
+    bridge_feed_divergence_points: float = 1.5
+    # Skip divergence checks when market is closed.
+    only_when_market_open: bool = True
+
+
+class AdminSettings(StrictSettingsModel):
+    canary: CanaryDeploySettings = Field(default_factory=CanaryDeploySettings)
+    auto_rollback: AutoRollbackSettings = Field(default_factory=AutoRollbackSettings)
+    data_health: DataHealthMonitorSettings = Field(default_factory=DataHealthMonitorSettings)
+    regime_session_matrix_windows_days: list[int] = Field(default_factory=lambda: [7, 30])
+
+
 class TrainingSettings(StrictSettingsModel):
     train_split: float = 0.8
     train_start_date: str | datetime | None = None
@@ -393,6 +436,7 @@ class Settings(StrictSettingsModel):
     strategy: StrategySettings = Field(default_factory=StrategySettings)
     risk: RiskSettings = Field(default_factory=RiskSettings)
     execution: ExecutionSettings = Field(default_factory=ExecutionSettings)
+    admin: AdminSettings = Field(default_factory=AdminSettings)
     training: TrainingSettings = Field(default_factory=TrainingSettings)
     notifications: NotificationSettings = Field(default_factory=NotificationSettings)
     integrations: IntegrationSettings = Field(default_factory=IntegrationSettings)

@@ -283,6 +283,22 @@ def _apply_live_config_overrides() -> None:
                 "max_drawdown_kill_pct": float(settings.risk.max_drawdown_kill_pct),
                 "consecutive_loss_pause_count": int(settings.risk.consecutive_loss_pause_count),
                 "consecutive_loss_cooldown_bars": int(settings.risk.consecutive_loss_cooldown_bars),
+                "admin_matrix_windows_days": [int(v) for v in settings.admin.regime_session_matrix_windows_days],
+                "canary_enabled": bool(settings.admin.canary.enabled),
+                "canary_volume_fraction": float(settings.admin.canary.volume_fraction),
+                "auto_rollback_enabled": bool(settings.admin.auto_rollback.enabled),
+                "auto_rollback_profile": str(settings.admin.auto_rollback.rollback_profile),
+                "auto_rollback_daily_dd_trigger_pct": float(settings.admin.auto_rollback.daily_dd_trigger_pct),
+                "auto_rollback_consecutive_losses_trigger": int(settings.admin.auto_rollback.consecutive_losses_trigger),
+                "auto_rollback_cooldown_seconds": int(settings.admin.auto_rollback.cooldown_seconds),
+                "data_health_enabled": bool(settings.admin.data_health.enabled),
+                "data_health_alert_cooldown_seconds": int(settings.admin.data_health.alert_cooldown_seconds),
+                "data_health_missing_bar_gap_factor": float(settings.admin.data_health.missing_bar_gap_factor),
+                "data_health_stale_tick_alert_seconds": int(settings.admin.data_health.stale_tick_alert_seconds),
+                "data_health_spread_spike_multiplier": float(settings.admin.data_health.spread_spike_multiplier),
+                "data_health_spread_spike_abs_points": float(settings.admin.data_health.spread_spike_abs_points),
+                "data_health_spread_lookback_bars": int(settings.admin.data_health.spread_lookback_bars),
+                "data_health_bridge_feed_divergence_points": float(settings.admin.data_health.bridge_feed_divergence_points),
             }
         except Exception as exc:
             logger.warning("Could not apply live config override for %s from %s: %s", acct, cfg_path, exc)
@@ -956,6 +972,142 @@ def _estimate_profile_presets(
     }
 
 
+def _is_truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value or "").strip().lower()
+    return text in {"1", "true", "yes", "y", "on"}
+
+
+def _max_drawdown_pct_from_pnls(items: list[dict[str, Any]]) -> float:
+    if not items:
+        return 0.0
+    ordered = sorted(items, key=lambda row: row.get("ts") or datetime.min.replace(tzinfo=timezone.utc))
+    equity = 0.0
+    peak = 0.0
+    max_dd = 0.0
+    for row in ordered:
+        pnl = _as_float(row.get("pnl")) or 0.0
+        equity += pnl
+        if equity > peak:
+            peak = equity
+        drawdown = max(0.0, peak - equity)
+        if drawdown > max_dd:
+            max_dd = drawdown
+    if peak <= 0:
+        return 0.0
+    return round((max_dd / peak) * 100.0, 4)
+
+
+def _build_regime_session_matrix(
+    trades: list[dict[str, Any]],
+    signals: list[dict[str, Any]],
+    windows_days: list[int] | None = None,
+) -> dict[str, Any]:
+    sessions = ("Asian", "London", "New York")
+    regimes = ("sideway", "normal", "strong")
+    windows = [int(w) for w in (windows_days or [7, 30]) if int(w) > 0]
+    if not windows:
+        windows = [7, 30]
+
+    signal_rows: list[dict[str, Any]] = []
+    for sg in signals:
+        sg_ts = _parse_trade_timestamp(sg.get("time") or sg.get("ts") or sg.get("bar_time"))
+        if sg_ts is None:
+            continue
+        signal_rows.append(
+            {
+                "ts": sg_ts,
+                "side": _normalize_trade_side(sg.get("direction") or sg.get("signal") or sg.get("side")),
+                "regime": _regime_bucket(sg.get("volatility_regime")),
+                "session": _session_bucket(sg_ts),
+                "should_trade": _is_truthy(sg.get("should_trade")),
+            }
+        )
+    signal_rows.sort(key=lambda item: item["ts"])
+
+    max_link_age = timedelta(days=7)
+    trade_rows: list[dict[str, Any]] = []
+    for tr in trades:
+        tr_ts = _parse_trade_timestamp(tr.get("time") or tr.get("close_time") or tr.get("ts") or tr.get("open_time"))
+        if tr_ts is None:
+            continue
+        tr_side = _normalize_trade_side(tr.get("side") or tr.get("direction"))
+        tr_pnl = _as_float(tr.get("pnl") or tr.get("profit")) or 0.0
+        regime = "unknown"
+        if tr_side != "unknown":
+            for sg in reversed(signal_rows):
+                if sg["side"] not in {tr_side, "unknown"}:
+                    continue
+                if sg["ts"] > tr_ts:
+                    continue
+                if (tr_ts - sg["ts"]) > max_link_age:
+                    break
+                regime = str(sg.get("regime") or "unknown")
+                break
+        trade_rows.append(
+            {
+                "ts": tr_ts,
+                "side": tr_side,
+                "pnl": tr_pnl,
+                "session": _session_bucket(tr_ts),
+                "regime": regime,
+            }
+        )
+
+    now_ref = datetime.now(timezone.utc)
+    ts_candidates = [row["ts"] for row in trade_rows if row.get("ts")] + [row["ts"] for row in signal_rows if row.get("ts")]
+    if ts_candidates:
+        now_ref = max(ts_candidates)
+
+    payload: dict[str, Any] = {"generated_at": now_ref.isoformat()}
+    for window in windows:
+        cutoff = now_ref - timedelta(days=int(window))
+        signals_cut = [sg for sg in signal_rows if sg["ts"] >= cutoff and bool(sg.get("should_trade"))]
+        trades_cut = [tr for tr in trade_rows if tr["ts"] >= cutoff]
+
+        signal_counts: dict[tuple[str, str], int] = {}
+        for sg in signals_cut:
+            key = (str(sg.get("session") or "Unknown"), str(sg.get("regime") or "unknown"))
+            signal_counts[key] = signal_counts.get(key, 0) + 1
+
+        rows: list[dict[str, Any]] = []
+        for session in sessions:
+            for regime in regimes:
+                grouped = [tr for tr in trades_cut if tr.get("session") == session and tr.get("regime") == regime]
+                summary = _summarize_group(grouped)
+                signal_count = signal_counts.get((session, regime), 0)
+                recall = (summary["trades"] / signal_count) if signal_count > 0 else None
+                rows.append(
+                    {
+                        "session": session,
+                        "regime": regime,
+                        "trades": summary["trades"],
+                        "wins": summary["wins"],
+                        "losses": summary["losses"],
+                        "win_rate": summary["win_rate"],
+                        "profit_factor": summary["profit_factor"],
+                        "net_pnl": summary["net_pnl"],
+                        "max_drawdown_pct": _max_drawdown_pct_from_pnls(grouped),
+                        "signals_passed": signal_count,
+                        "recall": None if recall is None else round(recall, 4),
+                    }
+                )
+
+        leak_rows = sorted(
+            [row for row in rows if (row.get("net_pnl") or 0.0) < 0 or ((row.get("profit_factor") or 0.0) < 1.0 and row.get("trades", 0) > 0)],
+            key=lambda row: (row.get("net_pnl") or 0.0),
+        )
+        payload[f"rolling_{window}d"] = {
+            "window_days": int(window),
+            "rows": rows,
+            "leakage_hotspots": leak_rows[:6],
+            "total_trades": len(trades_cut),
+            "total_signals_passed": len(signals_cut),
+        }
+    return payload
+
+
 _dashboard_cache: dict = {}
 _dashboard_cache_ts: float = 0.0
 _dashboard_cache_lock = _threading.Lock()
@@ -1281,6 +1433,8 @@ def _build_dashboard_payload_uncached() -> dict:
         total_pnl = round(total_pnl, 2)
         pnl_explain = _build_pnl_explain(trades, signals)
         profile_presets = _estimate_profile_presets(trades, runtime_cfg, dd)
+        matrix_windows = runtime_cfg.get("admin_matrix_windows_days") if isinstance(runtime_cfg, dict) else [7, 30]
+        matrix_payload = _build_regime_session_matrix(trades, signals, windows_days=matrix_windows)
         profile_override = _read_runtime_profile_override(acct)
         profile_active = str(profile_override.get("profile") or "balanced").strip().lower()
         if profile_active not in _PROFILE_MODES:
@@ -1366,6 +1520,7 @@ def _build_dashboard_payload_uncached() -> dict:
             "recent_signals": signals,
             "pnl_series":     _build_pnl_series(trades),
             "pnl_explain":    pnl_explain,
+            "regime_session_matrix": matrix_payload,
             "profile_presets": profile_presets,
             "profile_active": profile_active,
             "runtime": runtime_cfg,
