@@ -27,6 +27,10 @@ Manifest (single source of truth):
 
 - `configs/benchmarks/wf_expanded_profiles_20260405.json`
 
+WF verify script:
+
+- `scripts/wf_verify_expanded_profiles.py`
+
 Quick threshold snapshot:
 
 - ACC1 expanded: `strategy.signal_threshold = 0.68` and model meta threshold `0.68`
@@ -43,6 +47,25 @@ PYTHONPATH=src python3 -m uvicorn xauusd_ai.api.main:app --host 0.0.0.0 --port 8
 Dashboard:
 
 - `http://localhost:8000/dashboard`
+
+### Verify expanded benchmarks
+
+Locked-mode verify (recommended for cross-machine 100% reproducibility):
+
+```bash
+PYTHONPATH=src python3 scripts/wf_verify_expanded_profiles.py --mode locked
+```
+
+This verifies exact locked benchmark artifacts:
+
+- ACC1: `Net 127,313.86 | DD 32.15% | PF 1.3570 | Trades 1149 | WR 60.40%`
+- ACC2: `Net 35,714.67 | DD 22.81% | PF 1.6547 | Trades 641 | WR 59.59%`
+
+Optional full recompute from raw data:
+
+```bash
+PYTHONPATH=src python3 scripts/wf_verify_expanded_profiles.py --mode recompute
+```
 
 ## Locked benchmark profiles (must-use)
 
