@@ -1,0 +1,289 @@
+# ─────────────────────────────────────────────────────────────────
+# LIVE TRADING CONFIG — Account 1 (ACC1 breakthrough profile)
+# Model:  outputs/acc1_expand_net127313_dd3215_model.pkl
+# Symbol: XAUUSDm  |  WF: Net $127,313.86 | DD 32.15% | PF 1.3570
+# ─────────────────────────────────────────────────────────────────
+app:
+  poll_seconds: 60
+  model_path:          outputs/acc1_expand_net127313_dd3215_model.pkl
+  scaler_path:         outputs/acc1_expand_net127313_dd3215_scaler.pkl
+  model_meta_path:     outputs/acc1_expand_net127313_dd3215_model_meta.json
+  training_report_path: outputs/task4_acc1_training_report.json
+  training_plot_path:  outputs/task4_acc1_training_metrics.png
+  backtest_report_path: outputs/task4_acc1_backtest_report.json
+  backtest_trades_path: outputs/task4_acc1_backtest_trades.csv
+  backtest_equity_plot_path: outputs/task4_acc1_backtest_equity.png
+  backtest_trades_plot_path: outputs/task4_acc1_backtest_trades_plot.png
+  walkforward_report_path: outputs/acc1_expand_net127313_dd3215_walkforward_report.json
+  walkforward_trades_path: outputs/acc1_expand_net127313_dd3215_walkforward_trades.csv
+  paper_trade_log_path: outputs/paper_trade_signals_acc1.csv
+  live_learning_log_path: outputs/live_learning_log_acc1.jsonl
+  live_closed_trades_path: outputs/live_closed_trades_acc1.csv
+  log_level: INFO
+
+market:
+  symbol: XAUUSDm
+  training_symbol: GC=F
+  training_data_source: csv
+  csv_data_path: src/xauusd_ai/real_data/XAUUSD_M5.csv
+  live_data_source: yfinance
+  csv_folder_path: src/xauusd_ai/real_data
+  csv_timeframe: M5
+  higher_timeframe: D1
+  mid_timeframe: H1
+  structure_timeframe: H4
+  execution_timeframe: M5
+  bars:
+    D1: 100
+    H1: 500
+    H4: 200
+    M30: 300
+    M15: 300
+    M5: 500
+    M1: 200
+  timezone: UTC
+  enforce_market_open_gate: true
+  market_tick_stale_seconds: 300
+  market_preopen_alert_minutes: 30
+  market_preclose_alert_minutes: 30
+  market_preopen_alert_minutes_list: [1440, 30]
+  market_preclose_alert_minutes_list: [1440, 30]
+
+strategy:
+  rsi_period: 14
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  liquidity_lookback: 15
+  swing_lookback: 20
+  volatility_window: 20
+  signal_threshold: 0.68             # Expanded candidate (WF net ~$127.3k, DD~32.15%)
+  sideways_volatility_threshold: 0.003
+  strong_volatility_threshold: 0.016
+  news_block_minutes: 0              # Tắt blackout ML feature (dùng news override thay thế)
+  rsi_long_threshold: 50             # Less strict than acc2 (52)
+  rsi_short_threshold: 50            # Less strict than acc2 (48)
+  ict_weight: 0.40
+  wyckoff_weight: 0.35
+  momentum_weight: 0.25
+  min_strategy_score: 0.05
+  sideway_min_strategy_score: 0.10
+  strong_volatility_min_strategy_score: 0.12
+  require_trend_alignment: false
+  force_trade: false
+  blocked_hours_utc: []
+  blocked_weekdays_utc: []
+  blocked_weekday_hours_utc: {}
+  allowed_weekday_hours_utc:
+    Monday: [0, 1, 5, 6, 7, 13, 14, 20, 21]
+    Tuesday: [0, 1, 5, 6, 7, 13, 14, 20, 21]
+    Wednesday: [0, 1, 5, 6, 7, 13, 14, 20, 21]
+    Thursday: [0, 1, 5, 6, 7, 13, 14, 20, 21]
+    Friday: [0, 1, 5, 6, 7, 13, 14, 20, 21]
+  regime_shutdown_rules: []
+  # Silver Bullet ICT windows
+  silver_bullet_enabled: true
+  silver_bullet_windows_utc: [[3, 4], [10, 11], [14, 15]]
+  silver_bullet_confidence_boost: 0.05  # Slightly higher boost than acc2 (0.03)
+  # ADX trend gate — relaxed so we enter more often
+  adx_gate_enabled: true
+  adx_min_trend: 17.0
+  # Regime-specific confidence thresholds — all lower than acc2
+  sideway_min_confidence: 0.80
+  volatile_min_confidence: 0.70
+  dynamic_threshold_enabled: false
+  dynamic_threshold_by_regime_session: {}
+
+risk:
+  mode: fixed_fractional
+  risk_per_trade: 0.04
+  risk_tier_floor: 0.04
+  max_open_positions: 2
+  stop_loss_atr_multiple: 1.5
+  take_profit_rr: 3.5
+  volatile_take_profit_rr: 5.0     # ACC2 logic: Volatile regime RR 1:5
+  sideway_take_profit_rr: 2.5      # Sideways regime RR 1:2.5
+  min_confidence: 0.70
+  fixed_lot: 0.01
+  max_risk_fraction: 0.10
+  sideway_risk_multiplier: 0.2
+  normal_risk_multiplier: 1.0
+  strong_volatility_risk_multiplier: 1.4
+  # Circuit breaker — ENABLED for capital preservation
+  kill_switch_enabled: true
+  daily_loss_limit_pct: 0.0
+  max_drawdown_kill_pct: 0.12
+  consecutive_loss_pause_count: 0
+  consecutive_loss_cooldown_bars: 4
+  anti_martingale_factor: 0.5
+  anti_martingale_max_reductions: 3
+  max_total_exposure_pct: 0.10
+  reentry_guard_enabled: true
+  reentry_cooldown_bars_after_sl: 3
+  reentry_min_distance_atr: 0.35
+  dynamic_sltp_enabled: false
+  dynamic_rr_quality_sensitivity: 0.38
+  dynamic_sl_quality_sensitivity: 0.22
+  dynamic_rr_min: 1.2
+  dynamic_rr_max: 7.0
+  dynamic_sl_atr_min: 0.8
+  dynamic_sl_atr_max: 3.5
+  spread_cost_rr: 0.0
+  slippage_rr: 0.02
+  commission_rr: 0.01
+  dynamic_friction_enabled: false
+  dynamic_slippage_volatility_multiplier: 1.0
+  dynamic_slippage_news_multiplier: 1.5
+  dynamic_spread_regime_multiplier: 0.8
+  confidence_risk_sizing_enabled: false
+  confidence_reference: 0.65
+  confidence_risk_min_multiplier: 0.60
+  confidence_risk_max_multiplier: 1.45
+  cvar_guard_enabled: true
+  cvar_alpha: 0.10
+  cvar_window_trades: 40
+  cvar_limit_pct_equity: 0.025
+  # Partial Take Profit — book at 1.5R (better quality exits than 1.0R)
+  partial_tp_enabled: true
+  partial_tp_rr: 1.2
+  partial_tp_pct: 0.5               # Close 50% of position
+  risk_throttle_rules: []
+
+execution:
+  auto_trade: true
+  deviation: 20
+  magic_number: 20260325            # Unique for acc1
+  comment: xauusd-ai-live-acc1-freeze
+  paper_trade_max_loops: 0          # 0 = run continuously until manually stopped
+  paper_data_source: yfinance       # Paper test should follow live feed, not static CSV
+  close_opposite_on_signal: true
+
+  trailing_sl:
+    enabled: true
+    breakeven_at_rr: 0.5
+    activation_rr: 1.0
+    trail_atr_multiple: 1.0
+
+  dca:
+    enabled: false
+    max_dca_count: 2
+    trigger_atr_multiple: 1.5
+    lot_multiplier: 1.5
+    max_total_risk_pct: 0.03
+
+  exit_model:
+    enabled: false
+    exit_model_path: "outputs/exit_model_acc1.pkl"
+    exit_scaler_path: "outputs/exit_scaler_acc1.pkl"
+    exit_model_meta_path: "outputs/exit_model_meta_acc1.json"
+    exit_threshold: 0.65
+    min_unrealized_rr: 0.80
+    exit_min_hold_bars: 4
+    exit_label_horizon: 8
+    exit_label_threshold_rr: 0.50
+    max_entry_samples: 8000
+    also_cut_losses: false
+    min_loss_rr: -0.50
+
+
+training:
+  # ── DATE-BASED SPLIT — wider range for more diverse training ────────────────
+  train_start_date: "2022-01-01"    # ACC1: start from 2022 for more data (~4yr)
+  train_end_date:   "2026-03-08"
+  test_start_date:  "2026-03-09"
+  test_end_date:    null
+  train_split: 0.70
+  use_sltp_label: true
+  sltp_label_max_horizon: 96         # 8h horizon (tighter than acc2's 192) → faster hits
+  label_tp_rr: 1.5                   # ACC1: lower RR label → more positive samples
+  label_horizon: 24                  # 2h horizon for signal validity
+  min_return_threshold: 0.0008       # Lower → even more positive labels
+  retrain_on_startup: false          # Dùng model freeze hiện tại ngay khi bot khởi động
+  live_learning_enabled: false       # Tắt self-learn — dùng model cố định
+  live_learning_interval_minutes: 60
+  live_learning_min_new_bars: 12
+  live_learning_min_rows: 500
+  min_self_learning_roc_auc: 0.53
+  save_dataset: true
+  dataset_path: outputs/task4_training_dataset_acc1.csv
+  optimize_threshold: true
+  probability_calibration: isotonic
+  two_stage_enabled: true
+  two_stage_meta_threshold: 0.57
+  two_stage_min_base_probability: 0.42
+  two_stage_min_rows: 300
+  hard_negative_enabled: true
+  hard_negative_hours_utc: [2, 3, 4, 5, 6, 7, 17, 18, 19, 20, 21]
+  hard_negative_weekdays_utc: [monday]
+  hard_negative_multiplier: 2.0
+  hard_negative_weekday_boost: 1.3
+  validation_split: 0.15
+  threshold_min: 0.45
+  threshold_max: 0.85
+  threshold_step: 0.01
+  min_precision_floor: 0.45
+  backtest_initial_balance: 200.0
+  walkforward_train_size: 24000
+  walkforward_test_size: 4000
+  walkforward_step_size: 4000
+  walkforward_max_combinations: 30
+  walkforward_max_folds_per_combination: 8
+  walkforward_use_purged_splits: true
+  walkforward_purge_bars: 12
+  walkforward_embargo_bars: 6
+
+notifications:
+  telegram_enabled: true
+  verbose_message: true
+
+integrations:
+  mt5:
+    enabled: true
+    login_env: MT5_LOGIN
+    password_env: MT5_PASSWORD
+    server_env: MT5_SERVER
+    login: 270832477
+    password: "07032001bB@"
+    server: "Exness-MT5Trial17"
+    terminal_path: "C:\\Program Files\\MetaTrader 5\\terminal64.exe"
+  telegram:
+    token_env: TELEGRAM_BOT_TOKEN
+    chat_id_env: TELEGRAM_CHAT_ID
+  news:
+    enabled: true
+    provider: forexfactory
+    minutes_before: 2         # Chặn 2 phút trước tin (tránh spread rộng lúc chờ)
+    minutes_after: 5          # Cửa sổ tín hiệu sau tin
+    trade_before_news: false
+    trade_after_news: true    # Cho phép lệnh sau tin qua filter bình thường
+    high_impact_only: true
+    currencies:
+      - USD
+    # --- News Trade Override: ép BUY/SELL ngay khi tin vừa ra ---
+    news_trade_override: true          # true = kích hoạt giao dịch theo tin
+    news_trade_window_minutes: 3       # Thực hiện trong 3 phút đầu sau khi tin ra
+    news_trade_atr_sl_mult: 1.5        # SL = 1.5 × ATR (đủ rộng tránh spike)
+    news_trade_atr_tp_mult: 3.5        # TP = 3.5 × ATR  →  RR ≈ 1:2.3
+
+admin:
+  canary:
+    enabled: false
+    volume_fraction: 0.20
+    min_lot: 0.01
+  auto_rollback:
+    enabled: false
+    rollback_profile: balanced
+    daily_dd_trigger_pct: 3.0
+    consecutive_losses_trigger: 4
+    cooldown_seconds: 1800
+  data_health:
+    enabled: true
+    alert_cooldown_seconds: 900
+    missing_bar_gap_factor: 1.8
+    stale_tick_alert_seconds: 300
+    spread_spike_multiplier: 2.5
+    spread_spike_abs_points: 1.5
+    spread_lookback_bars: 50
+    bridge_feed_divergence_points: 1.5
+    only_when_market_open: true
+  regime_session_matrix_windows_days: [7, 30]

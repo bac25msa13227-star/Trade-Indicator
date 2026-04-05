@@ -1,6 +1,48 @@
 # Latest Live Guide
 
-Last updated: `2026-04-03` (after cleanup commit `0894ba7` on branch `model/net66kdd39_net21dd23`)
+Last updated: `2026-04-05` (expanded WF profiles locked)
+
+## Expanded locked profiles (new)
+
+Use these when you want the expanded-result set:
+
+- ACC1 expanded: `Net 127,313.86 | DD 32.15% | PF 1.3570 | Trades 1149 | WR 60.40%`
+- ACC2 expanded: `Net 35,714.67 | DD 22.81% | PF 1.6547 | Trades 641 | WR 59.59%`
+
+Required live configs:
+
+- `configs/benchmarks/acc1_expand_net127313_dd3215.yaml`
+- `configs/benchmarks/acc2_expand_net35714_dd2281.yaml`
+
+Required model artifacts:
+
+- `outputs/acc1_expand_net127313_dd3215_model.pkl`
+- `outputs/acc1_expand_net127313_dd3215_scaler.pkl`
+- `outputs/acc1_expand_net127313_dd3215_model_meta.json`
+- `outputs/acc2_expand_net35714_dd2281_model.pkl`
+- `outputs/acc2_expand_net35714_dd2281_scaler.pkl`
+- `outputs/acc2_expand_net35714_dd2281_model_meta.json`
+
+Manifest (single source of truth):
+
+- `configs/benchmarks/wf_expanded_profiles_20260405.json`
+
+Quick threshold snapshot:
+
+- ACC1 expanded: `strategy.signal_threshold = 0.68` and model meta threshold `0.68`
+- ACC2 expanded: `strategy.signal_threshold = 0.62` and model meta threshold `0.62`
+
+Run without MLflow/Airflow/Grafana:
+
+```bash
+PYTHONPATH=src python3 scripts/live_runner.py live --config configs/benchmarks/acc1_expand_net127313_dd3215.yaml
+PYTHONPATH=src python3 scripts/live_runner.py live --config configs/benchmarks/acc2_expand_net35714_dd2281.yaml
+PYTHONPATH=src python3 -m uvicorn xauusd_ai.api.main:app --host 0.0.0.0 --port 8000
+```
+
+Dashboard:
+
+- `http://localhost:8000/dashboard`
 
 ## Locked benchmark profiles (must-use)
 
