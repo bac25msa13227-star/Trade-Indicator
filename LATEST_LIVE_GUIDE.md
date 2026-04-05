@@ -19,22 +19,23 @@ Tất cả số trên được generate từ `scripts/wf_pf3_v2_search.py` seed 
 
 ---
 
-## Yêu cầu model artifacts (PHẢI CÓ trước khi chạy)
+## Model artifacts
 
-Những file sau **không được commit vào git** (quá lớn) — phải copy thủ công sang máy mới:
+Các file model artifacts **ĐÃ được commit vào git** và có sẵn trên branch — máy khác
+`git clone` + `git checkout` là có ngay, **không cần copy thủ công**.
 
 ```
-outputs/acc1_expand_net127313_dd3215_model.pkl      (~1 MB)
-outputs/acc1_expand_net127313_dd3215_scaler.pkl     (~3 KB)
-outputs/acc1_expand_net127313_dd3215_model_meta.json
+outputs/acc1_expand_net127313_dd3215_model.pkl      (~989 KB)  ← commit 5db0852
+outputs/acc1_expand_net127313_dd3215_scaler.pkl     (~2.9 KB)  ← commit 5db0852
+outputs/acc1_expand_net127313_dd3215_model_meta.json           ← commit 5db0852
 
-outputs/acc2_expand_net35714_dd2281_model.pkl       (~1 MB)
-outputs/acc2_expand_net35714_dd2281_scaler.pkl      (~3 KB)
-outputs/acc2_expand_net35714_dd2281_model_meta.json
+outputs/acc2_expand_net35714_dd2281_model.pkl       (~983 KB)  ← commit 5db0852
+outputs/acc2_expand_net35714_dd2281_scaler.pkl      (~2.9 KB)  ← commit 5db0852
+outputs/acc2_expand_net35714_dd2281_model_meta.json            ← commit 5db0852
 ```
 
-> **Lý do**: WF v2 search dùng các model `expand` làm base để simulate trên 8 folds.
-> Live configs trỏ tới đúng các file này — nếu thiếu bot sẽ không start được.
+> **Lưu ý**: `outputs/` bị `.gitignore` nhưng các file này đã được force-add từ trước
+> nên git vẫn track. Chạy `git ls-files outputs/ | grep expand` để xác nhận.
 
 ---
 
@@ -137,9 +138,32 @@ source .venv2/bin/activate      # macOS/Linux
 pip install -r requirements.txt
 ```
 
-### 3. Copy model artifacts
+### 3. Xác nhận model artifacts có sẵn
 
-Copy 6 files model artifacts vào `outputs/` (xem danh sách ở trên).
+```bash
+git ls-files outputs/ | grep expand
+```
+
+Expected (6 files):
+```
+outputs/acc1_expand_net127313_dd3215_model.pkl
+outputs/acc1_expand_net127313_dd3215_model_meta.json
+outputs/acc1_expand_net127313_dd3215_scaler.pkl
+outputs/acc2_expand_net35714_dd2281_model.pkl
+outputs/acc2_expand_net35714_dd2281_model_meta.json
+outputs/acc2_expand_net35714_dd2281_scaler.pkl
+```
+
+Nếu output rỗng (git không track), chạy:
+
+```bash
+git checkout 5db0852 -- outputs/acc1_expand_net127313_dd3215_model.pkl \
+  outputs/acc1_expand_net127313_dd3215_scaler.pkl \
+  outputs/acc1_expand_net127313_dd3215_model_meta.json \
+  outputs/acc2_expand_net35714_dd2281_model.pkl \
+  outputs/acc2_expand_net35714_dd2281_scaler.pkl \
+  outputs/acc2_expand_net35714_dd2281_model_meta.json
+```
 
 ### 4. Verify config load đúng
 
