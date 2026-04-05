@@ -1,19 +1,19 @@
-# ACC2 v2 PF3 profile lock (wf_pf3_v2_search most-trades recommended)
-# Target WF (locked artifact): Net 63,164.18 | DD 18.64% | PF 3.9679 | Trades 182 | WR 81.87%
-# Vs baseline (publish): Net 35,714.67 | DD 22.81% | PF 1.6547 -> IMPROVED ALL 3 METRICS
-# compound_cap=50.0 (standard, per-fold 50x ceiling relative to fold start balance)
-# template=focus_hours: allowed=[0,1,5,6,7,13,14,20,21] each weekday
+# ACC1 PF>=3 joint-feasible profile
+# WF Search Result: Net $297,581 | DD 26.29% | PF 3.3158 | Trades 171 | WR 81.29%
+# vs old benchmark: Net $127,313.86 | DD 32.15% | PF 1.3570 | Trades 1149 | WR 60.40%
+# Improvement: Net +2.3x | DD -5.86pp | PF +1.96
+# Search: wf_pf3_joint_search.py round4 | threshold=0.88 | risk=12% | TP=4:1 | compound_cap=0 (unlimited)
 
 app:
   poll_seconds: 60
-  model_path: outputs/acc2_expand_net35714_dd2281_model.pkl
-  scaler_path: outputs/acc2_pf3v2_net63k_dd1864_scaler.pkl
-  model_meta_path: outputs/acc2_pf3v2_net63k_dd1864_model_meta.json
-  walkforward_report_path: outputs/acc2_pf3v2_net63k_dd1864_walkforward_report.json
-  walkforward_trades_path: outputs/acc2_pf3v2_net63k_dd1864_walkforward_trades.csv
-  paper_trade_log_path: outputs/paper_trade_signals_acc2.csv
-  live_learning_log_path: outputs/live_learning_log_acc2.jsonl
-  live_closed_trades_path: outputs/live_closed_trades_acc2.csv
+  model_path: outputs/acc1_expand_net127313_dd3215_model.pkl
+  scaler_path: outputs/acc1_expand_net127313_dd3215_scaler.pkl
+  model_meta_path: outputs/acc1_expand_net127313_dd3215_model_meta.json
+  walkforward_report_path: outputs/acc1_expand_net127313_dd3215_walkforward_report.json
+  walkforward_trades_path: outputs/acc1_expand_net127313_dd3215_walkforward_trades.csv
+  paper_trade_log_path: outputs/paper_trade_signals_acc1.csv
+  live_learning_log_path: outputs/live_learning_log_acc1.jsonl
+  live_closed_trades_path: outputs/live_closed_trades_acc1.csv
   log_level: INFO
 
 market:
@@ -52,78 +52,76 @@ strategy:
   liquidity_lookback: 15
   swing_lookback: 20
   volatility_window: 20
-  signal_threshold: 0.80
+  signal_threshold: 0.88
   sideways_volatility_threshold: 0.003
   strong_volatility_threshold: 0.016
   news_block_minutes: 0
-  rsi_long_threshold: 52
-  rsi_short_threshold: 48
+  rsi_long_threshold: 50
+  rsi_short_threshold: 50
   ict_weight: 0.40
   wyckoff_weight: 0.35
   momentum_weight: 0.25
-  min_strategy_score: 0.15
-  sideway_min_strategy_score: 0.05
-  strong_volatility_min_strategy_score: 0.20
+  min_strategy_score: 0.20
+  sideway_min_strategy_score: 0.10
+  strong_volatility_min_strategy_score: 0.30
   require_trend_alignment: false
   force_trade: false
-  blocked_hours_utc: []
+  # template: minimal — block low-edge hours, no allowed_weekday filter
+  blocked_hours_utc: [15, 22, 23]
   blocked_weekdays_utc: []
   blocked_weekday_hours_utc: {}
-  allowed_weekday_hours_utc:
-    Monday: [0, 1, 5, 6, 7, 13, 14, 20, 21]
-    Tuesday: [0, 1, 5, 6, 7, 13, 14, 20, 21]
-    Wednesday: [0, 1, 5, 6, 7, 13, 14, 20, 21]
-    Thursday: [0, 1, 5, 6, 7, 13, 14, 20, 21]
-    Friday: [0, 1, 5, 6, 7, 13, 14, 20, 21]
+  allowed_weekday_hours_utc: {}
   silver_bullet_enabled: true
   silver_bullet_windows_utc: [[3, 4], [10, 11], [14, 15]]
-  silver_bullet_confidence_boost: 0.03
-  adx_gate_enabled: false
-  adx_min_trend: 22.0
-  sideway_min_confidence: 0.85
-  volatile_min_confidence: 0.75
+  silver_bullet_confidence_boost: 0.05
+  adx_gate_enabled: true
+  adx_min_trend: 12.0
+  sideway_min_confidence: 0.86
+  volatile_min_confidence: 0.84
   regime_shutdown_rules: []
 
 risk:
   mode: fixed_fractional
-  risk_per_trade: 0.06
+  risk_per_trade: 0.12
   risk_tier_floor: 0.03
   max_open_positions: 2
   stop_loss_atr_multiple: 1.2
-  take_profit_rr: 10.0
-  sideway_take_profit_rr: 9.0
-  volatile_take_profit_rr: 11.0
-  min_confidence: 0.75
+  sideway_sl_atr_multiple: 1.2
+  volatile_sl_atr_multiple: 1.5
+  take_profit_rr: 4.0
+  sideway_take_profit_rr: 3.0
+  volatile_take_profit_rr: 5.0
+  min_confidence: 0.85
   fixed_lot: 0.01
-  max_risk_fraction: 0.065
+  max_risk_fraction: 0.50
   sideway_risk_multiplier: 0.20
   normal_risk_multiplier: 1.0
-  strong_volatility_risk_multiplier: 1.0
-  spread_cost_rr: 0.01
+  strong_volatility_risk_multiplier: 1.20
+  spread_cost_rr: 0.02
   slippage_rr: 0.01
   commission_rr: 0.0
   kill_switch_enabled: true
   daily_loss_limit_pct: 0.015
-  max_drawdown_kill_pct: 0.15
-  consecutive_loss_pause_count: 3
-  consecutive_loss_cooldown_bars: 12
+  max_drawdown_kill_pct: 0.30
+  consecutive_loss_pause_count: 2
+  consecutive_loss_cooldown_bars: 16
   anti_martingale_factor: 0.7
   anti_martingale_max_reductions: 3
-  max_total_exposure_pct: 0.12
+  max_total_exposure_pct: 0.30
   reentry_guard_enabled: true
-  reentry_cooldown_bars_after_sl: 1
+  reentry_cooldown_bars_after_sl: 3
   reentry_min_distance_atr: 0.35
   partial_tp_enabled: false
   partial_tp_rr: 1.5
-  partial_tp_pct: 0.5
-  compound_cap: 50.0
+  partial_tp_pct: 0.4
+  compound_cap: 0.0
   risk_throttle_rules: []
 
 execution:
   auto_trade: true
   deviation: 20
-  magic_number: 20260406
-  comment: xauusd-ai-acc2-pf3v2-net63k
+  magic_number: 20260405
+  comment: xauusd-ai-acc1-pf3-net297k
   paper_trade_max_loops: 0
   paper_data_source: yfinance
   close_opposite_on_signal: true
@@ -148,7 +146,7 @@ training:
   live_learning_enabled: false
   optimize_threshold: false
   save_dataset: true
-  dataset_path: outputs/task4_training_dataset_acc2.csv
+  dataset_path: outputs/task4_training_dataset_acc1.csv
   walkforward_train_size: 24000
   walkforward_test_size: 4000
   walkforward_step_size: 4000
