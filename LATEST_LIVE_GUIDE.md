@@ -238,19 +238,87 @@ RiskManager -> 0.3% sizing -> MT5 execute
 
 ---
 
+## Files cần thiết để tái tạo kết quả WF
+
+### Files bắt buộc
+
+| File | Mục đích |
+|------|---------|
+| `src/xauusd_ai/real_data/XAUUSDm_M1.csv` | **Data chính** — 7.77M bars, Sep 2003 → Mar 2026. Không có file này thì không chạy được. |
+| `src/xauusd_ai/real_data/XAUUSDm_M5.csv` | **M5 context** — bias direction (m5_bias), RSI14 cho direction voting |
+| `scripts/acc2_scalp_m1_wf.py` | **WF benchmark script** — 18-fold walk-forward, dùng để verify model |
+| `scripts/acc2_scalp_m1_save_model.py` | **Train + save pkl** — dùng params giống WF, output 3 artifacts |
+| `src/xauusd_ai/model/scalp_model.py` | `DualScalpModel`, `CalibratedDirModel` — kiến trúc dual model |
+| `src/xauusd_ai/features/scalp_dataset.py` | `build_scalp_dataset()`, `_compute_direction()` — dataset builder |
+| `src/xauusd_ai/features/scalp_features.py` | 50 `SCALP_FEATURE_COLUMNS` — feature definitions |
+| `src/xauusd_ai/model/trainer.py` | `score_live_row()` → `_score_dual_scalp_row()` — live inference |
+| `src/xauusd_ai/features/dataset.py` | `build_live_feature_frame()` → `_build_live_scalp_feature_frame()` |
+| `src/xauusd_ai/strategies/hybrid.py` | `build_trade_decision()` — nhận `trade_side` từ model signal |
+| `configs/live_acc2_scalp_m1.yaml` | **Live config** — risk params, WF sizes, SL/TP |
+
+### Chạy WF benchmark (verify)
+
+```bash
+cd "Trade Indicator"
+source .venv2/bin/activate
+PYTHONPATH=src python scripts/acc2_scalp_m1_wf.py 2>/dev/null | tee /tmp/wf_result.txt
+```
+
+Cần: `XAUUSDm_M1.csv` + `XAUUSDm_M5.csv`. Chạy ~20–30 phút.
+
+### Train lại model (deploy)
+
+```bash
+PYTHONPATH=src python scripts/acc2_scalp_m1_save_model.py
+```
+
+Output:
+```
+outputs/acc2_scalp_m1_model.pkl         ← DualScalpModel (BUY+SELL)
+outputs/acc2_scalp_m1_scaler.pkl        ← identity transformer
+outputs/acc2_scalp_m1_model_meta.json   ← feature list, thresholds, train_end
+```
+
+---
+
+## So sánh WF params vs Live config
+
+> ⚠️ Một số thông số trong live có khác WF (đã điều chỉnh để an toàn hơn cho live trading).
+
+| Param | WF script (`acc2_scalp_m1_wf.py`) | Live config (`live_acc2_scalp_m1.yaml`) | Ghi chú |
+|-------|----------------------------------|------------------------------------------|---------|
+| `risk_per_trade` | 0.003 | **0.003** ✅ | Aligned |
+| `take_profit_rr` | 1.5 | **1.5** ✅ | Aligned |
+| `stop_loss_atr_multiple` | 0.8 | **0.8** ✅ | Aligned |
+| `label_horizon` | 8 | **8** ✅ | Critical — prevents slot congestion |
+| `thr_buy` | 0.58 | **0.58** ✅ | Bundled inside DualScalpModel |
+| `thr_sell` | 0.55 | **0.55** ✅ | Bundled inside DualScalpModel |
+| `max_open_positions` | **3** | 2 | Live: 2 (giảm risk) |
+| `compound_cap` | **25×** | 10× | Live: 10× (vốn nhỏ, an toàn hơn) |
+| `consecutive_loss_pause_count` | **2** | 3 | Live: thêm 1 lần filter |
+| `consecutive_loss_cooldown_bars` | **4** | 8 | Live: 8 phút (chờ lâu hơn) |
+| `partial_tp_rr` | 0.75R | 1.0R | Live: chốt ở 1R thay vì 0.75R |
+| `partial_tp_pct` | **60%** | 50% | Live: chốt 50% |
+| `anti_martingale_factor` | 0.3 | 0.2 | Live: giảm size nhẹ hơn sau thua |
+
+> Kết quả WF (+12,015%/yr non-compound) được tính với WF params.  
+> Live params an toàn hơn → return thực tế thấp hơn ~10–20% nhưng DD cũng thấp hơn.
+
+---
+
 ## Files source code quan trọng
 
 ```
 src/xauusd_ai/model/scalp_model.py          DualScalpModel + CalibratedDirModel
 src/xauusd_ai/features/scalp_features.py    50 SCALP_FEATURE_COLUMNS
-src/xauusd_ai/features/scalp_dataset.py     build_scalp_dataset()
-src/xauusd_ai/model/trainer.py              score_live_row: DualScalpModel fast path
+src/xauusd_ai/features/scalp_dataset.py     build_scalp_dataset(), _compute_direction()
+src/xauusd_ai/model/trainer.py              score_live_row → _score_dual_scalp_row (SELL fix)
 src/xauusd_ai/features/dataset.py           build_live_feature_frame: scalp branch
 src/xauusd_ai/strategies/hybrid.py          trade_side override from DualScalpModel
-configs/live_acc2_scalp_m1.yaml             live config chinh
-scripts/acc2_scalp_m1_save_model.py         train + save pkl (~4 phut)
+configs/live_acc2_scalp_m1.yaml             live config chính
+scripts/acc2_scalp_m1_save_model.py         train + save pkl (~4 phút)
 scripts/acc2_scalp_m1_paper.py              paper trade validator
-scripts/acc2_scalp_m1_wf.py                 18-fold WF script
+scripts/acc2_scalp_m1_wf.py                 18-fold WF script (benchmark)
 docker-compose.yml                          live-scalp-acc2 service
 ```
 
@@ -284,6 +352,7 @@ Repo:   https://github.com/bac25msa13227-star/Trade-Indicator.git
 
 | Commit | Nội dung |
 |--------|----------|
+| `8368e32` | fix(scalp): SELL fix — _score_dual_scalp_row routes DualScalpModel live inference |
 | `936bb99` | feat(scalp): M1 DualScalpM1 live — 18/18 WF positive, ATH-proof |
 | `02d0b87` | docs(guide): rewrite guide for WF PF3 v2 |
 | `21f20f6` | feat(wf-v2): lock pf3v2 configs + 324 passing tests |
