@@ -1,3 +1,2 @@
-# pkl files are stored as regular git blobs (no git-lfs required)
-outputs/*.pkl binary
+outputs/*.pkl filter=lfs diff=lfs merge=lfs -text
 
