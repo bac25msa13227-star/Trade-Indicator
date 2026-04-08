@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 #  setup.sh — Trade Indicator: bootstrap mới hoàn toàn từ git clone
-#  Chạy: bash setup.sh [--bot acc2|acc1|both] [--data-src user@host]
+#  Chạy: bash setup.sh [--bot acc2|acc1|both]
 # =============================================================================
 set -euo pipefail
 
@@ -18,12 +18,10 @@ cd "$REPO_DIR"
 
 # ── Parse args ────────────────────────────────────────────────────────────────
 BOT_TARGET="acc2"          # default: only run M1 scalp bot
-DATA_SRC=""                # e.g. user@192.168.1.10
 
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --bot)     BOT_TARGET="$2"; shift 2 ;;
-    --data-src) DATA_SRC="$2"; shift 2 ;;
+    --bot) BOT_TARGET="$2"; shift 2 ;;
     *) warn "Unknown arg: $1"; shift ;;
   esac
 done
@@ -93,69 +91,14 @@ mkdir -p outputs src/xauusd_ai/real_data
 ok "outputs/ và real_data/ ready"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 5 — CSV market data
+# STEP 5 — Model artifacts (đã có trong git, không cần CSV)
 # ─────────────────────────────────────────────────────────────────────────────
-info "STEP 5 — Market data CSV"
-
-# Files required per bot
-NEED_M1_CSV=false
-NEED_M5_CSV=false
-
-[[ "$BOT_TARGET" == "acc2" || "$BOT_TARGET" == "both" ]] && NEED_M1_CSV=true
-[[ "$BOT_TARGET" == "acc1" || "$BOT_TARGET" == "both" ]] && NEED_M5_CSV=true
-
-COMMON_FILES=("XAUUSDm_D1.csv" "XAUUSDm_H4.csv" "XAUUSDm_H1.csv")
-REQUIRED_FILES=("${COMMON_FILES[@]}")
-$NEED_M1_CSV && REQUIRED_FILES+=("XAUUSDm_M1.csv")
-$NEED_M5_CSV && REQUIRED_FILES+=("XAUUSDm_M5.csv")
-
-CSV_MISSING=()
-for f in "${REQUIRED_FILES[@]}"; do
-  [[ -f "src/xauusd_ai/real_data/$f" ]] || CSV_MISSING+=("$f")
-done
-
-if [[ ${#CSV_MISSING[@]} -eq 0 ]]; then
-  ok "Tất cả CSV data đã có"
-else
-  warn "Thiếu ${#CSV_MISSING[@]} file(s) CSV: ${CSV_MISSING[*]}"
-
-  if [[ -n "$DATA_SRC" ]]; then
-    info "Đang copy từ ${DATA_SRC} ..."
-    for f in "${CSV_MISSING[@]}"; do
-      info "  rsync: ${f}"
-      rsync -az --progress \
-        "${DATA_SRC}:\"$(ssh "$DATA_SRC" 'find ~/Documents -name Trade-Indicator -type d 2>/dev/null | head -1' 2>/dev/null)/src/xauusd_ai/real_data/${f}\"" \
-        "src/xauusd_ai/real_data/" 2>/dev/null || \
-      rsync -az --progress \
-        "${DATA_SRC}:/root/Trade-Indicator/src/xauusd_ai/real_data/${f}" \
-        "src/xauusd_ai/real_data/" 2>/dev/null || \
-      warn "  ❌ Không copy được ${f} — copy thủ công sau"
-    done
-  else
-    echo ""
-    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}  Copy dữ liệu từ máy Mac (chạy trên Mac):${NC}"
-    echo ""
-    SOURCE_MAC_DIR="/Users/dodoannang/Documents/Thac si MSE/Trade Indicator"
-    TARGET_DIR="$(pwd)/src/xauusd_ai/real_data/"
-    for f in "${CSV_MISSING[@]}"; do
-      echo -e "  ${CYAN}scp \"${SOURCE_MAC_DIR}/src/xauusd_ai/real_data/${f}\" \\${NC}"
-      echo -e "      ${CYAN}user@TARGET_IP:${TARGET_DIR}${NC}"
-    done
-    echo ""
-    echo -e "  Hoặc dùng rsync (nhanh hơn, có resume):"
-    echo -e "  ${CYAN}bash setup.sh --bot ${BOT_TARGET} --data-src user@MAC_IP${NC}"
-    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    read -r -p "  Tiếp tục mà không có CSV? (bot sẽ fail khi chạy) [y/N]: " CONT
-    [[ "$CONT" =~ ^[Yy]$ ]] || { warn "Setup dừng — copy CSV rồi chạy lại"; exit 0; }
-  fi
-fi
-
-# ─────────────────────────────────────────────────────────────────────────────
-# STEP 6 — Model artifacts (đã có trong git)
-# ─────────────────────────────────────────────────────────────────────────────
-info "STEP 6 — Model artifacts"
+# Lý do không cần CSV:
+#   - retrain_on_startup: false  → bot không train lại khi start
+#   - model pkl đã commit vào git (outputs/acc2_scalp_m1_model.pkl)
+#   - live bars lấy từ MT5 Bridge (http://host.docker.internal:5601)
+#   - CSV chỉ cần khi muốn train lại model từ đầu (scripts/acc2_scalp_m1_save_model.py)
+info "STEP 5 — Model artifacts"
 
 MODELS_OK=true
 for f in "outputs/acc2_scalp_m1_model.pkl" \
@@ -170,9 +113,9 @@ for f in "outputs/acc2_scalp_m1_model.pkl" \
 done
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 7 — Build Docker image
+# STEP 6 — Build Docker image
 # ─────────────────────────────────────────────────────────────────────────────
-info "STEP 7 — Build Docker image"
+info "STEP 6 — Build Docker image"
 
 case "$BOT_TARGET" in
   acc2) BUILD_SERVICES="live-scalp-acc2" ;;
@@ -185,9 +128,9 @@ $DOCKER_COMPOSE_CMD build $BUILD_SERVICES
 ok "Build xong"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 8 — Start bots
+# STEP 7 — Start bots
 # ─────────────────────────────────────────────────────────────────────────────
-info "STEP 8 — Start bots"
+info "STEP 7 — Start bots"
 
 $DOCKER_COMPOSE_CMD up -d $BUILD_SERVICES
 ok "Containers started"
