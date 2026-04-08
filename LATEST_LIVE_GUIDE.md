@@ -1,4 +1,4 @@
-﻿# Latest Live Guide
+# Latest Live Guide
 
 Last updated: `2026-04-08` — **M1 DualScalpM1** live bot (18/18 WF folds positive, ATH-proof)
 
@@ -244,7 +244,7 @@ RiskManager -> 0.3% sizing -> MT5 execute
 src/xauusd_ai/model/scalp_model.py          DualScalpModel + CalibratedDirModel
 src/xauusd_ai/features/scalp_features.py    50 SCALP_FEATURE_COLUMNS
 src/xauusd_ai/features/scalp_dataset.py     build_scalp_dataset()
-src/xauusd_ai/model/trainer.py              score_live_row: DualScalpM1 fast path
+src/xauusd_ai/model/trainer.py              score_live_row: DualScalpModel fast path
 src/xauusd_ai/features/dataset.py           build_live_feature_frame: scalp branch
 src/xauusd_ai/strategies/hybrid.py          trade_side override from DualScalpModel
 configs/live_acc2_scalp_m1.yaml             live config chinh
@@ -284,7 +284,6 @@ Repo:   https://github.com/bac25msa13227-star/Trade-Indicator.git
 
 | Commit | Nội dung |
 |--------|----------|
-| `eb255f6` | merge develop bug fixes: telegram multi-acct, news cache, market alerts, orchestrator |
 | `936bb99` | feat(scalp): M1 DualScalpM1 live — 18/18 WF positive, ATH-proof |
 | `02d0b87` | docs(guide): rewrite guide for WF PF3 v2 |
 | `21f20f6` | feat(wf-v2): lock pf3v2 configs + 324 passing tests |
