@@ -567,7 +567,95 @@ def prepare_training_dataset(settings: Settings, frames: dict[str, pd.DataFrame]
 
 
 def build_live_feature_frame(settings: Settings, frames: dict[str, pd.DataFrame], strategy) -> pd.DataFrame:
+    # ── DualScalpM1 fast path: build scalp features when model_type matches ──
+    import json
+    from pathlib import Path as _Path
+    try:
+        _meta_path = _Path(settings.app.model_meta_path)
+        if _meta_path.exists():
+            _meta = json.loads(_meta_path.read_text())
+            if _meta.get("model_type") == "DualScalpM1":
+                return _build_live_scalp_feature_frame(settings, frames)
+    except Exception:
+        pass
+    # ── Standard multi-timeframe path ────────────────────────────────────────
     merged = _merge_context(settings, frames)
     strategy_output = strategy.annotate_dataset(merged)
     dataset = merged.join(strategy_output)
     return dataset.dropna(subset=FEATURE_COLUMNS).reset_index(drop=True)
+
+
+def _build_live_scalp_feature_frame(settings: Settings, frames: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Build a live feature frame with SCALP_FEATURE_COLUMNS for DualScalpM1 model.
+
+    Pulls the execution (M1) frame, computes all scalp features, merges M5 context,
+    and fills required columns expected by HybridStrategy.build_trade_decision().
+    """
+    from xauusd_ai.features.scalp_features import build_all_scalp_features, SCALP_FEATURE_COLUMNS
+
+    exec_tf = settings.market.execution_timeframe  # "M1"
+    m1 = frames.get(exec_tf, frames.get("M1"))
+    if m1 is None or m1.empty:
+        raise ValueError(f"_build_live_scalp_feature_frame: '{exec_tf}' frame missing from fetch.")
+
+    m1 = m1.copy().reset_index(drop=True)
+
+    # Ensure required tick volume cols exist (default 0 if MT5 doesn't provide)
+    for col in ("tick_volume", "tick_volume_delta", "volume_imbalance"):
+        if col not in m1.columns:
+            m1[col] = 0.0
+
+    featured = build_all_scalp_features(m1)
+
+    # ── Merge M5 context (m5_bias, m5_rsi_14, m5_atr_norm) ────────────────
+    m5 = frames.get("M5")
+    if m5 is not None and not m5.empty:
+        m5 = m5.copy().sort_values("time").reset_index(drop=True)
+        from xauusd_ai.features.indicators import rsi as _rsi_ind, atr as _atr_ind
+        m5_rsi = _rsi_ind(m5["close"], 14).iloc[-1]
+        m5_atr_series = _atr_ind(m5, 14)
+        m5_atr = m5_atr_series.iloc[-1]
+        m5_atr_mean = m5_atr_series.rolling(50).mean().iloc[-1]
+        m5_bias = float(1 if m5["close"].iloc[-1] > m5["close"].rolling(20).mean().iloc[-1] else -1)
+        m5_atr_norm = float(m5_atr / m5_atr_mean) if m5_atr_mean and m5_atr_mean > 0 else 1.0
+        featured["m5_bias"]    = m5_bias
+        featured["m5_rsi_14"]  = float(m5_rsi)
+        featured["m5_atr_norm"] = m5_atr_norm
+    else:
+        featured["m5_bias"]    = 0.0
+        featured["m5_rsi_14"]  = 50.0
+        featured["m5_atr_norm"] = 1.0
+
+    # ── Compute ATR14 for SL/TP (used by RiskManager) ─────────────────────
+    from xauusd_ai.features.indicators import atr as _atr_ind2
+    featured["atr"] = _atr_ind2(featured, 14)
+
+    # ── Compute volatility_regime from ATR expansion ───────────────────────
+    atr5_norm = featured.get("atr5_norm_pct", featured["atr"] / featured["atr"].rolling(50).mean().fillna(1))
+    latest_atr_norm = float(atr5_norm.ffill().iloc[-1]) if not atr5_norm.empty else 1.0
+    if latest_atr_norm < float(settings.strategy.sideways_volatility_threshold) * 100:
+        vol_regime = 0  # sideways
+    elif latest_atr_norm > float(settings.strategy.strong_volatility_threshold) * 100:
+        vol_regime = 2  # volatile
+    else:
+        vol_regime = 1  # normal
+    featured["volatility_regime"] = vol_regime
+
+    # ── Strategy score: placeholder (all strategy gates are 0.0 in scalp config)
+    # Sign encodes tentative direction from momentum (overridden by trade_side in signal)
+    if "ema3_ema8_cross" in featured.columns:
+        featured["strategy_score"] = featured["ema3_ema8_cross"].fillna(0.0)
+    else:
+        featured["strategy_score"] = 0.0
+
+    # ── Required columns defaulted for compatibility ─────────────────────
+    for _col, _default in [
+        ("trend_alignment", 1),
+        ("news_is_blackout", 0),
+        ("news_impact_ahead", 0),
+        ("news_hours_ahead", 48.0),
+    ]:
+        if _col not in featured.columns:
+            featured[_col] = _default
+
+    return featured.dropna(subset=SCALP_FEATURE_COLUMNS[:5]).reset_index(drop=True)

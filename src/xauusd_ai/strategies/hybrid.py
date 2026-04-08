@@ -269,6 +269,9 @@ class HybridStrategy:
         stop_distance = atr_value * sl_mult if atr_value > 0 else 0.0
 
         hyp_side = "buy" if strategy_score >= 0 else "sell"
+        # ── DualScalpM1: use model's explicit trade_side if provided ──────────
+        if model_signal.get("trade_side"):
+            hyp_side = str(model_signal["trade_side"])
         if hyp_side == "buy":
             hyp_sl = entry - stop_distance if stop_distance > 0 else 0.0
             hyp_tp = entry + stop_distance * rr if stop_distance > 0 else 0.0

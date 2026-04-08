@@ -320,6 +320,52 @@ services:
       retries: 3
       start_period: 120s
 
+  # ── BACKEND: Live Trading — ACC2 M1 Scalp (DualScalpM1 model, 0.3% risk) ──
+  # 18-fold WF: 18/18 positive | ATH-proof | WR 52-56% | PF 1.71-2.12
+  # Lệnh: docker compose up live-scalp-acc2 -d
+  # First run: trains model (~4 min) then starts live loop.
+  live-scalp-acc2:
+    init: true
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    image: xauusd-backend:latest
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-trader}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trader_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-tradedb}
+      MLFLOW_TRACKING_URI: "file:///app/mlruns"
+      TRADING_ACCOUNT: acc2
+      MT5_BRIDGE_URL: "http://host.docker.internal:5601"
+    volumes:
+      - ./configs:/app/configs
+      - ./outputs:/app/outputs
+      - ./src:/app/src
+      - ./scripts:/app/scripts
+    restart: unless-stopped
+    command:
+      - bash
+      - -c
+      - |
+        set -e
+        cd /app
+        if [ ! -f outputs/acc2_scalp_m1_model.pkl ]; then
+          echo "=== Building DualScalpM1 model (first run) ==="
+          python scripts/acc2_scalp_m1_save_model.py
+        else
+          echo "=== Model pkl found — skipping retrain ==="
+        fi
+        echo "=== Starting M1 Scalp live bot ==="
+        exec python src/xauusd_ai/main.py live --config configs/live_acc2_scalp_m1.yaml
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import os,sys,time; sys.exit(0 if time.time()-os.stat('outputs/live_status_acc2.json').st_mtime<300 else 1)\""]
+      interval: 60s
+      timeout: 15s
+      retries: 5
+      start_period: 600s
+
   # ── BACKEND: Live Trading — ACC1 (aggressive, acc1_live_model.pkl) ───────
   # Lệnh: docker compose up live-acc1 -d
   live-acc1:
