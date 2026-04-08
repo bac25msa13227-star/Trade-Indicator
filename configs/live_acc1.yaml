@@ -25,7 +25,7 @@ market:
   symbol: XAUUSDm
   training_symbol: GC=F
   training_data_source: csv_folder
-  live_data_source: yfinance
+  live_data_source: mt5
   csv_folder_path: src/xauusd_ai/real_data
   csv_timeframe: M15
   higher_timeframe: D1
@@ -160,7 +160,7 @@ execution:
   magic_number: 20260325            # Unique for acc1
   comment: xauusd-ai-live-acc1-freeze
   paper_trade_max_loops: 0          # 0 = run continuously until manually stopped
-  paper_data_source: yfinance       # Paper test should follow live feed, not static CSV
+  paper_data_source: mt5             # Paper test should follow live feed, not static CSV
   close_opposite_on_signal: true
 
   trailing_sl:
@@ -258,11 +258,11 @@ admin:
   data_health:
     enabled: true
     alert_cooldown_seconds: 900
-    missing_bar_gap_factor: 1.8
+    missing_bar_gap_factor: 3.0
     stale_tick_alert_seconds: 300
     spread_spike_multiplier: 2.5
     spread_spike_abs_points: 1.5
     spread_lookback_bars: 50
-    bridge_feed_divergence_points: 1.5
+    bridge_feed_divergence_points: 80.0
     only_when_market_open: true
   regime_session_matrix_windows_days: [7, 30]

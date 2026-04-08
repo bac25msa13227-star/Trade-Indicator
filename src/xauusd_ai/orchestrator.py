@@ -1228,7 +1228,7 @@ def run_live_loop(settings: Settings) -> None:
         metrics["bar_gap_sec"] = round(bar_gap_sec, 2)
         metrics["expected_bar_gap_sec"] = expected_gap
         gap_factor = max(_safe_float(cfg.missing_bar_gap_factor, 1.8), 1.0)
-        if bar_gap_sec > expected_gap * gap_factor:
+        if bar_gap_sec > expected_gap * gap_factor and (market_is_open or not bool(cfg.only_when_market_open)):
             alerts.append(
                 {
                     "key": "missing_bars",
@@ -3024,10 +3024,9 @@ def run_live_loop(settings: Settings) -> None:
                         "original_volume": _safe_float(getattr(order_plan, "volume", 0.0), 0.0),
                         "effective_volume": _safe_float(getattr(order_plan, "volume", 0.0), 0.0),
                     }
-                    # ── Rebase entry/SL/TP về giá real-time từ MT5 bridge ──────────────────
-                    # Nguyên nhân lệch: live_data_source=yfinance có delay ~15 phút.
-                    # live_row["close"] = bear M5 bar ~15 phút trước → lệch 10-20 USD.
-                    # Fetch tick thật từ MT5 bridge TRƯỚC khi gửi Telegram để notification
+                    # ── Rebase entry/SL/TP về giá real-time MT5 tick ─────────────────────
+                    # live_row["close"] = giá đóng nến M5 trước đó (broker price).
+                    # Fetch tick thật từ MT5 TRƯỚC khi gửi Telegram để notification
                     # và lệnh thực tế khớp nhau.
                     try:
                         _rt_price = executor.get_current_price(order_plan.symbol, order_plan.side)
@@ -3043,7 +3042,7 @@ def run_live_loop(settings: Settings) -> None:
                                     _rebased_sl = round(_rt_price - _sl_dist, 2)
                                     _rebased_tp = round(_rt_price + _tp_dist, 2)
                                 LOGGER.info(
-                                    "Price rebase: yfinance=%.2f → mt5_tick=%.2f (offset=%.2f) | "
+                                    "Price rebase: bar_close=%.2f → mt5_tick=%.2f (offset=%.2f) | "
                                     "SL %.2f→%.2f TP %.2f→%.2f",
                                     order_plan.entry_price, _rt_price, _offset,
                                     order_plan.stop_loss, _rebased_sl,
@@ -3061,7 +3060,7 @@ def run_live_loop(settings: Settings) -> None:
                                     reason=order_plan.reason,
                                 )
                     except Exception as _rebase_err:
-                        LOGGER.warning("Price rebase failed (using yfinance price): %s", _rebase_err)
+                        LOGGER.warning("Price rebase failed (using bar close price): %s", _rebase_err)
 
                     try:
                         order_plan, _canary_report = _apply_canary_volume(order_plan)

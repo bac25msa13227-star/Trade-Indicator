@@ -268,7 +268,9 @@ def _apply_live_config_overrides() -> None:
                 "model_binding_mismatch": mismatches,
                 "threshold_config": model_threshold_cfg,
                 "risk_min_confidence": risk_threshold,
-                "threshold_effective_config": max(model_threshold_cfg, risk_threshold),
+                # threshold_effective = strategy.signal_threshold (the ML gate).
+                # risk.min_confidence is a separate execution guard, not the signal threshold.
+                "threshold_effective_config": model_threshold_cfg,
                 "sideway_min_confidence": float(settings.strategy.sideway_min_confidence),
                 "volatile_min_confidence": float(settings.strategy.volatile_min_confidence),
                 "min_strategy_score": float(settings.strategy.min_strategy_score),
@@ -1118,7 +1120,8 @@ _DASHBOARD_CACHE_TTL = 30.0  # seconds — longer than build time to avoid thras
 _FF_NEWS_WEEK_URL  = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 _FF_NEWS_MONTH_URL = "https://nfs.faireconomy.media/ff_calendar_thismonth.json"
 _NEWS_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; XAUBot/1.0)"}
-_NEWS_CACHE_TTL = 300.0   # 5 min in-memory cache for news
+_NEWS_CACHE_TTL = 300.0   # 5 min default — short enough to catch actuals, avoids FF 429
+_NEWS_CACHE_TTL_POST_EVENT = 60.0  # reduce to 1 min for 10 min after an event fires
 
 _NEWS_GOLD_DIR: dict[str, int] = {
     "Non-Farm Payroll": -1, "Nonfarm Payrolls": -1, "NF Payrolls": -1,
@@ -1183,7 +1186,8 @@ def _compute_gold_impact(title: str, actual: str, forecast: str, previous: str, 
     act_f  = _parse_news_num(actual)
     for_f  = _parse_news_num(forecast)
     prev_f = _parse_news_num(previous)
-    released = act_f is not None
+    # released = any non-empty actual string (not just numeric — e.g. "RBNZ Rate Statement" has text actual)
+    released = bool(actual.strip())
 
     if not released:
         if base > 0:
@@ -1238,19 +1242,29 @@ _news_cache_ts: float = 0.0
 _news_cache_lock = _threading.Lock()
 # Track sent Telegram alerts: "{event_id}_{milestone}"
 _news_alerted: set[str] = set()
+_news_last_event_ts: float = 0.0  # monotonic time when last _past fired (shorter TTL window)
 
 
 def _build_news_payload() -> dict[str, Any]:
-    """Return news calendar (5-min in-memory cache)."""
+    """Return news calendar with adaptive-TTL cache (shorter for 10 min after event fires)."""
     global _news_cache, _news_cache_ts
     now = time.monotonic()
+    # Use short TTL for 10 min after any event just-fired (_past branch)
+    effective_ttl = (
+        _NEWS_CACHE_TTL_POST_EVENT if now - _news_last_event_ts < 600
+        else _NEWS_CACHE_TTL
+    )
     with _news_cache_lock:
-        if _news_cache and now - _news_cache_ts < _NEWS_CACHE_TTL:
+        if _news_cache and now - _news_cache_ts < effective_ttl:
             return _news_cache
         result = _fetch_news_uncached()
-        _news_cache = result
-        _news_cache_ts = now
-        return result
+        # Only replace cache if we got real data — don't overwrite with empty (FF rate-limit / timeout)
+        if result.get("week"):
+            _news_cache = result
+            _news_cache_ts = now
+        elif not _news_cache:
+            _news_cache = result  # no prior cache at all — store even if empty
+        return _news_cache
 
 
 def _fetch_news_uncached() -> dict[str, Any]:
@@ -1265,6 +1279,9 @@ def _fetch_news_uncached() -> dict[str, Any]:
     for url in [_FF_NEWS_WEEK_URL, _FF_NEWS_MONTH_URL]:
         try:
             r = _req.get(url, headers=_NEWS_HEADERS, timeout=15)
+            if r.status_code == 429:
+                logger.warning("ForexFactory rate-limited (429) — keeping stale cache")
+                break  # don't try fallback URL, just keep existing cache
             r.raise_for_status()
             data = r.json()
             if isinstance(data, list) and data:
@@ -1466,8 +1483,15 @@ def _build_dashboard_payload_uncached() -> dict:
         model_threshold = meta.get("threshold") or meta.get("decision_threshold")
         config_threshold = runtime_cfg.get("threshold_config")
         risk_min_conf = runtime_cfg.get("risk_min_confidence")
-        threshold_candidates = [v for v in (model_threshold, risk_min_conf) if isinstance(v, (int, float))]
-        threshold_effective = max(threshold_candidates) if threshold_candidates else None
+        # threshold_effective_config = strategy.signal_threshold (set in _apply_live_config_overrides).
+        # This is the ML signal gate: ACC1=0.62, ACC2=0.76 per LATEST_LIVE_GUIDE.md.
+        threshold_eff_cfg = runtime_cfg.get("threshold_effective_config")
+        threshold_candidates = [v for v in (model_threshold, config_threshold, risk_min_conf) if isinstance(v, (int, float))]
+        threshold_effective = (
+            float(threshold_eff_cfg)
+            if isinstance(threshold_eff_cfg, (int, float))
+            else (max(threshold_candidates) if threshold_candidates else None)
+        )
 
         accounts[acct] = {
             "label":   cfg["label"],
@@ -1869,27 +1893,37 @@ async def serve_dashboard() -> FileResponse:
 # ── Telegram news alerter ─────────────────────────────────────────────────────
 
 def _tg_news_send(text: str) -> None:
-    """Send Telegram message for news alerts (tolerates missing credentials)."""
+    """Send Telegram news alert to ALL configured accounts."""
     import requests as _req
-    token   = os.getenv("TELEGRAM_BOT_TOKEN_ACC2") or os.getenv("TELEGRAM_BOT_TOKEN", "")
-    chat_id = os.getenv("TELEGRAM_CHAT_ID_ACC2")   or os.getenv("TELEGRAM_CHAT_ID", "")
-    if not token or not chat_id:
-        return
-    try:
-        resp = _req.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
-            timeout=10,
-        )
-        if not resp.ok:
-            # Retry without HTML parse mode
-            _req.post(
+    # Collect (token, chat_id) pairs for every account in _LIVE_CFG_MAP
+    sent_tokens: set[str] = set()
+    for acct, cfg_path in _LIVE_CFG_MAP.items():
+        try:
+            s = load_settings(cfg_path)
+            token   = os.getenv(s.integrations.telegram.token_env, "")
+            chat_id = os.getenv(s.integrations.telegram.chat_id_env, "")
+        except Exception:
+            continue
+        if not token or not chat_id:
+            continue
+        # Avoid duplicate sends when two accounts share the same bot token
+        if token in sent_tokens:
+            continue
+        sent_tokens.add(token)
+        try:
+            resp = _req.post(
                 f"https://api.telegram.org/bot{token}/sendMessage",
-                json={"chat_id": chat_id, "text": text},
+                json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
                 timeout=10,
             )
-    except Exception as exc:
-        logger.debug("Telegram news alert send error: %s", exc)
+            if not resp.ok:
+                _req.post(
+                    f"https://api.telegram.org/bot{token}/sendMessage",
+                    json={"chat_id": chat_id, "text": text},
+                    timeout=10,
+                )
+        except Exception as exc:
+            logger.debug("Telegram news alert send error (%s): %s", acct, exc)
 
 
 def _tg_send_account(account: str, text: str) -> bool:
@@ -1932,6 +1966,7 @@ def _tg_send_account(account: str, text: str) -> bool:
 
 async def _news_alert_loop() -> None:
     """Background task: check every 60s and alert upcoming / just-released news."""
+    global _news_last_event_ts
     await asyncio.sleep(30)   # short delay after startup
     while True:
         try:
@@ -1944,24 +1979,47 @@ async def _news_alert_loop() -> None:
                 mins  = ev["minutes_until"]
                 rel   = ev["released"]
 
+                # ── Released with actual data ────────────────────────────────
                 if rel:
                     key = f"{eid}_released"
                     if key not in _news_alerted:
                         _news_alerted.add(key)
+                        _news_alerted.discard(f"{eid}_past")  # drop preliminary key
                         actual   = ev.get("actual")   or "—"
                         forecast = ev.get("forecast") or "—"
                         previous = ev.get("previous") or "—"
                         label    = ev.get("gold_label", "")
+                        icon     = "🔴" if ev["impact"] == "High" else "🟡"
                         msg = (
-                            f"📊 <b>{ev['event']}</b> — Đã phát hành!\n"
-                            f"🕐 {ev['time_utc']} UTC ({ev['date']})\n"
-                            f"⬅️ Trước: <b>{previous}</b> &nbsp; 🎯 Dự báo: <b>{forecast}</b> &nbsp; ✅ Thực tế: <b>{actual}</b>\n"
+                            f"📊 {icon} <b>{ev['event']}</b> — Đã phát hành!\n"
+                            f"📰 ({ev['currency']}) 🕐 {ev['time_utc']} UTC\n"
+                            f"⬅️ Trước: <b>{previous}</b>  🎯 Dự báo: <b>{forecast}</b>  ✅ Thực tế: <b>{actual}</b>\n"
                             f"🏅 Vàng: {label}"
                         )
                         await loop.run_in_executor(None, _tg_news_send, msg)
 
+                # ── Just passed — fire immediately even without actual ────────
+                elif -120 < mins <= 0:
+                    key = f"{eid}_past"
+                    if key not in _news_alerted:
+                        _news_alerted.add(key)
+                        _news_last_event_ts = time.monotonic()  # shorten cache TTL for next 10 min
+                        forecast = ev.get("forecast") or "—"
+                        previous = ev.get("previous") or "—"
+                        label    = ev.get("gold_label", "")
+                        icon     = "🔴" if ev["impact"] == "High" else "🟡"
+                        msg = (
+                            f"{icon} <b>{ev['event']}</b> — Vừa phát hành!\n"
+                            f"📰 ({ev['currency']}) 🕐 {ev['time_utc']} UTC\n"
+                            f"🎯 Dự báo: <b>{forecast}</b>  ⬅️ Trước: <b>{previous}</b>\n"
+                            f"⏳ Đang chờ số liệu thực tế từ ForexFactory...\n"
+                            f"💡 {label}"
+                        )
+                        await loop.run_in_executor(None, _tg_news_send, msg)
+
+                # ── Upcoming — T-30, T-20, T-10, T-5 ────────────────────────
                 elif 0 < mins <= 32:
-                    for milestone, milestone_lbl in [(30, "30 phút"), (5, "5 phút")]:
+                    for milestone, milestone_lbl in [(30, "30 phút"), (20, "20 phút"), (10, "10 phút"), (5, "5 phút")]:
                         if mins <= (milestone + 2):
                             key = f"{eid}_{milestone}min"
                             if key not in _news_alerted:
@@ -1974,7 +2032,7 @@ async def _news_alert_loop() -> None:
                                     f"{icon} <b>Tin {ev['impact']} sắp ra — {milestone_lbl} nữa!</b>\n"
                                     f"📰 <b>{ev['event']}</b> ({ev['currency']})\n"
                                     f"🕐 {ev['time_utc']} UTC\n"
-                                    f"🎯 Dự báo: <b>{forecast}</b> &nbsp; ⬅️ Trước: <b>{previous}</b>\n"
+                                    f"🎯 Dự báo: <b>{forecast}</b>  ⬅️ Trước: <b>{previous}</b>\n"
                                     f"💡 {label}"
                                 )
                                 await loop.run_in_executor(None, _tg_news_send, msg)
