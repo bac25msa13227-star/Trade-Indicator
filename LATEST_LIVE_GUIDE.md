@@ -1,6 +1,6 @@
 # Latest Live Guide
 
-Last updated: `2026-04-08` — **M1 DualScalpM1** live bot (18/18 WF folds positive, ATH-proof)
+Last updated: `2026-04-09` — **M1 DualScalpModel** live bot (18/18 WF folds positive, ATH-proof)
 
 ---
 
@@ -10,7 +10,7 @@ Last updated: `2026-04-08` — **M1 DualScalpM1** live bot (18/18 WF folds posit
 |---|---|---|
 | Service | `live-scalp-acc2` | `live-acc1` |
 | Config | `configs/live_acc2_scalp_m1.yaml` | `configs/live_acc1.yaml` |
-| Model | `DualScalpM1` (BUY+SELL độc lập) | HistGBDT + isotonic calibrator |
+| Model | `DualScalpModel` (BUY+SELL độc lập) | HistGBDT + isotonic calibrator |
 | Timeframe | M1 | M5 |
 | Risk/trade | **0.3%** | 0.07% |
 | WR | 52–56% | 76% |
@@ -159,7 +159,7 @@ docker compose build live-scalp-acc2
 docker compose up live-scalp-acc2 -d
 ```
 
-- **Lần đầu**: tự train DualScalpM1 (~4 phút) rồi start live loop
+- **Lần đầu**: tự train DualScalpModel (~4 phút) rồi start live loop
 - **Lần sau**: pkl có sẵn trong `outputs/` → skip train, start ngay
 
 ### Bước 6 — Kiểm tra
@@ -191,7 +191,7 @@ docker compose up live-scalp-acc2 -d
 
 ---
 
-## Kiến trúc kỹ thuật — DualScalpM1
+## Kiến trúc kỹ thuật — DualScalpModel
 
 ### Luồng inference (production)
 
