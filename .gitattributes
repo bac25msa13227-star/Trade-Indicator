@@ -1,3 +1,2 @@
 outputs/*.pkl filter=lfs diff=lfs merge=lfs -text
-outputs/model2_weekly500.pkl filter=lfs diff=lfs merge=lfs -text
-outputs/*.pkl.bak filter=lfs diff=lfs merge=lfs -text
+
