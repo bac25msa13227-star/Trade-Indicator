@@ -380,6 +380,11 @@ class ModelTrainer:
         return frame
 
     def score_live_row(self, live_frame: pd.DataFrame) -> dict[str, float]:
+        # ── DualScalpModel path: direction-aware BUY/SELL routing ──────────────
+        from xauusd_ai.model.scalp_model import DualScalpModel as _DualScalpModel
+        if isinstance(self.model, _DualScalpModel):
+            return self._score_dual_scalp_row(live_frame)
+        # ── Standard single-model path ───────────────────────────────────────
         latest = self._aligned_feature_frame(live_frame.iloc[[-1]])
         x_scaled = self.scaler.transform(latest)
         x_sel = self._apply_feature_mask(x_scaled)
@@ -390,6 +395,33 @@ class ModelTrainer:
         prediction = int(probability >= self.decision_threshold)
         margin = probability - self.decision_threshold
         return {"probability": probability, "prediction": prediction, "margin": margin}
+
+    def _score_dual_scalp_row(self, live_frame: pd.DataFrame) -> dict[str, float]:
+        """Inference for DualScalpModel: compute direction, route to buy/sell sub-model."""
+        from xauusd_ai.features.scalp_dataset import _compute_direction
+        row = live_frame.iloc[[-1]].copy()
+        direction = int(_compute_direction(row).iloc[0])
+        feat_cols = self.model.feature_columns
+        for c in feat_cols:
+            if c not in row.columns:
+                row[c] = 0.0
+        X = row[feat_cols].fillna(0.0).values
+        if direction == 1:
+            prob = float(self.model.score_buy(X)[0])
+            thr = self.model.thr_buy
+            trade_side = "buy"
+        else:
+            prob = float(self.model.score_sell(X)[0])
+            thr = self.model.thr_sell
+            trade_side = "sell"
+        prediction = int(prob >= thr)
+        margin = prob - thr
+        return {
+            "probability": prob,
+            "prediction": prediction,
+            "margin": margin,
+            "trade_side": trade_side,
+        }
 
     def train_with_loss_weights(
         self,
