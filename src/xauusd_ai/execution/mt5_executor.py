@@ -172,7 +172,7 @@ class MT5Executor:
     def get_current_price(self, symbol: str, side: str) -> float:
         """
         Lấy giá thị trường real-time từ MT5: ask cho BUY, bid cho SELL.
-        Dùng để rebase entry/SL/TP từ giá yfinance (delay ~15 phút) sang giá thật
+        Dùng để rebase entry/SL/TP từ giá bar close sang giá tick hiện tại
         trước khi gửi Telegram notification và đặt lệnh.
         """
         try:
@@ -551,7 +551,7 @@ class MT5Executor:
         price = tick.ask if plan.side == "buy" else tick.bid
 
         # Re-anchor SL/TP về giá fill thực tế (giống mt5_bridge)
-        # Tránh sai lệch khi entry_price từ yfinance lệch xa giá fill 10-20 USD
+        # Tránh sai lệch khi entry_price từ bar close lệch xa giá fill thực tế
         if plan.entry_price and plan.entry_price > 0 and plan.stop_loss and plan.take_profit:
             _sl_dist = abs(plan.entry_price - plan.stop_loss)
             _tp_dist = abs(plan.take_profit - plan.entry_price)

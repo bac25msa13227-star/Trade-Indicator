@@ -323,6 +323,10 @@ class ModelTrainer:
         try:
             with open(str(model_path), "rb") as file_handle:
                 self.model = pickle.load(file_handle)
+            # Patch sklearn version-mismatch: HistGradientBoosting models trained with
+            # sklearn <1.4 don't have _preprocessor; add it to prevent AttributeError.
+            if not hasattr(self.model, "_preprocessor"):
+                self.model._preprocessor = None
             with open(str(scaler_path), "rb") as file_handle:
                 self.scaler = pickle.load(file_handle)
         except (AttributeError, ModuleNotFoundError, ImportError, Exception) as _pkl_err:
@@ -376,14 +380,6 @@ class ModelTrainer:
         return frame
 
     def score_live_row(self, live_frame: pd.DataFrame) -> dict[str, float]:
-        # ── DualScalpM1 fast path ─────────────────────────────────────────────
-        try:
-            from xauusd_ai.model.scalp_model import DualScalpModel
-            if isinstance(self.model, DualScalpModel):
-                return self._score_live_scalp(live_frame)
-        except ImportError:
-            pass
-        # ── Standard path ─────────────────────────────────────────────────────
         latest = self._aligned_feature_frame(live_frame.iloc[[-1]])
         x_scaled = self.scaler.transform(latest)
         x_sel = self._apply_feature_mask(x_scaled)
@@ -394,60 +390,6 @@ class ModelTrainer:
         prediction = int(probability >= self.decision_threshold)
         margin = probability - self.decision_threshold
         return {"probability": probability, "prediction": prediction, "margin": margin}
-
-    def _score_live_scalp(self, live_frame: pd.DataFrame) -> dict[str, float]:
-        """Score a live row using DualScalpM1 model.
-        live_frame must have SCALP_FEATURE_COLUMNS (from _build_live_scalp_feature_frame).
-        Returns signal compatible with strategy.build_trade_decision().
-        """
-        from xauusd_ai.features.scalp_features import SCALP_FEATURE_COLUMNS
-        dual = self.model
-        thr_buy  = float(getattr(dual, "thr_buy",  0.58))
-        thr_sell = float(getattr(dual, "thr_sell", 0.55))
-
-        latest_row = live_frame.iloc[-1]
-        missing = [c for c in SCALP_FEATURE_COLUMNS if c not in latest_row.index]
-        if missing:
-            import logging as _log
-            _log.getLogger(__name__).warning(
-                "_score_live_scalp: %d scalp features missing in live_frame (first 5: %s). "
-                "Returning no-signal.", len(missing), missing[:5])
-            return {"probability": 0.0, "prediction": 0, "margin": -1.0, "trade_side": None}
-
-        X = np.array([latest_row[c] for c in SCALP_FEATURE_COLUMNS], dtype=float).reshape(1, -1)
-        np.nan_to_num(X, copy=False)
-
-        p_buy  = 0.0
-        p_sell = 0.0
-        if dual.buy_model is not None:
-            p_buy = float(dual.buy_model.predict_proba(X)[0])
-        if dual.sell_model is not None:
-            p_sell = float(dual.sell_model.predict_proba(X)[0])
-
-        buy_fires  = p_buy  >= thr_buy
-        sell_fires = p_sell >= thr_sell
-
-        if buy_fires and sell_fires:
-            # Both fire — prefer stronger signal
-            if p_buy >= p_sell:
-                trade_side, prob = "buy",  p_buy
-            else:
-                trade_side, prob = "sell", p_sell
-        elif buy_fires:
-            trade_side, prob = "buy",  p_buy
-        elif sell_fires:
-            trade_side, prob = "sell", p_sell
-        else:
-            trade_side, prob = None, max(p_buy, p_sell)
-
-        prediction = 1 if trade_side is not None else 0
-        margin = prob - self.decision_threshold
-        return {
-            "probability": prob,
-            "prediction":  prediction,
-            "margin":      margin,
-            "trade_side":  trade_side,
-        }
 
     def train_with_loss_weights(
         self,

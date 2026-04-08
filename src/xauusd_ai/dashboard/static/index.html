@@ -1680,7 +1680,8 @@ function renderTrading(acct,d){
   const stratStrength=(stratScore==null?'No data':(Math.abs(stratScore)>=0.35?'Strong':Math.abs(stratScore)>=0.1?'Medium':'Weak'));
   const cbOk=!day.killed&&!(day.cooldown_bars>0);
   const posOk=(s.open_positions??0)<(s.max_positions??99);
-  const riskOk=cbOk&&posOk;
+  const riskConfOk=thrRisk==null||conf==null||conf>=thrRisk;
+  const riskOk=cbOk&&posOk&&riskConfOk;
   const quality=computeTradeQualityScore({
     timeFilterPass,
     volatilityRegime:vr,
@@ -1711,8 +1712,8 @@ function renderTrading(acct,d){
     [vrOk,           stepCard('&#127754;','Volatility',`<span class="vol-${Math.min(Math.max(vr,0),3)}">${vr>=0?vrNames[vr]:'-'}</span>`,vrOk,vr===0?'Low — caution':vr===2?'High ATR':vr===3?'Extreme':'')],
     [stratOk,        stepCard('&#128202;','Strategy',stratScore!=null?`<span class="${stratScore>0?'win':stratScore<0?'loss':'dim'}">${signed(stratScore,2)}</span>`:'&#8212;',stratOk,(stratScore!=null&&stratRequiredMin!=null)?`|score|=${Math.abs(stratScore).toFixed(2)} / min=${stratRequiredMin.toFixed(2)} (${stratStrength})`:stratStrength)],
     [confPass,       stepCard('&#129302;','ML Model',`${fmt(conf,4)}<br><span style="font-size:.6rem;color:var(--text3)">/ ${fmt(thr,4)}</span>`,confPass,confPass?'Above threshold':'Below threshold')],
-    [riskOk,         stepCard('&#128737;','Risk Guard',cbOk?`<span class="bdg bdg-ok">Clear</span>`:`<span class="bdg bdg-warn">${day.killed?'Killed':'Cooldown'}</span>`,riskOk,`Pos ${s.open_positions??0}/${s.max_positions??'?'} &#183; ${day.consecutive_losses||0} losses`)],
-    [s.should_trade, stepCard('&#9989;','Decision',s.should_trade?`<span style="color:${s.side?.toLowerCase()==='buy'?'var(--green)':'var(--red)'};font-size:.9rem;font-weight:900">${s.side?.toLowerCase()==='buy'?'&#9650;':'&#9660;'} ${(s.side||'').toUpperCase()}</span>`:`<span class="dim">BLOCKED</span>`,s.should_trade,'')]
+    [riskOk,         stepCard('&#128737;','Risk Guard',cbOk&&riskConfOk?`<span class="bdg bdg-ok">Clear</span>`:`<span class="bdg bdg-warn">${day.killed?'Killed':(!riskConfOk?'Conf gate':'Cooldown')}</span>`,riskOk,`Pos ${s.open_positions??0}/${s.max_positions??'?'} &#183; ${day.consecutive_losses||0} losses`+(!riskConfOk&&thrRisk!=null?` &#183; &#9888; conf ${fmt(conf,3)} &lt; risk.min_conf ${fmt(thrRisk,2)}`:''))],
+    [s.should_trade, stepCard('&#9989;','Decision',s.should_trade?`<span style="color:${s.side?.toLowerCase()==='buy'?'var(--green)':'var(--red)'};font-size:.9rem;font-weight:900">${s.side?.toLowerCase()==='buy'?'&#9650;':'&#9660;'} ${(s.side||'').toUpperCase()}</span>`:`<span class="dim">BLOCKED</span>`,s.should_trade,s.should_trade?`${(s.side||'').toUpperCase()} order ready`:(s.reason?`&#9888; ${(s.reason||'').length>70?(s.reason||'').slice(0,70)+'&#8230;':s.reason}`:'No entry condition met'))]
   ];
 
   const flowHTML=steps.map(([pass,card],i)=>`<div class="step-w">${card}${i<steps.length-1?stepArr(pass):''}</div>`).join('');
@@ -1847,8 +1848,8 @@ function renderTrading(acct,d){
         <div class="q-step"><div class="q-step-k">Volatility</div><div class="q-step-v">${quality.points.volatility}/10</div><div class="q-step-s">${vr>=0?vrNames[vr]:'Unknown'}</div></div>
         <div class="q-step"><div class="q-step-k">Strategy</div><div class="q-step-v">${quality.points.strategy}/25</div><div class="q-step-s">|S| ${fmt(Math.abs(stratScore??0),2)} / ${fmt(stratRequiredMin,2)}</div></div>
         <div class="q-step"><div class="q-step-k">ML Model</div><div class="q-step-v">${quality.points.ml}/20</div><div class="q-step-s">${fmt(conf,3)} vs ${fmt(thr,3)}</div></div>
-        <div class="q-step"><div class="q-step-k">Risk Guard</div><div class="q-step-v">${quality.points.risk}/15</div><div class="q-step-s">${riskOk?'Clear':'Restricted'}</div></div>
-        <div class="q-step"><div class="q-step-k">Decision</div><div class="q-step-v">${quality.points.decision}/15</div><div class="q-step-s">${s.should_trade?'Entry allowed':'No entry'}</div></div>
+        <div class="q-step"><div class="q-step-k">Risk Guard</div><div class="q-step-v">${quality.points.risk}/15</div><div class="q-step-s">${riskOk?'Clear':(!riskConfOk?`conf&lt;${fmt(thrRisk,2)}`:day.killed?'Killed':'Cooldown')}</div></div>
+        <div class="q-step"><div class="q-step-k">Decision</div><div class="q-step-v">${quality.points.decision}/15</div><div class="q-step-s">${s.should_trade?'Entry allowed':(s.reason?((s.reason||'').length>25?(s.reason||'').slice(0,25)+'…':s.reason):'No entry')}</div></div>
       </div>
     </div>
   </div>

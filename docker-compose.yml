@@ -228,10 +228,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-trader}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trader_secret}
       POSTGRES_DB: ${POSTGRES_DB:-tradedb}
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
-      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_TRACKING_URI: "file:///app/mlruns"
     volumes:
       - ./configs:/app/configs
       - ./outputs:/app/outputs
@@ -320,8 +317,7 @@ services:
       retries: 3
       start_period: 120s
 
-  # ── BACKEND: Live Trading — ACC2 M1 Scalp (DualScalpM1 model, 0.3% risk) ──
-  # 18-fold WF: 18/18 positive | ATH-proof | WR 52-56% | PF 1.71-2.12
+  # ── BACKEND: M1 Scalp Bot — ACC2 (DualScalpM1, live-scalp-acc2) ──────────
   # Lệnh: docker compose up live-scalp-acc2 -d
   # First run: trains model (~4 min) then starts live loop.
   live-scalp-acc2:

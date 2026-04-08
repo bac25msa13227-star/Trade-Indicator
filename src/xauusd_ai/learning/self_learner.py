@@ -253,6 +253,33 @@ class SelfLearner:
             LOGGER.error("SelfLearner.maybe_retrain error: %s", exc, exc_info=True)
             return None
 
+    def fetch_fresh_mt5(self, timeframe: str = "M15") -> pd.DataFrame:
+        """
+        Fetch data mới nhất từ MT5 broker trực tiếp.
+        Dùng khi live_data_source=mt5 thay thế yfinance.
+        """
+        try:
+            from xauusd_ai.data.market_data import MarketDataService
+            _svc = MarketDataService(self.settings)
+            max_bars = self._MAX_CACHE_BARS.get(timeframe, 10_000)
+            frame = _svc._fetch_rates_mt5(timeframe, max_bars)
+            if not frame.empty:
+                LOGGER.info(
+                    "SelfLearner: fetched %d rows from MT5 (%s)",
+                    len(frame), timeframe,
+                )
+            return frame
+        except Exception as exc:
+            LOGGER.warning("SelfLearner: MT5 fetch failed (%s): %s", timeframe, exc)
+            return pd.DataFrame()
+
+    def fetch_fresh_data(self, timeframe: str = "M15") -> pd.DataFrame:
+        """Fetch fresh data using configured live_data_source (mt5 or yfinance)."""
+        src = getattr(self.settings.market, "live_data_source", "yfinance")
+        if src == "mt5":
+            return self.fetch_fresh_mt5(timeframe)
+        return self.fetch_fresh_yfinance(timeframe)
+
     def fetch_fresh_yfinance(self, timeframe: str = "M15") -> pd.DataFrame:
         """
         Cào data mới nhất từ yfinance (XAUUSD=X).
@@ -333,10 +360,10 @@ class SelfLearner:
                 merged[tf] = frame
             self._cached_frames[tf] = merged[tf]
 
-        # Mỗi 1 giờ cào thêm từ yfinance để bổ sung data mới nhất
+        # Mỗi 1 giờ cào thêm data mới nhất (MT5 hoặc yfinance theo live_data_source)
         exec_tf = self.settings.market.execution_timeframe
         if now - self._last_fetch_ts > 3600:
-            yf_frame = self.fetch_fresh_yfinance(exec_tf)
+            yf_frame = self.fetch_fresh_data(exec_tf)
             if not yf_frame.empty and exec_tf in merged:
                 combined = pd.concat([merged[exec_tf], yf_frame], ignore_index=True)
                 combined = (

@@ -6,8 +6,9 @@ account's live_status file has been updated recently. If the file is
 stale (> MAX_STALE_SECS) or missing, a Telegram alert is fired.
 When the bot comes back online, a recovery notification is sent.
 
-Also sends market session alerts 15 minutes before major Forex/Gold session
-opens and closes, repeating every 5 minutes (T-15, T-10, T-5).
+Also detects market open/close by reading market_is_open from the bot's
+live status JSON (which queries MT5 directly) — handles all holidays
+automatically without any hardcoded schedule.
 
 Environment variables (loaded from .env via docker-compose):
   TELEGRAM_BOT_TOKEN_ACC1  or  TELEGRAM_BOT_TOKEN
@@ -126,74 +127,141 @@ def _check_status(acct_id: str, cfg: dict, down_state: dict[str, bool]) -> None:
             LOGGER.debug("%s: OK — stale %ds", acct_id, int(stale_secs))
 
 
-# ── Market session events (UTC) ─────────────────────────────────────────────
-# Each entry: (display_name, hour_utc, minute_utc, event_type, weekdays)
-# weekdays: 0=Mon … 4=Fri, 6=Sun
-_MARKET_EVENTS = [
-    ("Tokyo Open",    0,  0, "open",  [0, 1, 2, 3, 6]),  # Mon-Thu + Sun (Sunday 22 UTC is Mon 00)
-    ("London Open",   8,  0, "open",  [0, 1, 2, 3, 4]),  # Mon-Fri
-    ("NY Open",      13,  0, "open",  [0, 1, 2, 3, 4]),  # Mon-Fri
-    ("London Close", 16,  0, "close", [0, 1, 2, 3, 4]),  # Mon-Fri
-    ("NY Close",     22,  0, "close", [0, 1, 2, 3, 4]),  # Mon-Fri (Friday = weekly close)
-]
-# Alert slots in minutes before event  (T-15, T-10, T-5)
-_ALERT_SLOTS_MIN = [15, 10, 5]
-# Match window: ±2.5 minutes around each slot so a 60s poll doesn't miss it
-_SLOT_TOLERANCE_MIN = 2.5
+# ── Market open/close detection ─────────────────────────────────────────────
+# Reads market_next_open_utc / market_next_close_utc from the bot's live status
+# JSON (which queries MT5 directly — handles all holidays automatically).
+# Fires alerts at T-1440min (24h ahead) and T-5min before each event.
+
+_MARKET_ALERT_SLOTS_MIN = [1440, 5]  # 24h and 5min before
+_MARKET_SLOT_TOLERANCE_MIN = 3.0     # ±3 min window so 60s poll never misses
 
 
-def _check_market_alerts(sent_state: dict) -> None:
-    """Send Telegram session open/close warnings. Fires at T-15, T-10, T-5 min."""
+def _read_status_data() -> dict | None:
+    """Return parsed JSON from the first available (fresh) status file."""
+    for cfg in ACCOUNTS.values():
+        p = OUTPUTS / cfg["status_file"]
+        if not p.exists():
+            continue
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            ts = datetime.fromisoformat(data["ts"]).astimezone(timezone.utc)
+            if (datetime.now(timezone.utc) - ts).total_seconds() > 600:
+                continue  # stale
+            return data
+        except Exception:
+            continue
+    return None
+
+
+def _check_market_state(state: dict) -> None:
+    """
+    Two behaviours in one function:
+
+    1. Advance alerts — fires at T-1440min (24h) and T-5min before the next
+       open or close, using the exact UTC time reported by MT5.
+
+    2. Transition alert — fires once when market_is_open flips, confirming
+       the actual open/close moment.
+    """
+    data = _read_status_data()
+    if data is None:
+        return
+
     now = datetime.now(timezone.utc)
-    weekday = now.weekday()  # 0=Mon … 6=Sun
 
-    for name, ev_hour, ev_min, ev_type, weekdays in _MARKET_EVENTS:
-        if weekday not in weekdays:
+    # ── 1. Advance alerts ────────────────────────────────────────────────────
+    for ev_type, key_utc in (("open", "market_next_open_utc"), ("close", "market_next_close_utc")):
+        raw = data.get(key_utc)
+        if not raw:
+            continue
+        try:
+            ev_time = datetime.fromisoformat(raw).astimezone(timezone.utc)
+        except Exception:
             continue
 
-        ev_time = now.replace(hour=ev_hour, minute=ev_min, second=0, microsecond=0)
-        # If event already passed today, skip
         minutes_to = (ev_time - now).total_seconds() / 60.0
         if minutes_to < 0:
             continue
 
-        for slot in _ALERT_SLOTS_MIN:
-            if not (slot - _SLOT_TOLERANCE_MIN <= minutes_to < slot + _SLOT_TOLERANCE_MIN):
+        for slot in _MARKET_ALERT_SLOTS_MIN:
+            if not (slot - _MARKET_SLOT_TOLERANCE_MIN <= minutes_to < slot + _MARKET_SLOT_TOLERANCE_MIN):
                 continue
+            sent_key = f"{ev_time.strftime('%Y-%m-%dT%H:%M')}_{ev_type}_{slot}"
+            if sent_key in state:
+                break
+            state[sent_key] = True
 
-            key = f"{now.strftime('%Y-%m-%d')}_{name}_{slot}"
-            if key in sent_state:
-                break  # already fired this slot
+            ev_vn = ev_time + timedelta(hours=7)
+            if ev_type == "open":
+                if slot >= 1440:
+                    msg = (
+                        f"📅 <b>Nhắc trước 24h — Sàn XAUUSD MỞ CỬA</b>\n"
+                        f"├ Thời gian: {ev_time.strftime('%d/%m/%Y %H:%M UTC')} "
+                        f"({ev_vn.strftime('%d/%m %H:%M +07')})\n"
+                        f"└ Chuẩn bị chiến lược cho phiên tới!"
+                    )
+                else:
+                    msg = (
+                        f"🟢 <b>Sàn XAUUSD sắp MỞ CỬA (~{slot} phút)</b>\n"
+                        f"├ Thời gian: {ev_time.strftime('%H:%M UTC')} "
+                        f"({ev_vn.strftime('%H:%M +07')})\n"
+                        f"└ Chuẩn bị vào lệnh!"
+                    )
+            else:
+                if slot >= 1440:
+                    msg = (
+                        f"📅 <b>Nhắc trước 24h — Sàn XAUUSD ĐÓNG CỬA</b>\n"
+                        f"├ Thời gian: {ev_time.strftime('%d/%m/%Y %H:%M UTC')} "
+                        f"({ev_vn.strftime('%d/%m %H:%M +07')})\n"
+                        f"└ Lên kế hoạch đóng vị thế trước khi sàn đóng!"
+                    )
+                else:
+                    msg = (
+                        f"🔴 <b>Sàn XAUUSD sắp ĐÓNG CỬA (~{slot} phút)</b>\n"
+                        f"├ Thời gian: {ev_time.strftime('%H:%M UTC')} "
+                        f"({ev_vn.strftime('%H:%M +07')})\n"
+                        f"└ Hãy kiểm tra và đóng vị thế nếu cần!"
+                    )
 
-            sent_state[key] = True
-            emoji = "🟢" if ev_type == "open" else "🔴"
-            ev_label = "MỞ CỬA" if ev_type == "open" else "ĐÓNG CỬA"
-            # Add "💎 Weekly market close" tag for Friday NY Close
-            suffix = ""
-            if ev_type == "close" and name == "NY Close" and weekday == 4:
-                suffix = "\n└⚠️ <b>Thị trường đóng cửa cuối tuần!</b>"
+            for cfg in ACCOUNTS.values():
+                if cfg["token_env"] and cfg["chat_id_env"]:
+                    _send_telegram(cfg["token_env"], cfg["chat_id_env"], msg)
+            LOGGER.info("Market advance alert: %s T-%dmin", ev_type, slot)
+            break
 
-            msg = (
-                f"{emoji} <b>Chuẩn bị — {name} {ev_label}</b>\n"
-                f"├ Giờ mở/đóng: {ev_time.strftime('%H:%M UTC')} "
-                f"({(ev_time + timedelta(hours=7)).strftime('%H:%M +07')})\n"
-                f"├ Còn lại: <b>~{slot} phút</b>\n"
-                f"└ Hãy kiểm tra vị thế đang mở!{suffix}"
-            )
-            # Broadcast to all accounts
-            for acct_id, cfg in ACCOUNTS.items():
-                token = cfg["token_env"]
-                chat_id = cfg["chat_id_env"]
-                if token and chat_id:
-                    _send_telegram(token, chat_id, msg)
-                    LOGGER.info("Market alert: %s T-%dmin → %s", name, slot, acct_id)
-            break  # one slot per event per loop
+    # ── 2. Transition alert ──────────────────────────────────────────────────
+    market_is_open: bool = bool(data.get("market_is_open", False))
+    prev = state.get("_is_open")
+    state["_is_open"] = market_is_open
+
+    if prev is None or market_is_open == prev:
+        return  # first run or no change
+
+    now_vn = now + timedelta(hours=7)
+    if market_is_open:
+        msg = (
+            f"🟢 <b>Sàn XAUUSD đã MỞ CỬA</b>\n"
+            f"├ Thời gian: {now.strftime('%H:%M UTC')} ({now_vn.strftime('%H:%M +07')})\n"
+            f"└ Thị trường đang hoạt động!"
+        )
+        LOGGER.info("Market OPENED at %s UTC", now.strftime("%H:%M"))
+    else:
+        msg = (
+            f"🔴 <b>Sàn XAUUSD đã ĐÓNG CỬA</b>\n"
+            f"├ Thời gian: {now.strftime('%H:%M UTC')} ({now_vn.strftime('%H:%M +07')})\n"
+            f"└ Thị trường tạm dừng giao dịch."
+        )
+        LOGGER.info("Market CLOSED at %s UTC", now.strftime("%H:%M"))
+
+    for cfg in ACCOUNTS.values():
+        if cfg["token_env"] and cfg["chat_id_env"]:
+            _send_telegram(cfg["token_env"], cfg["chat_id_env"], msg)
 
 
 def main() -> None:
     LOGGER.info("Healthwatch started — interval=%ds  max_stale=%ds", POLL_INTERVAL, MAX_STALE_SECS)
     down_state: dict[str, bool] = {acct_id: False for acct_id in ACCOUNTS}
-    market_alert_state: dict[str, bool] = {}  # tracks sent market alerts (key = date_event_slot)
+    market_state: dict = {}  # shared state for advance alerts + transition tracking
 
     # Send startup notification
     for acct_id, cfg in ACCOUNTS.items():
@@ -211,11 +279,10 @@ def main() -> None:
                 _check_status(acct_id, cfg, down_state)
             except Exception as exc:
                 LOGGER.error("Error checking %s: %s", acct_id, exc)
-        # Check market session alerts (T-15, T-10, T-5 before open/close)
         try:
-            _check_market_alerts(market_alert_state)
+            _check_market_state(market_state)
         except Exception as exc:
-            LOGGER.error("Error in market alerts: %s", exc)
+            LOGGER.error("Error in market state check: %s", exc)
         time.sleep(POLL_INTERVAL)
 
 
