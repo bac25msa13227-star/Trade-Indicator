@@ -4,7 +4,13 @@ __pycache__/
 *.pyc
 *.pyo
 .env
-outputs/
+outputs/*
+!outputs/acc1_scalp_m1_reversal_model.pkl
+!outputs/acc1_scalp_m1_reversal_scaler.pkl
+!outputs/acc1_scalp_m1_reversal_model_meta.json
+!outputs/acc2_scalp_m1_h10_setup_exit_model.pkl
+!outputs/acc2_scalp_m1_h10_setup_exit_scaler.pkl
+!outputs/acc2_scalp_m1_h10_setup_exit_model_meta.json
 
 # Cloudflare tunnel binary (large, OS-specific)
 cloudflared.exe

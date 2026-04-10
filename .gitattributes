@@ -1,2 +1,4 @@
-outputs/*.pkl filter=lfs diff=lfs merge=lfs -text
-
+outputs/acc1_scalp_m1_reversal_model.pkl filter=lfs diff=lfs merge=lfs -text
+outputs/acc1_scalp_m1_reversal_scaler.pkl filter=lfs diff=lfs merge=lfs -text
+outputs/acc2_scalp_m1_h10_setup_exit_model.pkl filter=lfs diff=lfs merge=lfs -text
+outputs/acc2_scalp_m1_h10_setup_exit_scaler.pkl filter=lfs diff=lfs merge=lfs -text
