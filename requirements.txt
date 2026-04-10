@@ -1,2 +1,2 @@
 -r requirements-core.txt
--r requirements-dashboard.txt
+-r requirements-infra.txt

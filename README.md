@@ -108,7 +108,7 @@ Notes:
 - Training and backtesting in Docker use Yahoo Finance by default, specifically `GC=F` gold futures as the closest widely available proxy feed.
 - `MetaTrader5` inside Docker often depends on host-specific terminal access. For live execution on macOS, the common practical pattern is to keep MT5 terminal running on Windows or a VPS and run this service there, or expose execution through a bridge service.
 - If you have a broker feed or CSV export for spot XAUUSD, replace the training source with that feed for closer alignment.
-- `trainer` and `live` now use a lighter core image. `dashboard` is built separately so `streamlit` does not slow every build.
+- The realtime dashboard is served directly by FastAPI at `/dashboard` with WebSocket updates. Streamlit is no longer used in this repository.
 
 ## Main commands
 
@@ -157,14 +157,15 @@ After running backtest, inspect these artifacts:
 
 ## Dashboard
 
-Run the lightweight dashboard with:
+Run the API and nginx services:
 
 ```bash
-docker compose build dashboard
-docker compose up dashboard
+docker compose up -d postgres api nginx
 ```
 
-Then open `http://localhost:8501`.
+Then open `http://localhost/dashboard` or `http://localhost:8000/dashboard`.
+
+For the exact live/runtime instructions on another machine, use `LATEST_LIVE_GUIDE.md` as the single source of truth.
 
 ## MT5 auto trade
 

@@ -64,19 +64,19 @@ except ImportError:
 _OUTPUTS = Path(os.getenv("OUTPUTS_PATH", "outputs"))
 _STATIC_DIR = Path(__file__).resolve().parent.parent / "dashboard" / "static"
 _LIVE_CFG_MAP: dict[str, Path] = {
-    "acc1": Path(os.getenv("ACC1_SETTINGS_PATH", "configs/live_acc1.yaml")),
-    "acc2": Path(os.getenv("ACC2_SETTINGS_PATH", "configs/live_acc2.yaml")),
+    "acc1": Path(os.getenv("ACC1_SETTINGS_PATH", "configs/live_acc1_scalp_m1.yaml")),
+    "acc2": Path(os.getenv("ACC2_SETTINGS_PATH", "configs/live_acc2_scalp_m1.yaml")),
 }
 _REQUIRED_MODEL_BINDINGS: dict[str, dict[str, str]] = {
     "acc1": {
-        "model": "outputs/acc1_expand_net127313_dd3215_model.pkl",
-        "scaler": "outputs/acc1_pf3v2_net815k_dd2891_scaler.pkl",
-        "meta": "outputs/acc1_pf3v2_net815k_dd2891_model_meta.json",
+        "model": "outputs/acc1_scalp_m1_reversal_model.pkl",
+        "scaler": "outputs/acc1_scalp_m1_reversal_scaler.pkl",
+        "meta": "outputs/acc1_scalp_m1_reversal_model_meta.json",
     },
     "acc2": {
-        "model": "outputs/acc2_expand_net35714_dd2281_model.pkl",
-        "scaler": "outputs/acc2_pf3v2_net63k_dd1864_scaler.pkl",
-        "meta": "outputs/acc2_pf3v2_net63k_dd1864_model_meta.json",
+        "model": "outputs/acc2_scalp_m1_h10_setup_exit_model.pkl",
+        "scaler": "outputs/acc2_scalp_m1_h10_setup_exit_scaler.pkl",
+        "meta": "outputs/acc2_scalp_m1_h10_setup_exit_model_meta.json",
     },
 }
 _BENCHMARK_VERIFY_FILE = Path(os.getenv("BENCHMARK_VERIFY_FILE", "outputs/wf_exact_recovery_verify_2016501.json"))
@@ -88,26 +88,26 @@ _ACCOUNT_CFG: dict[str, dict[str, str]] = {
     "acc1": {
         "label": "ACC1 · Live Profile",
         "status": "live_status_acc1.json",
-        "trades": "live_closed_trades_acc1.csv",
+        "trades": "live_closed_trades_acc1_scalp_m1.csv",
         "trades_fallback": "live_closed_trades.csv",
         "journal": "trade_journal_acc1.jsonl",
-        "signals": "paper_trade_signals_acc1.csv",
-        "meta": "acc1_live_model_meta.json",
-        "wf": "walkforward_report_acc1.json",
+        "signals": "paper_trade_signals_acc1_scalp_m1.csv",
+        "meta": "acc1_scalp_m1_reversal_model_meta.json",
+        "wf": "acc1_scalp_m1_reversal_walkforward_report.json",
         "bt": "backtest_report_acc1.json",
         "bt_trades": "backtest_trades_acc1.csv",
         "peak": "risk_peak_balance_acc1.json",
         "daily": "risk_daily_state_acc1.json",
     },
     "acc2": {
-        "label": "ACC2 · Live Profile",
+        "label": "ACC2 · Freeze Scalp M1",
         "status": "live_status_acc2.json",
-        "trades": "live_closed_trades_acc2.csv",
+        "trades": "live_closed_trades_acc2_scalp_m1.csv",
         "trades_fallback": "live_closed_trades_acc2.csv",
         "journal": "trade_journal_acc2.jsonl",
-        "signals": "paper_trade_signals_acc2.csv",
-        "meta": "acc2_live_model_meta.json",
-        "wf": "walkforward_report_acc2.json",
+        "signals": "paper_trade_signals_acc2_scalp_m1.csv",
+        "meta": "acc2_scalp_m1_h10_setup_exit_model_meta.json",
+        "wf": "acc2_scalp_m1_walkforward_report.json",
         "bt": "backtest_report_acc2.json",
         "bt_trades": "backtest_trades_acc2.csv",
         "peak": "risk_peak_balance_acc2.json",

@@ -97,12 +97,14 @@ if ($afCheck -eq "running") {
     Log "airflow-scheduler:  $afSch"
 }
 
-# ── Step 6: Start FastAPI ────────────────────────────────────────────────────
-Log "--- [6/6] Starting FastAPI ---"
-docker compose up -d api 2>&1 | ForEach-Object { Log $_ }
+# ── Step 6: Start API + WebSocket dashboard ─────────────────────────────────
+Log "--- [6/6] Starting API + nginx dashboard ---"
+docker compose up -d api nginx 2>&1 | ForEach-Object { Log $_ }
 Start-Sleep 8
 $apiStatus = docker inspect xauusd-api --format "{{.State.Status}}" 2>&1
 Log "api: $apiStatus"
+$nginxStatus = docker inspect xauusd-nginx --format "{{.State.Status}}" 2>&1
+Log "nginx: $nginxStatus"
 
 # ── Final status ─────────────────────────────────────────────────────────────
 Log ""
@@ -111,7 +113,8 @@ docker ps --format "{{.Names}}  {{.Status}}  {{.Ports}}" 2>&1 | ForEach-Object {
 
 Log ""
 Log "=== SERVICE URLS ==="
-Log "Streamlit Dashboard : http://localhost:8501"
+Log "Realtime Dashboard  : http://localhost/dashboard"
+Log "FastAPI Dashboard   : http://localhost:8000/dashboard"
 Log "FastAPI Swagger      : http://localhost:8000/docs"
 Log "MLflow UI            : http://localhost:5000"
 Log "MinIO Console        : http://localhost:9001  (user: minioadmin / minioadmin123)"

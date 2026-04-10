@@ -19,12 +19,6 @@ dependencies = [
   "python-dotenv>=1.0.1",
   "yfinance>=0.2.54",
 ]
-
-[project.optional-dependencies]
-dashboard = [
-  "streamlit>=1.41.1",
-]
-
 [tool.setuptools]
 package-dir = {"" = "src"}
 

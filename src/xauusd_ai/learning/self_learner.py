@@ -273,9 +273,31 @@ class SelfLearner:
             LOGGER.warning("SelfLearner: MT5 fetch failed (%s): %s", timeframe, exc)
             return pd.DataFrame()
 
+    def fetch_fresh_bridge(self, timeframe: str = "M15") -> pd.DataFrame:
+        """
+        Fetch data mới nhất từ MT5 Bridge.
+        Dùng khi live_data_source=bridge để live và self-learning cùng nhìn một nguồn.
+        """
+        try:
+            from xauusd_ai.data.market_data import MarketDataService
+            _svc = MarketDataService(self.settings)
+            max_bars = self._MAX_CACHE_BARS.get(timeframe, 10_000)
+            frame = _svc._fetch_rates_bridge(timeframe, max_bars)
+            if not frame.empty:
+                LOGGER.info(
+                    "SelfLearner: fetched %d rows from MT5 bridge (%s)",
+                    len(frame), timeframe,
+                )
+            return frame
+        except Exception as exc:
+            LOGGER.warning("SelfLearner: bridge fetch failed (%s): %s", timeframe, exc)
+            return pd.DataFrame()
+
     def fetch_fresh_data(self, timeframe: str = "M15") -> pd.DataFrame:
-        """Fetch fresh data using configured live_data_source (mt5 or yfinance)."""
+        """Fetch fresh data using configured live_data_source (bridge / mt5 / yfinance)."""
         src = getattr(self.settings.market, "live_data_source", "yfinance")
+        if src in {"bridge", "mt5_bridge"}:
+            return self.fetch_fresh_bridge(timeframe)
         if src == "mt5":
             return self.fetch_fresh_mt5(timeframe)
         return self.fetch_fresh_yfinance(timeframe)

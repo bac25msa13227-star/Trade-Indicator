@@ -81,11 +81,12 @@ if errorlevel 1 (
 for /f %%s in ('docker inspect xauusd-airflow-webserver --format "{{.State.Status}}" 2^>^&1') do call :log "  airflow-webserver: %%s"
 for /f %%s in ('docker inspect xauusd-airflow-scheduler --format "{{.State.Status}}" 2^>^&1') do call :log "  airflow-scheduler: %%s"
 
-REM ─── Step 6: FastAPI ────────────────────────────────────────────────────
-call :log "[6/6] Starting FastAPI..."
-docker compose up -d api
+REM ─── Step 6: API + nginx dashboard ──────────────────────────────────────
+call :log "[6/6] Starting API + nginx dashboard..."
+docker compose up -d api nginx
 timeout /t 8 /nobreak >nul
 for /f %%s in ('docker inspect xauusd-api --format "{{.State.Status}}" 2^>^&1') do call :log "  api: %%s"
+for /f %%s in ('docker inspect xauusd-nginx --format "{{.State.Status}}" 2^>^&1') do call :log "  nginx: %%s"
 
 REM ─── Final status ───────────────────────────────────────────────────────
 call :log ""
@@ -95,7 +96,8 @@ docker ps --format "  {{.Names}}  {{.Status}}" 2>&1 >> %LOG%
 
 call :log ""
 call :log "=== SERVICE URLS ==="
-call :log "  Streamlit   : http://localhost:8501"
+call :log "  Dashboard   : http://localhost/dashboard"
+call :log "  API Dash    : http://localhost:8000/dashboard"
 call :log "  FastAPI     : http://localhost:8000/docs"
 call :log "  MLflow      : http://localhost:5000"
 call :log "  MinIO UI    : http://localhost:9001  (minioadmin / minioadmin123)"

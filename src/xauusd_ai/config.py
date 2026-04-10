@@ -29,7 +29,7 @@ class AppSettings(StrictSettingsModel):
     live_learning_log_path: str = "outputs/live_learning_log.jsonl"
     live_closed_trades_path: str = "outputs/live_closed_trades.csv"
     dashboard_host: str = "0.0.0.0"
-    dashboard_port: int = 8501
+    dashboard_port: int = 8000
     log_level: str = "INFO"
 
 
@@ -173,6 +173,48 @@ class RiskSettings(StrictSettingsModel):
     # Strong volatile: SL rộng hơn (2.5× ATR), TP lớn hơn (RR 4.0) — cho giá chạy xa
     volatile_sl_atr_multiple: float = 2.5
     volatile_take_profit_rr: float = 4.0
+    # ── Live SL guards (optional, default off for backward compatibility) ─
+    # Enforce a minimum SL distance in price units (XAUUSD USD move).
+    # Example: 4.0 => SL always at least $4 away from entry.
+    min_stop_loss_points: float = 0.0
+    # Enforce SL >= ATR * this multiplier (acts as ATR floor).
+    # Example: 1.0 => never place SL tighter than 1x ATR.
+    min_stop_loss_atr_multiple: float = 0.0
+    # Expand SL automatically when volatility (atr_percentile) is elevated.
+    sl_volatility_boost_enabled: bool = False
+    # Start boosting when atr_percentile >= trigger (0..1).
+    sl_volatility_boost_trigger_percentile: float = 0.85
+    # Maximum multiplier applied to base SL at atr_percentile=1.0.
+    # Effective SL multiplier scales linearly from 1.0 (at trigger)
+    # to this value (at percentile 1.0).
+    sl_volatility_boost_max_multiplier: float = 1.0
+    # ── Hybrid dynamic SL/TP (model-driven + guardrails) ────────────────
+    dynamic_sltp_enabled: bool = False
+    # In backtest/WF, recompute SL/TP race from OHLC using dynamic params
+    # when high/low data are available in prediction rows.
+    dynamic_sltp_backtest_enabled: bool = False
+    # Blend score = confidence*w_conf + quality*w_quality
+    dynamic_sltp_confidence_weight: float = 0.7
+    dynamic_sltp_quality_weight: float = 0.3
+    # Scale factors around base regime params.
+    # combined>0.5 => TP farther, SL tighter ; combined<0.5 => TP nearer, SL wider.
+    dynamic_sltp_sl_scale: float = 0.25
+    dynamic_sltp_tp_scale: float = 0.40
+    # Bounds for dynamic SL multiplier relative to base SL multiplier.
+    dynamic_sltp_sl_mult_min: float = 0.85
+    dynamic_sltp_sl_mult_max: float = 1.60
+    # Absolute TP RR bounds after dynamic adjustment.
+    dynamic_sltp_tp_rr_min: float = 1.0
+    dynamic_sltp_tp_rr_max: float = 4.0
+    # Include dynamic tuning tags in decision reason text.
+    dynamic_sltp_debug_in_reason: bool = True
+    # ── Setup-aware exit override (ICT/Wyckoff tiers) ───────────────────
+    # When enabled, runtime/backtest can override TP/SL by detected setup tier:
+    # tier0=plain, tier1=basic, tier2=advanced, tier3=premium.
+    setup_exit_enabled: bool = False
+    # Multiplier applied to setup TP table (SL table unchanged).
+    # Example: 0.75 shrinks TP targets by 25% while preserving setup hierarchy.
+    setup_exit_scale: float = 1.0
     # Dynamic risk tier: tự điều chỉnh risk theo drawdown từ peak
     # risk_tier_floor = 3% → dùng khi drawdown >= 10% từ peak balance
     # risk_per_trade   = 5% → dùng khi balance ở peak (không có drawdown)
@@ -338,6 +380,11 @@ class TrainingSettings(StrictSettingsModel):
     min_return_threshold: float = 0.0008
     use_sltp_label: bool = True           # SL/TP race label: cleaner targets vs n-bar return
     sltp_label_max_horizon: int = 32      # Max bars forward to scan for TP/SL hit
+    setup_label_mode: str = "fixed"       # "fixed" | "setup_aware"
+    # For scalp pipelines: recompute SL/TP labels with dynamic SL/TP policy
+    # so model learns the same decision surface used in live.
+    dynamic_sltp_label_enabled: bool = False
+    dataset_start_date: str = "2019-01-01"
     label_tp_rr: float = 0.0              # TP RR for labeling (0 = use risk.take_profit_rr)
     retrain_on_startup: bool = True
     live_learning_enabled: bool = True

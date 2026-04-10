@@ -591,6 +591,7 @@ def _build_live_scalp_feature_frame(settings: Settings, frames: dict[str, pd.Dat
     Pulls the execution (M1) frame, computes all scalp features, merges M5 context,
     and fills required columns expected by HybridStrategy.build_trade_decision().
     """
+    from xauusd_ai.execution.sltp import resolve_setup_exit_targets, setup_label_horizon
     from xauusd_ai.features.scalp_features import build_all_scalp_features, SCALP_FEATURE_COLUMNS
 
     exec_tf = settings.market.execution_timeframe  # "M1"
@@ -641,21 +642,56 @@ def _build_live_scalp_feature_frame(settings: Settings, frames: dict[str, pd.Dat
         vol_regime = 1  # normal
     featured["volatility_regime"] = vol_regime
 
-    # ── Strategy score: placeholder (all strategy gates are 0.0 in scalp config)
-    # Sign encodes tentative direction from momentum (overridden by trade_side in signal)
-    if "ema3_ema8_cross" in featured.columns:
-        featured["strategy_score"] = featured["ema3_ema8_cross"].fillna(0.0)
-    else:
-        featured["strategy_score"] = 0.0
+    featured["trend_strength_score"] = featured.get("trend_strength_score", 0.0)
+    featured["pullback_quality"] = featured.get("pullback_quality", 0.0)
+    featured["execution_quality"] = featured.get("execution_quality", 0.0)
+    featured["strategy_score"] = featured.get("strategy_setup_score", 0.0)
 
     # ── Required columns defaulted for compatibility ─────────────────────
     for _col, _default in [
-        ("trend_alignment", 1),
         ("news_is_blackout", 0),
         ("news_impact_ahead", 0),
         ("news_hours_ahead", 48.0),
     ]:
         if _col not in featured.columns:
             featured[_col] = _default
+
+    if "trend_alignment" not in featured.columns:
+        featured["trend_alignment"] = (
+            np.sign(pd.to_numeric(featured.get("m1_bos", 0.0), errors="coerce").fillna(0.0))
+            == np.sign(pd.to_numeric(featured.get("m5_bias", 0.0), errors="coerce").fillna(0.0))
+        ).astype(int)
+
+    if settings.risk.setup_exit_enabled:
+        setup_rows = []
+        base_horizon = int(getattr(settings.training, "sltp_label_max_horizon", settings.training.label_horizon) or 8)
+        for _, row in featured.iterrows():
+            trade_side = "buy" if float(row.get("strategy_setup_score", row.get("m1_bos", 0.0)) or 0.0) >= 0 else "sell"
+            row_payload = row.to_dict()
+            row_payload["trade_side"] = trade_side
+            row_payload["expected_direction"] = 1 if trade_side == "buy" else -1
+            tp_rr, sl_mult, tier, _, _ = resolve_setup_exit_targets(
+                row_payload,
+                enabled=True,
+                tp_scale=float(settings.risk.setup_exit_scale),
+            )
+            hold_bars = setup_label_horizon(base_horizon, row_payload)
+            setup_rows.append(
+                {
+                    "setup_tp_rr": tp_rr,
+                    "setup_sl_mult": sl_mult,
+                    "setup_tier": tier,
+                    "bars_held": hold_bars,
+                    "setup_exit_scaled": 1,
+                }
+            )
+        setup_df = pd.DataFrame(setup_rows, index=featured.index)
+        featured[["setup_tp_rr", "setup_sl_mult", "setup_tier", "bars_held", "setup_exit_scaled"]] = setup_df
+    else:
+        featured["setup_tp_rr"] = 0.0
+        featured["setup_sl_mult"] = 0.0
+        featured["setup_tier"] = 0
+        featured["bars_held"] = int(getattr(settings.training, "label_horizon", 8) or 8)
+        featured["setup_exit_scaled"] = 0
 
     return featured.dropna(subset=SCALP_FEATURE_COLUMNS[:5]).reset_index(drop=True)

@@ -44,23 +44,17 @@ from sklearn.preprocessing import StandardScaler
 from xauusd_ai.config import load_settings
 from xauusd_ai.backtesting.engine import simulate_dynamic_concurrent_backtest
 from xauusd_ai.execution.risk import RiskManager
-from xauusd_ai.features.scalp_dataset import build_scalp_dataset
+from xauusd_ai.features.scalp_dataset import apply_dynamic_sltp_labels, build_scalp_dataset
 from xauusd_ai.features.scalp_features import SCALP_FEATURE_COLUMNS
 from xauusd_ai.model.scalp_model import CalibratedDirModel, DualScalpModel
 
 REPO    = Path(__file__).parent.parent
 OUT_DIR = REPO / "outputs"
-# Use live_acc2_scalp.yaml as settings base for the backtest engine.
-# live_acc2_scalp_m1.yaml is for live bot configuration (MT5 execution).
-# The simulation engine only needs risk/strategy scalar parameters, not
-# execution_timeframe or csv paths — _run_sim overrides all critical fields.
-CONFIG  = REPO / "configs" / "live_acc2_scalp.yaml"
+# Use live_acc2_scalp_m1.yaml so paper simulation matches live profile 1:1.
+CONFIG  = REPO / "configs" / "live_acc2_scalp_m1.yaml"
 
 # ── Paper trade parameters ─────────────────────────────────────────────────
-DS_START     = "2019-01-01"
-SL_ATR_MULT  = 0.8
-TP_RR        = 1.5
-MAX_HORIZON  = 8
+DEFAULT_DS_START = "2019-01-01"
 TRAIN_SIZE   = 250_000    # same as save_model / WF
 TEST_SIZE    = 50_000     # ~8 weeks — same as WF fold
 INITIAL_BAL  = 200.0
@@ -116,6 +110,9 @@ def _train_dir(df, direction: int) -> CalibratedDirModel | None:
 
 def _run_sim(preds, settings, risk: float, initial_bal: float) -> dict:
     """Run backtest — identical parameters as acc2_scalp_m1_wf.py._run_sim."""
+    max_horizon = int(getattr(settings.training, "sltp_label_max_horizon", settings.training.label_horizon) or 8)
+    base_tp_rr = float(getattr(settings.risk, "take_profit_rr", 1.5))
+    base_sl_atr = float(getattr(settings.risk, "stop_loss_atr_multiple", 0.8))
     s = settings.model_copy(deep=True)
     s.training.backtest_initial_balance             = initial_bal
     s.strategy.adx_gate_enabled                     = False
@@ -124,13 +121,13 @@ def _run_sim(preds, settings, risk: float, initial_bal: float) -> dict:
     s.strategy.strong_volatility_min_strategy_score = 0.0
     s.strategy.require_trend_alignment               = False
     s.strategy.silver_bullet_enabled                 = False
-    s.training.label_horizon                         = MAX_HORIZON
+    s.training.label_horizon                         = max_horizon
     s.risk.risk_per_trade                  = risk
     s.risk.max_risk_fraction               = risk + 0.02
-    s.risk.take_profit_rr                  = TP_RR
-    s.risk.sideway_take_profit_rr          = TP_RR * 0.8
-    s.risk.volatile_take_profit_rr         = TP_RR * 1.3
-    s.risk.stop_loss_atr_multiple          = SL_ATR_MULT
+    s.risk.take_profit_rr                  = base_tp_rr
+    s.risk.sideway_take_profit_rr          = base_tp_rr * 0.8
+    s.risk.volatile_take_profit_rr         = base_tp_rr * 1.3
+    s.risk.stop_loss_atr_multiple          = base_sl_atr
     s.risk.min_confidence                  = 0.55
     s.risk.compound_cap                    = 25.0
     s.risk.consecutive_loss_pause_count    = 2
@@ -139,7 +136,7 @@ def _run_sim(preds, settings, risk: float, initial_bal: float) -> dict:
     s.risk.anti_martingale_factor          = 0.3
     s.risk.max_open_positions              = 3
     s.risk.partial_tp_enabled             = True
-    s.risk.partial_tp_rr                  = TP_RR * 0.5
+    s.risk.partial_tp_rr                  = base_tp_rr * 0.5
     s.risk.partial_tp_pct                 = 0.60
     s.execution.close_opposite_on_signal  = True
     sim = simulate_dynamic_concurrent_backtest(
@@ -164,28 +161,42 @@ def _run_sim(preds, settings, risk: float, initial_bal: float) -> dict:
 
 
 def main(test_bars: int = TEST_SIZE) -> None:
-    meta_path  = OUT_DIR / "acc2_scalp_m1_model_meta.json"
+    settings = load_settings(CONFIG)
+    meta_path = REPO / settings.app.model_meta_path
     train_end_saved = ""
     if meta_path.exists():
         train_end_saved = json.loads(meta_path.read_text()).get("train_end", "")
+    dataset_start = str(getattr(settings.training, "dataset_start_date", DEFAULT_DS_START) or DEFAULT_DS_START)
+    label_horizon = int(getattr(settings.training, "sltp_label_max_horizon", settings.training.label_horizon) or 8)
+    setup_label_mode = str(getattr(settings.training, "setup_label_mode", "fixed") or "fixed").strip().lower()
+    base_tp_rr = float(getattr(settings.risk, "take_profit_rr", 1.5))
+    base_sl_atr = float(getattr(settings.risk, "stop_loss_atr_multiple", 0.8))
 
     print("=" * 80)
     print("  ACC2 M1 Scalp — PAPER TRADE SIMULATION (WF holdout)")
     print(f"  Holdout: train on last {TRAIN_SIZE:,}+{test_bars:,} bars excl. last {test_bars:,}")
     print(f"  Test on last {test_bars:,} M1 bars (~{test_bars//7200:.0f} weeks)  — GENUINE out-of-sample")
-    print(f"  Risk: {RISK*100:.1f}%  |  TP={TP_RR}R  SL={SL_ATR_MULT}×ATR  |  Max positions: 2")
+    print(f"  Risk: {RISK*100:.1f}%  |  TP={base_tp_rr}R  SL={base_sl_atr}×ATR  |  Max positions: 2")
     if train_end_saved:
         print(f"  Live model (saved pkl) trained to: {train_end_saved}")
     print("=" * 80)
 
     # ── 1. Build dataset ──────────────────────────────────────────────────
-    print(f"\n[1] Building scalp dataset from {DS_START}…", flush=True)
+    print(f"\n[1] Building scalp dataset from {dataset_start}…", flush=True)
     ds = build_scalp_dataset(
-        start_date=DS_START,
-        sl_atr_mult=SL_ATR_MULT,
-        tp_rr=TP_RR,
-        max_horizon=MAX_HORIZON,
+        start_date=dataset_start,
+        sl_atr_mult=base_sl_atr,
+        tp_rr=base_tp_rr,
+        max_horizon=label_horizon,
+        setup_label_mode=setup_label_mode,
     )
+    if settings.training.dynamic_sltp_label_enabled and setup_label_mode == "fixed":
+        print("    Re-label with dynamic SL/TP policy...", flush=True)
+        ds = apply_dynamic_sltp_labels(
+            ds,
+            settings=settings,
+            max_horizon=label_horizon,
+        )
     total = len(ds)
     print(f"    {total:,} M1 rows  "
           f"[{str(ds['time'].iloc[0])[:10]} → {str(ds['time'].iloc[-1])[:10]}]")
@@ -224,8 +235,8 @@ def main(test_bars: int = TEST_SIZE) -> None:
         buy_model       = buy_model,
         sell_model      = sell_model,
         feature_columns = SCALP_FEATURE_COLUMNS,
-        thr_buy         = 0.58,
-        thr_sell        = 0.55,
+        thr_buy         = float(settings.strategy.signal_threshold),
+        thr_sell        = float(settings.strategy.signal_threshold),
         train_end       = tr_end,
     )
     print(f"    {paper_model}")
@@ -244,7 +255,6 @@ def main(test_bars: int = TEST_SIZE) -> None:
 
     # ── 5. Run simulation ─────────────────────────────────────────────────
     print(f"\n[5] Running paper trade simulation (risk={RISK*100:.1f}%)…", flush=True)
-    settings = load_settings(CONFIG)
     report   = _run_sim(preds, settings, RISK, INITIAL_BAL)
 
     # ── 6. Print results ──────────────────────────────────────────────────
@@ -260,7 +270,7 @@ def main(test_bars: int = TEST_SIZE) -> None:
     yrs      = max(weeks / 52, 1 / 52)
     f        = 1 + ret_pct / 100
     ann_pct  = (f ** (1 / yrs) - 1) * 100 if f > 0 else ret_pct / yrs
-    edge_pct = (wins * TP_RR - losses * 1.0) * RISK * 100
+    edge_pct = (wins * base_tp_rr - losses * 1.0) * RISK * 100
     edge_ann = edge_pct / yrs
 
     print(f"\n{'='*80}")
@@ -292,7 +302,7 @@ def main(test_bars: int = TEST_SIZE) -> None:
     # ── 7. Save signals to CSV ────────────────────────────────────────────
     sig_csv = OUT_DIR / "paper_trade_signals_acc2_scalp_m1.csv"
     active  = preds[preds["prediction"] == 1].copy()
-    active["paper_trade_time"] = pd.Timestamp.utcnow().isoformat()
+    active["paper_trade_time"] = pd.Timestamp.now("UTC").isoformat()
     active.to_csv(str(sig_csv), index=False, mode="a",
                   header=not sig_csv.exists())
     print(f"  Signals saved to {sig_csv.name}  ({len(active):,} rows)")

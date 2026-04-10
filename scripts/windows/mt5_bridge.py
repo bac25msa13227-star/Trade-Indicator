@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""
+r"""
 MT5 Bridge Service — runs on Windows host, proxies MT5 trade operations over HTTP.
 
 The live-bot Docker containers (Linux) cannot import MetaTrader5 directly.
@@ -48,6 +48,16 @@ except ImportError:
     sys.exit(1)
 
 PORT = int(os.getenv("MT5_BRIDGE_PORT", "5600"))
+
+_TIMEFRAME_MAP = {
+    "M1": mt5.TIMEFRAME_M1,
+    "M5": mt5.TIMEFRAME_M5,
+    "M15": mt5.TIMEFRAME_M15,
+    "M30": mt5.TIMEFRAME_M30,
+    "H1": mt5.TIMEFRAME_H1,
+    "H4": mt5.TIMEFRAME_H4,
+    "D1": mt5.TIMEFRAME_D1,
+}
 
 # ── MT5 lifecycle ──────────────────────────────────────────────────────────────
 
@@ -283,6 +293,48 @@ def op_get_tick(symbol: str) -> dict:
     }
 
 
+def op_get_bars(symbol: str, timeframe: str, count: int, start_pos: int = 0) -> list[dict]:
+    """Return OHLCV bars directly from MT5 terminal history."""
+    _ensure()
+    tf_name = str(timeframe or "M1").upper()
+    if tf_name not in _TIMEFRAME_MAP:
+        raise RuntimeError(f"Unsupported timeframe: {timeframe}")
+
+    count = max(1, min(int(count or 0), 200_000))
+    start_pos = max(0, int(start_pos or 0))
+
+    if not mt5.symbol_select(symbol, True):
+        raise RuntimeError(f"symbol_select failed for {symbol}: {mt5.last_error()}")
+
+    rates = None
+    for _attempt in range(8):
+        rates = mt5.copy_rates_from_pos(symbol, _TIMEFRAME_MAP[tf_name], start_pos, count)
+        if rates is not None and len(rates) > 0:
+            break
+        import time as _time
+        _time.sleep(min(2 * (1.5 ** _attempt), 10))
+
+    if rates is None or len(rates) == 0:
+        raise RuntimeError(f"No rates returned for {symbol} {tf_name}")
+
+    out: list[dict] = []
+    for row in rates:
+        data = dict(row)
+        out.append(
+            {
+                "time": int(data.get("time", 0)),
+                "open": float(data.get("open", 0.0)),
+                "high": float(data.get("high", 0.0)),
+                "low": float(data.get("low", 0.0)),
+                "close": float(data.get("close", 0.0)),
+                "tick_volume": float(data.get("tick_volume", 0.0)),
+                "spread": float(data.get("spread", 0.0)),
+                "real_volume": float(data.get("real_volume", 0.0)),
+            }
+        )
+    return out
+
+
 def _collect_session_windows(symbol: str, now_utc: _dt.datetime, days_ahead: int = 8) -> list[tuple[_dt.datetime, _dt.datetime]]:
     """Collect MT5 trade sessions as UTC windows [open, close)."""
     fn = getattr(mt5, "symbol_info_session_trade", None)
@@ -488,6 +540,12 @@ class _Handler(BaseHTTPRequestHandler):
             elif path == "/tick":
                 symbol = qs.get("symbol", ["XAUUSD"])[0]
                 self._send_json(200, op_get_tick(symbol))
+            elif path == "/bars":
+                symbol = qs.get("symbol", ["XAUUSD"])[0]
+                timeframe = qs.get("timeframe", ["M1"])[0]
+                count = int(qs.get("count", ["500"])[0])
+                start_pos = int(qs.get("start_pos", ["0"])[0])
+                self._send_json(200, op_get_bars(symbol, timeframe, count, start_pos))
             elif path == "/market/state":
                 symbol = qs.get("symbol", ["XAUUSD"])[0]
                 stale_seconds = int(qs.get("stale_seconds", ["300"])[0])

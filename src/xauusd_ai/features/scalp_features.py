@@ -45,6 +45,12 @@ def _atr(frame: pd.DataFrame, period: int = 5) -> pd.Series:
     return tr.rolling(period).mean().bfill()
 
 
+def _series_or_default(frame: pd.DataFrame, column: str, default: float = 0.0) -> pd.Series:
+    if column in frame.columns:
+        return pd.to_numeric(frame[column], errors="coerce").fillna(default)
+    return pd.Series(default, index=frame.index, dtype=float)
+
+
 # ─── Feature functions ────────────────────────────────────────────────────────
 
 def m1_momentum_features(frame: pd.DataFrame) -> pd.DataFrame:
@@ -308,6 +314,128 @@ def m1_bb_stoch_features(frame: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def m1_strategy_setup_features(frame: pd.DataFrame) -> pd.DataFrame:
+    """
+    Strategy-aware setup features inspired by ICT/Wyckoff ideas that are
+    realistically derivable from M1 OHLCV + existing scalp signals.
+    """
+    o = pd.to_numeric(frame["open"], errors="coerce").ffill()
+    h = pd.to_numeric(frame["high"], errors="coerce").ffill()
+    l = pd.to_numeric(frame["low"], errors="coerce").ffill()
+    c = pd.to_numeric(frame["close"], errors="coerce").ffill()
+    ts = pd.to_datetime(frame["time"], utc=True, errors="coerce")
+
+    body_sign = np.sign(c - o)
+    close_in_rng = _series_or_default(frame, "ms_close_in_rng", 0.5).clip(0.0, 1.0)
+    wick_net = _series_or_default(frame, "ms_wick_net", 0.0).clip(-1.0, 1.0)
+    flow = _series_or_default(frame, "of_flow_score", 0.0).clip(-1.0, 1.0)
+    bos = _series_or_default(frame, "m1_bos", 0.0).clip(-1.0, 1.0)
+    fvg = _series_or_default(frame, "m1_fvg", 0.0).clip(-2.0, 2.0)
+    vol_surge = _series_or_default(frame, "of_vol_surge", 1.0).clip(0.0, 5.0)
+    body_ratio = _series_or_default(frame, "ms_body_ratio", 0.0).clip(0.0, 1.0)
+    sweep_h20 = _series_or_default(frame, "m1_sweep_h20", 0.0)
+    sweep_l20 = _series_or_default(frame, "m1_sweep_l20", 0.0)
+    m5_bias = _series_or_default(frame, "m5_bias", 0.0).clip(-1.0, 1.0)
+
+    out = pd.DataFrame(index=frame.index)
+
+    swing_low20 = l.rolling(20).min().shift(1)
+    swing_high20 = h.rolling(20).max().shift(1)
+    turtle_bull = (l < swing_low20) & (c > swing_low20) & (close_in_rng > 0.55)
+    turtle_bear = (h > swing_high20) & (c < swing_high20) & (close_in_rng < 0.45)
+    out["sm_turtle_soup"] = (turtle_bull.astype(int) - turtle_bear.astype(int)).clip(-1, 1)
+
+    swing_low24 = l.rolling(24).min()
+    swing_high24 = h.rolling(24).max()
+    swing_range24 = (swing_high24 - swing_low24).replace(0, np.nan)
+    pct_in_swing = ((c - swing_low24) / swing_range24).fillna(0.5).clip(0.0, 1.0)
+    trend = np.sign(_ema(c, 8) - _ema(c, 21)).fillna(0.0)
+    bull_ote = (1.0 - (pct_in_swing.sub(0.30).abs() / 0.18)).clip(0.0, 1.0)
+    bear_ote = (1.0 - (pct_in_swing.sub(0.70).abs() / 0.18)).clip(0.0, 1.0)
+    out["sm_ote_score"] = np.where(trend > 0, bull_ote, np.where(trend < 0, -bear_ote, 0.0))
+
+    bear_fvg_recent = fvg.shift(1).rolling(4).min().fillna(0.0) < -0.10
+    bull_fvg_recent = fvg.shift(1).rolling(4).max().fillna(0.0) > 0.10
+    bull_ifvg = bear_fvg_recent & (c > h.shift(1)) & (body_sign > 0) & (bos > 0)
+    bear_ifvg = bull_fvg_recent & (c < l.shift(1)) & (body_sign < 0) & (bos < 0)
+    out["sm_ifvg"] = (bull_ifvg.astype(int) - bear_ifvg.astype(int)).clip(-1, 1)
+
+    recent_sweep_low = sweep_l20.rolling(3).max().fillna(0.0) > 0
+    recent_sweep_high = sweep_h20.rolling(3).max().fillna(0.0) > 0
+    bull_unicorn = recent_sweep_low & (fvg > 0.10) & (bos > 0) & (flow > 0)
+    bear_unicorn = recent_sweep_high & (fvg < -0.10) & (bos < 0) & (flow < 0)
+    out["sm_unicorn"] = (bull_unicorn.astype(int) - bear_unicorn.astype(int)).clip(-1, 1)
+
+    hour = ts.dt.hour.fillna(-1).astype(int)
+    date_key = ts.dt.date.astype(str)
+    asia_mask = hour < 7
+    asia_ref = pd.DataFrame(
+        {
+            "date": date_key,
+            "asia_high": h.where(asia_mask),
+            "asia_low": l.where(asia_mask),
+        },
+        index=frame.index,
+    )
+    asia_levels = asia_ref.groupby("date").agg({"asia_high": "max", "asia_low": "min"})
+    asia_high = date_key.map(asia_levels["asia_high"]).astype(float)
+    asia_low = date_key.map(asia_levels["asia_low"]).astype(float)
+    asia_mid = ((asia_high + asia_low) / 2.0).astype(float)
+    london_ny = hour.between(7, 16)
+    bull_po3 = london_ny & (l < asia_low) & (c > asia_low) & (c > asia_mid) & (flow > -0.15)
+    bear_po3 = london_ny & (h > asia_high) & (c < asia_high) & (c < asia_mid) & (flow < 0.15)
+    out["sm_po3_bias"] = (bull_po3.astype(int) - bear_po3.astype(int)).clip(-1, 1)
+
+    support = l.rolling(30).min().shift(1)
+    resistance = h.rolling(30).max().shift(1)
+    spring = (l < support) & (c > support) & (close_in_rng > 0.55) & (vol_surge > 1.05)
+    utad = (h > resistance) & (c < resistance) & (close_in_rng < 0.45) & (vol_surge > 1.05)
+    out["wyck_spring_utad"] = (spring.astype(int) - utad.astype(int)).clip(-1, 1)
+
+    spring_recent = (out["wyck_spring_utad"].rolling(6).max().shift(1).fillna(0.0) > 0)
+    utad_recent = (out["wyck_spring_utad"].rolling(6).min().shift(1).fillna(0.0) < 0)
+    sos = spring_recent & (c > h.shift(1)) & (vol_surge > 1.05) & (body_ratio > 0.45) & (flow > 0)
+    sow = utad_recent & (c < l.shift(1)) & (vol_surge > 1.05) & (body_ratio > 0.45) & (flow < 0)
+    out["wyck_sos_sow"] = (sos.astype(int) - sow.astype(int)).clip(-1, 1)
+
+    sos_recent = (out["wyck_sos_sow"].rolling(6).max().shift(1).fillna(0.0) > 0)
+    sow_recent = (out["wyck_sos_sow"].rolling(6).min().shift(1).fillna(0.0) < 0)
+    bull_lps = sos_recent & (wick_net > 0) & (flow > 0) & (vol_surge < 1.40) & (close_in_rng > 0.45)
+    bear_lpsy = sow_recent & (wick_net < 0) & (flow < 0) & (vol_surge < 1.40) & (close_in_rng < 0.55)
+    out["wyck_lps_quality"] = (bull_lps.astype(int) - bear_lpsy.astype(int)).clip(-1, 1)
+
+    trend_strength = (
+        0.30 * bos
+        + 0.20 * np.sign(flow)
+        + 0.15 * out["sm_po3_bias"]
+        + 0.20 * out["wyck_sos_sow"]
+        + 0.15 * np.sign(m5_bias)
+    )
+    pullback_quality = (
+        0.40 * out["sm_ote_score"]
+        + 0.20 * out["sm_turtle_soup"]
+        + 0.20 * out["wyck_lps_quality"]
+        + 0.20 * wick_net
+    )
+    execution_quality = (
+        0.25 * out["sm_unicorn"]
+        + 0.20 * out["sm_ifvg"]
+        + 0.20 * out["sm_turtle_soup"]
+        + 0.20 * np.sign(flow)
+        + 0.15 * body_sign
+    )
+    out["trend_strength_score"] = np.tanh(trend_strength).clip(-1.0, 1.0)
+    out["pullback_quality"] = np.tanh(pullback_quality).clip(-1.0, 1.0)
+    out["execution_quality"] = np.tanh(execution_quality).clip(-1.0, 1.0)
+    out["strategy_setup_score"] = np.tanh(
+        0.35 * out["trend_strength_score"]
+        + 0.30 * out["pullback_quality"]
+        + 0.35 * out["execution_quality"]
+    ).clip(-1.0, 1.0)
+
+    return out.fillna(0.0)
+
+
 # ─── Feature column registry ──────────────────────────────────────────────────
 
 SCALP_FEATURE_COLUMNS = [
@@ -346,8 +474,22 @@ SCALP_FEATURE_COLUMNS = [
     "m5_bias",      # sign of M5 EMA8 - EMA21 (-1 / 0 / +1)
     "m5_rsi_14",    # M5 RSI(14) - 50 (-50..+50)
     "m5_atr_norm",  # M5 ATR / price * 1000
+    # 8. ICT/Wyckoff setup features (8 features)
+    "sm_turtle_soup",
+    "sm_ote_score",
+    "sm_ifvg",
+    "sm_unicorn",
+    "sm_po3_bias",
+    "wyck_spring_utad",
+    "wyck_sos_sow",
+    "wyck_lps_quality",
+    # 9. Meta quality scores (4 features)
+    "trend_strength_score",
+    "pullback_quality",
+    "execution_quality",
+    "strategy_setup_score",
 ]
-# Total: 54 scalp features
+# Total: 66 scalp features
 
 
 def build_all_scalp_features(frame: pd.DataFrame) -> pd.DataFrame:
@@ -359,16 +501,18 @@ def build_all_scalp_features(frame: pd.DataFrame) -> pd.DataFrame:
     Returns the original frame with all scalp feature columns appended.
     Does NOT include M5 context columns (m5_*) — those are merged externally.
     """
-    feat_parts = [
-        m1_momentum_features(frame),
-        m1_orderflow_features(frame),
-        m1_microstructure_features(frame),
-        m1_structure_features(frame),
-        m1_session_features(frame),
-        m1_bb_stoch_features(frame),
-    ]
     result = frame.copy()
-    for part in feat_parts:
+    for part in (
+        m1_momentum_features(result),
+        m1_orderflow_features(result),
+        m1_microstructure_features(result),
+        m1_structure_features(result),
+        m1_session_features(result),
+        m1_bb_stoch_features(result),
+    ):
         for col in part.columns:
             result[col] = part[col].values
+    setup_part = m1_strategy_setup_features(result)
+    for col in setup_part.columns:
+        result[col] = setup_part[col].values
     return result

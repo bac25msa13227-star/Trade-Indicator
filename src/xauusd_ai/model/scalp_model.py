@@ -4,7 +4,8 @@ Dual M1 Scalp Model — picklable, direction-aware.
 Architecture:
   ▶ Two separate HistGBDT models: one for BUY direction, one for SELL direction
   ▶ Each model has its own scaler + isotonic calibration bundled inside
-  ▶ DualScalpModel is the top-level picklable artifact saved to outputs/acc2_scalp_m1_model.pkl
+  ▶ DualScalpModel is the top-level picklable artifact saved to the configured
+    `outputs/*_model.pkl` path (for example ACC2 freeze H10 or ACC1 scalp M1)
 
 Pickle safety: all classes defined at module level → fully importable during unpickling.
 """
@@ -53,10 +54,10 @@ class DualScalpModel:
     """
     Wraps a BUY model and a SELL model for M1 scalping inference.
 
-    Saved as `outputs/acc2_scalp_m1_model.pkl`.
+    Saved to the configured `outputs/*_model.pkl` path.
 
     Usage:
-        model = pickle.load(open("outputs/acc2_scalp_m1_model.pkl", "rb"))
+        model = pickle.load(open("outputs/<your_model>.pkl", "rb"))
 
         # Score a batch of M1 bars (pre-filtered to one direction):
         buy_proba  = model.score_buy(X_buy_rows)    # rows where expected_direction == +1

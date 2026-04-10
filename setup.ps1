@@ -7,7 +7,7 @@
     Automates: Docker check, git pull, .env creation, Docker build, start bot.
 
 .PARAMETER Bot
-    Which bot to run: acc2 (default), acc1, or both
+    Which bot to run: acc2 freeze scalp M1 (default), acc1 scalp M1 reversal, or both
 
 .EXAMPLE
     .\setup.ps1 -Bot acc2
@@ -68,9 +68,10 @@ if (-not (Test-Path $envFile)) {
     if (Test-Path $envExample) {
         Copy-Item $envExample $envFile
         Write-Warn ".env created from .env.example"
-        Write-Host "      Edit .env with your MT5 credentials before continuing." -ForegroundColor Yellow
-        Write-Host "      Required: MT5_LOGIN_ACC2, MT5_PASSWORD_ACC2, MT5_SERVER_ACC2" -ForegroundColor Yellow
+        Write-Host "      Edit .env Telegram values before continuing." -ForegroundColor Yellow
+        Write-Host "      Required: TELEGRAM_BOT_TOKEN_ACC1, TELEGRAM_CHAT_ID_ACC1" -ForegroundColor Yellow
         Write-Host "      Required: TELEGRAM_BOT_TOKEN_ACC2, TELEGRAM_CHAT_ID_ACC2" -ForegroundColor Yellow
+        Write-Host "      Live Docker mode expects MT5 Bridge on host ports 5600/5601" -ForegroundColor Yellow
         notepad.exe $envFile
         Read-Host "      Press ENTER after saving .env to continue"
     } else {
@@ -103,8 +104,8 @@ function Test-Pkl {
     }
 }
 
-if ($Bot -in @("acc2","both")) { Test-Pkl "outputs\acc2_scalp_m1_model.pkl" }
-if ($Bot -in @("acc1","both")) { Test-Pkl "outputs\acc1_expand_net127313_dd3215_model.pkl" }
+if ($Bot -in @("acc2","both")) { Test-Pkl "outputs\acc2_scalp_m1_h10_setup_exit_model.pkl" }
+if ($Bot -in @("acc1","both")) { Test-Pkl "outputs\acc1_scalp_m1_reversal_model.pkl" }
 
 # ── 6. Build Docker image ────────────────────────────────────────────────────
 Write-Host "[6/7] Building Docker image(s)..."
@@ -135,6 +136,6 @@ Write-Host "║  Logs:    docker compose logs live-scalp-acc2 -f"
 Write-Host "║  Status:  Get-Content outputs\live_status_acc2.json"
 Write-Host "║  Stop:    docker compose stop live-scalp-acc2"
 Write-Host "║"
-Write-Host "║  ⚠️  Make sure MT5 Bridge is running on host port 5601" -ForegroundColor Yellow
+Write-Host "║  ⚠️  Make sure MT5 Bridge is running on host ports 5600 and 5601" -ForegroundColor Yellow
 Write-Host "╚══════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
 Write-Host ""

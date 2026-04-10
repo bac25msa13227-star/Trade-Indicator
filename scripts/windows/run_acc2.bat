@@ -1,5 +1,5 @@
 @echo off
-title XAUUSD Bot ACC2 - acc2_breakthrough_net21k_dd2333
+title XAUUSD Bot ACC2 - scalp_m1_h10_setup_exit
 cd /d C:\Users\Administrator\Documents\Trade-Indicator
 
 REM Load .env vars
@@ -17,8 +17,8 @@ set MLFLOW_TRACKING_URI=file:///C:/Temp/mlflowruns
 
 echo [ACC2] Starting live bot...
 echo [ACC2] MT5_BRIDGE_URL=%MT5_BRIDGE_URL%
-echo [ACC2] Config: configs/live_acc2.yaml
-echo [ACC2] Model: outputs/acc2_breakthrough_net21k_dd2333_model.pkl
+echo [ACC2] Config: configs/live_acc2_scalp_m1.yaml
+echo [ACC2] Model: outputs/acc2_scalp_m1_h10_setup_exit_model.pkl
 
-python -m xauusd_ai.main live --config configs/live_acc2.yaml >> logs\bot_acc2.log 2>&1
+python -m xauusd_ai.main live --config configs/live_acc2_scalp_m1.yaml >> logs\bot_acc2.log 2>&1
 echo [ACC2] Process exited with code %ERRORLEVEL% >> logs\bot_acc2.log

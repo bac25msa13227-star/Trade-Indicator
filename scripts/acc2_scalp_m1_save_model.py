@@ -2,13 +2,8 @@
 """
 acc2_scalp_m1_save_model.py
 ============================
-Train the M1 scalp dual model on the LATEST data and save artifacts
-for live deployment.
-
-Artifacts saved:
-  outputs/acc2_scalp_m1_model.pkl        ← DualScalpModel (BUY + SELL)
-  outputs/acc2_scalp_m1_scaler.pkl       ← identity FunctionTransformer (compat)
-  outputs/acc2_scalp_m1_model_meta.json  ← feature list, thresholds, train_end, metrics
+Train the M1 scalp dual model on the latest data and save artifacts
+for live deployment, fully driven by `configs/live_acc2_scalp_m1.yaml`.
 
 Usage:
   cd "Trade Indicator"
@@ -29,21 +24,18 @@ from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.isotonic import IsotonicRegression
 from sklearn.preprocessing import FunctionTransformer, StandardScaler
 
-from xauusd_ai.features.scalp_dataset import build_scalp_dataset
+from xauusd_ai.config import load_settings
+from xauusd_ai.features.scalp_dataset import apply_dynamic_sltp_labels, build_scalp_dataset
 from xauusd_ai.features.scalp_features import SCALP_FEATURE_COLUMNS
 from xauusd_ai.model.scalp_model import CalibratedDirModel, DualScalpModel
 
 REPO     = Path(__file__).parent.parent
 OUT_DIR  = REPO / "outputs"
+CONFIG   = REPO / "configs" / "live_acc2_scalp_m1.yaml"
 
-# ── Training parameters (must match WF script) ─────────────────────────────
+# ── Training defaults (config can override) ────────────────────────────────
 TRAIN_SIZE   = 250_000
-DS_START     = "2019-01-01"
-SL_ATR_MULT  = 0.8
-TP_RR        = 1.5
-MAX_HORIZON  = 8
-THR_BUY      = 0.58
-THR_SELL     = 0.55
+DEFAULT_DS_START = "2019-01-01"
 
 
 def _make_model() -> HistGradientBoostingClassifier:
@@ -126,31 +118,51 @@ def _atomic_pickle(obj, dest: Path) -> None:
 
 
 def main() -> None:
+    settings = load_settings(CONFIG)
+    train_size = int(getattr(settings.training, "walkforward_train_size", TRAIN_SIZE) or TRAIN_SIZE)
+    thr_buy = float(settings.strategy.signal_threshold)
+    thr_sell = float(settings.strategy.signal_threshold)
+    label_horizon = int(getattr(settings.training, "sltp_label_max_horizon", settings.training.label_horizon) or 8)
+    setup_label_mode = str(getattr(settings.training, "setup_label_mode", "fixed") or "fixed").strip().lower()
+    dataset_start = str(getattr(settings.training, "dataset_start_date", DEFAULT_DS_START) or DEFAULT_DS_START)
+    base_sl_atr = float(getattr(settings.risk, "stop_loss_atr_multiple", 0.8))
+    base_tp_rr = float(getattr(settings.risk, "take_profit_rr", 1.5))
+
     print("=" * 80)
     print("  ACC2 M1 Scalp — Train & Save Model Artifacts")
-    print(f"  Train window: last {TRAIN_SIZE:,} M1 bars (~6 months)")
-    print(f"  Label: TP={TP_RR}R within {MAX_HORIZON} M1 bars  |  SL={SL_ATR_MULT}×ATR5")
-    print(f"  Thresholds: BUY≥{THR_BUY}  SELL≥{THR_SELL}")
+    print(f"  Train window: last {train_size:,} M1 bars (~6 months)")
+    print(f"  Label mode: {setup_label_mode}")
+    print(f"  Label: TP={base_tp_rr}R within {label_horizon} M1 bars  |  SL={base_sl_atr}×ATR5")
+    print(f"  Thresholds: BUY≥{thr_buy}  SELL≥{thr_sell}")
+    print(f"  Dynamic label: {'ON' if settings.training.dynamic_sltp_label_enabled else 'OFF'}")
     print("=" * 80)
 
     # ── 1. Build dataset ──────────────────────────────────────────────
-    print(f"\n[1] Loading M1 scalp dataset from {DS_START}…", flush=True)
+    print(f"\n[1] Loading M1 scalp dataset from {dataset_start}…", flush=True)
     ds = build_scalp_dataset(
-        start_date  = DS_START,
-        sl_atr_mult = SL_ATR_MULT,
-        tp_rr       = TP_RR,
-        max_horizon = MAX_HORIZON,
+        start_date  = dataset_start,
+        sl_atr_mult = base_sl_atr,
+        tp_rr       = base_tp_rr,
+        max_horizon = label_horizon,
+        setup_label_mode = setup_label_mode,
     )
     total = len(ds)
     print(f"    {total:,} M1 rows  "
           f"[{str(ds['time'].iloc[0])[:10]} → {str(ds['time'].iloc[-1])[:10]}]")
 
-    if total < TRAIN_SIZE:
-        print(f"ERROR: need {TRAIN_SIZE:,} rows, have {total:,}. Aborting.")
+    if total < train_size:
+        print(f"ERROR: need {train_size:,} rows, have {total:,}. Aborting.")
         sys.exit(1)
 
     # ── 2. Take last TRAIN_SIZE bars as training window ────────────────
-    train_df   = ds.iloc[-TRAIN_SIZE:].copy().reset_index(drop=True)
+    train_df   = ds.iloc[-train_size:].copy().reset_index(drop=True)
+    if settings.training.dynamic_sltp_label_enabled and setup_label_mode == "fixed":
+        print("\n[2a] Re-labeling with dynamic SL/TP policy...", flush=True)
+        train_df = apply_dynamic_sltp_labels(
+            train_df,
+            settings=settings,
+            max_horizon=label_horizon,
+        )
     train_end  = str(train_df["time"].iloc[-1])[:10]
     train_start= str(train_df["time"].iloc[0])[:10]
     print(f"\n[2] Training on {len(train_df):,} rows "
@@ -173,8 +185,8 @@ def main() -> None:
         buy_model       = buy_model,
         sell_model      = sell_model,
         feature_columns = SCALP_FEATURE_COLUMNS,
-        thr_buy         = THR_BUY,
-        thr_sell        = THR_SELL,
+        thr_buy         = thr_buy,
+        thr_sell        = thr_sell,
         train_end       = train_end,
     )
     print(f"\n[4] Built: {dual}")
@@ -191,9 +203,10 @@ def main() -> None:
     # ── 5. Save artifacts ─────────────────────────────────────────────
     print(f"\n[5] Saving artifacts to {OUT_DIR}/…", flush=True)
 
-    model_path = OUT_DIR / "acc2_scalp_m1_model.pkl"
-    scaler_path= OUT_DIR / "acc2_scalp_m1_scaler.pkl"
-    meta_path  = OUT_DIR / "acc2_scalp_m1_model_meta.json"
+    model_path = REPO / settings.app.model_path
+    scaler_path = REPO / settings.app.scaler_path
+    meta_path = REPO / settings.app.model_meta_path
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
 
     # model.pkl — the DualScalpModel
     _atomic_pickle(dual, model_path)
@@ -208,18 +221,23 @@ def main() -> None:
     meta = {
         "model_type":       "DualScalpM1",
         "feature_columns":  SCALP_FEATURE_COLUMNS,
-        "decision_threshold": THR_SELL,   # lower gate = SELL threshold
-        "thr_buy":          THR_BUY,
-        "thr_sell":         THR_SELL,
-        "sl_atr_mult":      SL_ATR_MULT,
-        "tp_rr":            TP_RR,
-        "max_horizon":      MAX_HORIZON,
-        "train_size":       TRAIN_SIZE,
+        "decision_threshold": thr_sell,   # lower gate = SELL threshold
+        "thr_buy":          thr_buy,
+        "thr_sell":         thr_sell,
+        "sl_atr_mult":      base_sl_atr,
+        "tp_rr":            base_tp_rr,
+        "max_horizon":      label_horizon,
+        "train_size":       train_size,
         "train_start":      train_start,
         "train_end":        train_end,
         "buy_model_ok":     buy_model  is not None,
         "sell_model_ok":    sell_model is not None,
         "feature_count":    len(SCALP_FEATURE_COLUMNS),
+        "setup_label_mode": setup_label_mode,
+        "setup_exit_enabled": bool(settings.risk.setup_exit_enabled),
+        "setup_exit_scale": float(getattr(settings.risk, "setup_exit_scale", 1.0)),
+        "dynamic_sltp_label_enabled": bool(settings.training.dynamic_sltp_label_enabled),
+        "dynamic_sltp_enabled": bool(settings.risk.dynamic_sltp_enabled),
     }
     meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
     print(f"    ✓ {meta_path.name}")

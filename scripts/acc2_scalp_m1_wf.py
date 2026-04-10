@@ -31,12 +31,12 @@ from sklearn.isotonic import IsotonicRegression
 from xauusd_ai.config import load_settings
 from xauusd_ai.backtesting.engine import simulate_dynamic_concurrent_backtest
 from xauusd_ai.execution.risk import RiskManager
-from xauusd_ai.features.scalp_dataset import build_scalp_dataset
+from xauusd_ai.features.scalp_dataset import apply_dynamic_sltp_labels, build_scalp_dataset
 from xauusd_ai.features.scalp_features import SCALP_FEATURE_COLUMNS
 from xauusd_ai.model.scalp_model import CalibratedDirModel
 
 REPO = Path(__file__).parent.parent
-CONFIG = REPO / "configs" / "live_acc2_scalp.yaml"
+CONFIG = REPO / "configs" / "live_acc2_scalp_m1.yaml"
 
 # ── WF parameters (M1 bars) ──────────────────────────────────────────────────
 TRAIN_SIZE   = 250_000    # ~6 months M1 bars  (prev: 120K)
@@ -243,6 +243,13 @@ def main():
         tp_rr=TP_RR,
         max_horizon=MAX_HORIZON,
     )
+    if settings.training.dynamic_sltp_label_enabled:
+        print("    Re-label with dynamic SL/TP policy...", flush=True)
+        ds = apply_dynamic_sltp_labels(
+            ds,
+            settings=settings,
+            max_horizon=int(settings.training.sltp_label_max_horizon or MAX_HORIZON),
+        )
     print(f"    Total: {len(ds):,} M1 rows  "
           f"[{str(ds['time'].iloc[0])[:10]} → {str(ds['time'].iloc[-1])[:10]}]", flush=True)
 

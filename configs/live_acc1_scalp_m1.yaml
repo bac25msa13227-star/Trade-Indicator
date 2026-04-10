@@ -1,0 +1,208 @@
+# ACC1 M1 Scalp Config — reversal/frequency branch (derived from ACC2 H10 freeze)
+# ─────────────────────────────────────────────────────────────────
+# Goal:
+#   - More entries than ACC2 scalp
+#   - Better reversal capture on M1
+#   - Separate artifact + logs so ACC2 freeze remains untouched
+# ─────────────────────────────────────────────────────────────────
+
+app:
+  poll_seconds: 60
+  model_path: outputs/acc1_scalp_m1_reversal_model.pkl
+  scaler_path: outputs/acc1_scalp_m1_reversal_scaler.pkl
+  model_meta_path: outputs/acc1_scalp_m1_reversal_model_meta.json
+  walkforward_report_path: outputs/acc1_scalp_m1_reversal_walkforward_report.json
+  walkforward_trades_path: outputs/acc1_scalp_m1_reversal_walkforward_trades.csv
+  paper_trade_log_path: outputs/paper_trade_signals_acc1_scalp_m1.csv
+  live_learning_log_path: outputs/live_learning_log_acc1_scalp_m1.jsonl
+  live_closed_trades_path: outputs/live_closed_trades_acc1_scalp_m1.csv
+  log_level: INFO
+
+market:
+  symbol: XAUUSDm
+  training_symbol: GC=F
+  training_data_source: csv
+  csv_data_path: src/xauusd_ai/real_data/XAUUSDm_M1.csv
+  live_data_source: bridge
+  csv_folder_path: src/xauusd_ai/real_data
+  csv_timeframe: M1
+  higher_timeframe: D1
+  mid_timeframe: H1
+  structure_timeframe: H4
+  execution_timeframe: M1
+  bars:
+    D1: 100
+    H1: 500
+    H4: 200
+    M30: 300
+    M15: 300
+    M5: 500
+    M1: 1000
+  timezone: UTC
+  enforce_market_open_gate: true
+  market_tick_stale_seconds: 120
+  market_preopen_alert_minutes: 30
+  market_preclose_alert_minutes: 30
+  market_preopen_alert_minutes_list: [1440, 30]
+  market_preclose_alert_minutes_list: [1440, 30]
+
+strategy:
+  rsi_period: 14
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  liquidity_lookback: 15
+  swing_lookback: 20
+  volatility_window: 20
+
+  signal_threshold: 0.59
+  sideways_volatility_threshold: 0.003
+  strong_volatility_threshold: 0.016
+  news_block_minutes: 0
+
+  rsi_long_threshold: 50
+  rsi_short_threshold: 50
+  ict_weight: 0.25
+  wyckoff_weight: 0.20
+  momentum_weight: 0.30
+  min_strategy_score: 0.00
+  sideway_min_strategy_score: 0.00
+  strong_volatility_min_strategy_score: 0.00
+  require_trend_alignment: false
+  force_trade: false
+
+  blocked_hours_utc: []
+  blocked_weekdays_utc: []
+  blocked_weekday_hours_utc: {}
+  allowed_weekday_hours_utc:
+    Monday: [6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18]
+    Tuesday: [6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18]
+    Wednesday: [6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18]
+    Thursday: [6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18]
+    Friday: [6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18]
+
+  silver_bullet_enabled: true
+  silver_bullet_windows_utc: [[3, 4], [6, 7], [10, 11], [14, 15]]
+  silver_bullet_confidence_boost: 0.04
+
+  adx_gate_enabled: false
+  adx_min_trend: 12.0
+  sideway_min_confidence: 0.59
+  volatile_min_confidence: 0.59
+  regime_shutdown_rules: []
+
+risk:
+  mode: fixed_fractional
+  risk_per_trade: 0.026
+  risk_tier_floor: 0.002
+  max_open_positions: 2
+  max_risk_fraction: 0.050
+  max_total_exposure_pct: 0.065
+
+  stop_loss_atr_multiple: 1.1
+  min_stop_loss_points: 2.0
+  min_stop_loss_atr_multiple: 1.2
+  sl_volatility_boost_enabled: true
+  sl_volatility_boost_trigger_percentile: 0.85
+  sl_volatility_boost_max_multiplier: 1.8
+  take_profit_rr: 1.8
+  sideway_take_profit_rr: 1.6
+  volatile_take_profit_rr: 2.0
+
+  dynamic_sltp_enabled: true
+  dynamic_sltp_backtest_enabled: true
+  dynamic_sltp_confidence_weight: 0.70
+  dynamic_sltp_quality_weight: 0.30
+  dynamic_sltp_sl_scale: 0.25
+  dynamic_sltp_tp_scale: 0.45
+  dynamic_sltp_sl_mult_min: 0.90
+  dynamic_sltp_sl_mult_max: 1.60
+  dynamic_sltp_tp_rr_min: 1.20
+  dynamic_sltp_tp_rr_max: 2.80
+  dynamic_sltp_debug_in_reason: true
+  setup_exit_enabled: true
+  setup_exit_scale: 0.75
+
+  min_confidence: 0.59
+  fixed_lot: 0.01
+  sideway_risk_multiplier: 0.75
+  normal_risk_multiplier: 1.0
+  strong_volatility_risk_multiplier: 1.20
+
+  spread_cost_rr: 0.01
+  slippage_rr: 0.01
+  commission_rr: 0.0
+
+  kill_switch_enabled: true
+  daily_loss_limit_pct: 0.20
+  max_drawdown_kill_pct: 0.12
+
+  consecutive_loss_pause_count: 2
+  consecutive_loss_cooldown_bars: 2
+  anti_martingale_factor: 0.2
+  anti_martingale_max_reductions: 2
+
+  reentry_guard_enabled: true
+  reentry_cooldown_bars_after_sl: 3
+  reentry_min_distance_atr: 0.35
+
+  partial_tp_enabled: true
+  partial_tp_rr: 1.0
+  partial_tp_pct: 0.50
+  compound_cap: 10.0
+  risk_throttle_rules: []
+
+execution:
+  auto_trade: true
+  deviation: 20
+  magic_number: 20260410
+  comment: xauusd-ai-acc1-scalp-m1-reversal
+  paper_trade_max_loops: 0
+  paper_data_source: bridge
+  close_opposite_on_signal: true
+  trailing_sl:
+    enabled: true
+    breakeven_at_rr: 0.5
+    activation_rr: 0.8
+    trail_atr_multiple: 0.5
+
+training:
+  train_start_date: "2026-02-01"
+  train_end_date: "2026-03-20"
+  test_start_date: "2026-03-22"
+  test_end_date: "2026-03-30"
+  dataset_start_date: "2023-01-01"
+
+  train_split: 0.80
+  use_sltp_label: true
+  sltp_label_max_horizon: 10
+  setup_label_mode: setup_aware
+  dynamic_sltp_label_enabled: false
+  label_tp_rr: 1.5
+  label_horizon: 10
+  min_return_threshold: 0.0006
+  retrain_on_startup: false
+  live_learning_enabled: false
+  optimize_threshold: false
+  save_dataset: true
+  dataset_path: outputs/acc1_scalp_m1_reversal_training_dataset.csv
+
+  walkforward_train_size: 250000
+  walkforward_test_size: 50000
+  walkforward_step_size: 50000
+  walkforward_max_combinations: 30
+  walkforward_max_folds_per_combination: 18
+  backtest_initial_balance: 200.0
+
+notifications:
+  telegram_enabled: true
+  verbose_message: true
+
+integrations:
+  mt5:
+    enabled: true
+    login_env: MT5_LOGIN
+    password_env: MT5_PASSWORD
+    server_env: MT5_SERVER
+  telegram:
+    token_env: TELEGRAM_BOT_TOKEN

@@ -41,7 +41,7 @@ dag = DAG(
 )
 
 ACCOUNT = os.getenv("TRADING_ACCOUNT", "acc2")
-CONFIG_PATH = os.getenv("SETTINGS_PATH", "configs/live_acc2.yaml")
+CONFIG_PATH = os.getenv("SETTINGS_PATH", "configs/live_acc2_scalp_m1.yaml")
 MIN_ROC_AUC = float(os.getenv("MIN_ROC_AUC", "0.62"))
 MODEL_NAME = f"xauusd-{ACCOUNT}"
 

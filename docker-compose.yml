@@ -160,7 +160,7 @@ services:
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
       MLFLOW_TRACKING_URI: http://mlflow:5000
       TRADING_ACCOUNT: ${TRADING_ACCOUNT:-acc2}
-      SETTINGS_PATH: configs/live_acc2.yaml
+      SETTINGS_PATH: configs/live_acc2_scalp_m1.yaml
     volumes:
       - ./dags:/opt/airflow/dags
       - ./src:/opt/airflow/src
@@ -238,7 +238,7 @@ services:
     restart: unless-stopped
     command: ["python", "-m", "uvicorn", "xauusd_ai.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
-  # ── BACKEND: Training (default config) ───────────────────────────────────
+  # ── BACKEND: Training (default config = ACC2 freeze scalp M1) ────────────
   # Lệnh: docker compose up train --build
   train:
     build:
@@ -259,63 +259,7 @@ services:
       - ./configs:/app/configs
       - ./outputs:/app/outputs
       - ./src:/app/src
-    command: ["python", "src/xauusd_ai/main.py", "train", "--config", "configs/settings.yaml"]
-
-  # ── BACKEND: Training ICT+Wyckoff ─────────────────────────────────────────
-  # Lệnh: docker compose up train-ict --build
-  train-ict:
-    build:
-      context: .
-      dockerfile: Dockerfile.backend
-    image: xauusd-backend:latest
-    env_file: .env
-    environment:
-      POSTGRES_HOST: postgres
-      POSTGRES_USER: ${POSTGRES_USER:-trader}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trader_secret}
-      POSTGRES_DB: ${POSTGRES_DB:-tradedb}
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
-      MLFLOW_TRACKING_URI: http://mlflow:5000
-    volumes:
-      - ./configs:/app/configs
-      - ./outputs:/app/outputs
-      - ./src:/app/src
-    command: ["python", "src/xauusd_ai/main.py", "train", "--config", "configs/train_ict_wyckoff_2022_2026.yaml"]
-
-  # ── BACKEND: Live Trading — ACC2 ─────────────────────────────────────────
-  # Lệnh: docker compose up live -d
-  live:
-    init: true
-    build:
-      context: .
-      dockerfile: Dockerfile.backend
-    image: xauusd-backend:latest
-    depends_on:
-      postgres:
-        condition: service_healthy
-    env_file: .env
-    environment:
-      POSTGRES_HOST: postgres
-      POSTGRES_USER: ${POSTGRES_USER:-trader}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trader_secret}
-      POSTGRES_DB: ${POSTGRES_DB:-tradedb}
-      MLFLOW_TRACKING_URI: "file:///app/mlruns"
-      TRADING_ACCOUNT: acc2
-      MT5_BRIDGE_URL: "http://host.docker.internal:5601"
-    volumes:
-      - ./configs:/app/configs
-      - ./outputs:/app/outputs
-      - ./src:/app/src
-    restart: unless-stopped
-    command: ["python", "src/xauusd_ai/main.py", "live", "--config", "configs/live_acc2.yaml"]
-    healthcheck:
-      test: ["CMD-SHELL", "python -c \"import os,sys,time; sys.exit(0 if time.time()-os.stat('outputs/live_status_acc2.json').st_mtime<300 else 1)\""]
-      interval: 60s
-      timeout: 15s
-      retries: 3
-      start_period: 120s
+    command: ["python", "src/xauusd_ai/main.py", "train", "--config", "configs/live_acc2_scalp_m1.yaml"]
 
   # ── BACKEND: M1 Scalp Bot — ACC2 (DualScalpM1, live-scalp-acc2) ──────────
   # Lệnh: docker compose up live-scalp-acc2 -d
@@ -335,6 +279,8 @@ services:
       MLFLOW_TRACKING_URI: "file:///app/mlruns"
       TRADING_ACCOUNT: acc2
       MT5_BRIDGE_URL: "http://host.docker.internal:5601"
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN_ACC2:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID_ACC2:-}
     volumes:
       - ./configs:/app/configs
       - ./outputs:/app/outputs
@@ -347,8 +293,8 @@ services:
       - |
         set -e
         cd /app
-        if [ ! -f outputs/acc2_scalp_m1_model.pkl ]; then
-          echo "=== Building DualScalpM1 model (first run) ==="
+        if [ ! -f outputs/acc2_scalp_m1_h10_setup_exit_model.pkl ]; then
+          echo "=== Building ACC2 freeze scalp M1 H10 model (first run) ==="
           python scripts/acc2_scalp_m1_save_model.py
         else
           echo "=== Model pkl found — skipping retrain ==="
@@ -362,7 +308,7 @@ services:
       retries: 5
       start_period: 600s
 
-  # ── BACKEND: Live Trading — ACC1 (aggressive, acc1_live_model.pkl) ───────
+  # ── BACKEND: Live Trading — ACC1 (scalp M1 reversal profile) ─────────────
   # Lệnh: docker compose up live-acc1 -d
   live-acc1:
     init: true
@@ -379,12 +325,14 @@ services:
       MLFLOW_TRACKING_URI: "file:///app/mlruns"
       TRADING_ACCOUNT: acc1
       MT5_BRIDGE_URL: "http://host.docker.internal:5600"
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN_ACC1:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID_ACC1:-}
     volumes:
       - ./configs:/app/configs
       - ./outputs:/app/outputs
       - ./src:/app/src
     restart: unless-stopped
-    command: ["python", "src/xauusd_ai/main.py", "live", "--config", "configs/live_acc1.yaml"]
+    command: ["python", "src/xauusd_ai/main.py", "live", "--config", "configs/live_acc1_scalp_m1.yaml"]
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import os,sys,time; sys.exit(0 if time.time()-os.stat('outputs/live_status_acc1.json').st_mtime<300 else 1)\""]
       interval: 60s
@@ -392,7 +340,7 @@ services:
       retries: 3
       start_period: 120s
 
-  # ── BACKEND: Training — ACC1 (train_acc1.yaml — does NOT touch acc2 model) ─
+  # ── BACKEND: Training — ACC1 scalp M1 (does NOT touch acc2 model) ─────────
   # Lệnh: docker compose run --rm train-acc1
   train-acc1:
     build:
@@ -413,9 +361,9 @@ services:
       - ./configs:/app/configs
       - ./outputs:/app/outputs
       - ./src:/app/src
-    command: ["python", "src/xauusd_ai/main.py", "train", "--config", "configs/train_acc1.yaml"]
+    command: ["python", "src/xauusd_ai/main.py", "train", "--config", "configs/live_acc1_scalp_m1.yaml"]
 
-  # ── BACKEND: Backtest ─────────────────────────────────────────────────────
+  # ── BACKEND: Backtest (default = ACC2 freeze scalp M1) ───────────────────
   # Lệnh: docker compose up backtest --build
   backtest:
     build:
@@ -436,7 +384,7 @@ services:
       - ./configs:/app/configs
       - ./outputs:/app/outputs
       - ./src:/app/src
-    command: ["python", "src/xauusd_ai/main.py", "backtest", "--config", "configs/settings.yaml"]
+    command: ["python", "src/xauusd_ai/main.py", "backtest", "--config", "configs/live_acc2_scalp_m1.yaml"]
 
   # ── Nginx: reverse proxy + WebSocket edge ────────────────────────────────
   # Exposes the FastAPI dashboard on port 80 with WS upgrade support
@@ -468,31 +416,6 @@ services:
       - nginx
     restart: unless-stopped
     command: tunnel --no-autoupdate --protocol http2 --url http://nginx:80
-
-  # ── FRONTEND: Streamlit Dashboard ────────────────────────────────────────
-  # Lệnh: docker compose up frontend --build -d
-  frontend:
-    build:
-      context: .
-      dockerfile: Dockerfile.frontend
-    image: xauusd-frontend:latest
-    depends_on:
-      - api
-      - postgres
-    env_file: .env
-    environment:
-      FASTAPI_URL: http://api:8000
-      POSTGRES_HOST: postgres
-      POSTGRES_USER: ${POSTGRES_USER:-trader}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trader_secret}
-      POSTGRES_DB: ${POSTGRES_DB:-tradedb}
-    volumes:
-      - ./configs:/app/configs
-      - ./outputs:/app/outputs
-      - ./src:/app/src
-    ports:
-      - "8501:8501"
-    restart: unless-stopped
 
   # ── Healthwatch: monitors live bots and sends Telegram alerts ─────────────
   # Lệnh: docker compose up healthwatch -d

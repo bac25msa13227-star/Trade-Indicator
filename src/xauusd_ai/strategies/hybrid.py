@@ -8,6 +8,11 @@ import numpy as np
 import pandas as pd
 
 from xauusd_ai.config import Settings
+from xauusd_ai.execution.sltp import (
+    base_sltp_by_regime,
+    compute_dynamic_sltp,
+    resolve_setup_exit_targets,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -230,19 +235,7 @@ class HybridStrategy:
         return result
 
     def _regime_sl_rr(self, volatility_regime: int) -> tuple[float, float]:
-        """
-        Trả về (sl_atr_multiple, take_profit_rr) phù hợp với market regime.
-
-        Sideways  (0): SL chặt hơn, TP gần hơn — thị trường ít room
-        Normal    (1): giá trị mặc định từ config
-        Volatile  (2): SL rộng hơn, TP xa hơn — cho giá chạy đủ xa
-        """
-        r = self.settings.risk
-        if volatility_regime == 0:
-            return r.sideway_sl_atr_multiple, r.sideway_take_profit_rr
-        elif volatility_regime == 2:
-            return r.volatile_sl_atr_multiple, r.volatile_take_profit_rr
-        return r.stop_loss_atr_multiple, r.take_profit_rr
+        return base_sltp_by_regime(self.settings, volatility_regime)
 
     def build_trade_decision(self, frames: dict[str, pd.DataFrame], live_row: pd.Series, model_signal: dict[str, float]) -> TradeDecision:
         confidence = float(model_signal["probability"])
@@ -264,14 +257,79 @@ class HybridStrategy:
 
         # ── Tính ATR-based SL/TP với multiplier theo regime ───────────────────
         sl_mult, rr = self._regime_sl_rr(volatility_regime)
-        atr_value = float(live_row.get("atr", 0))
-        entry = float(live_row["close"])
-        stop_distance = atr_value * sl_mult if atr_value > 0 else 0.0
-
         hyp_side = "buy" if strategy_score >= 0 else "sell"
         # ── DualScalpM1: use model's explicit trade_side if provided ──────────
         if model_signal.get("trade_side"):
             hyp_side = str(model_signal["trade_side"])
+
+        row_for_sltp = live_row.copy() if hasattr(live_row, "copy") else dict(live_row)
+        row_for_sltp["trade_side"] = hyp_side
+        if "expected_direction" not in row_for_sltp:
+            row_for_sltp["expected_direction"] = 1 if hyp_side == "buy" else -1
+
+        dyn_sl_mult, dyn_rr, dyn_tags, _ = compute_dynamic_sltp(
+            self.settings,
+            row_for_sltp,
+            confidence,
+            sl_mult,
+            rr,
+        )
+        sl_mult = dyn_sl_mult
+        rr = dyn_rr
+        setup_tp_rr, setup_sl_mult, _setup_tier, setup_tags, _ = resolve_setup_exit_targets(
+            row_for_sltp,
+            enabled=bool(getattr(self.settings.risk, "setup_exit_enabled", False)),
+            tp_scale=float(getattr(self.settings.risk, "setup_exit_scale", 1.0)),
+        )
+        if setup_tp_rr > 0:
+            rr = setup_tp_rr
+        if setup_sl_mult > 0:
+            sl_mult = setup_sl_mult
+        atr_value = float(live_row.get("atr", 0))
+        entry = float(live_row["close"])
+        effective_sl_mult = sl_mult
+        sl_guard_tags: list[str] = []
+        if dyn_tags:
+            sl_guard_tags.extend(dyn_tags)
+        if setup_tags:
+            sl_guard_tags.extend(setup_tags)
+
+        # Optional: widen SL automatically under high volatility percentiles.
+        if (
+            atr_value > 0
+            and bool(getattr(self.settings.risk, "sl_volatility_boost_enabled", False))
+        ):
+            atr_percentile = self._as_float(live_row.get("atr_percentile", None))
+            trigger = max(
+                0.0,
+                min(1.0, float(getattr(self.settings.risk, "sl_volatility_boost_trigger_percentile", 0.85))),
+            )
+            max_multiplier = max(
+                1.0, float(getattr(self.settings.risk, "sl_volatility_boost_max_multiplier", 1.0))
+            )
+            if atr_percentile is not None:
+                atr_percentile = max(0.0, min(1.0, atr_percentile))
+                if atr_percentile >= trigger and max_multiplier > 1.0:
+                    scale = (atr_percentile - trigger) / max(1e-6, 1.0 - trigger)
+                    boost = 1.0 + scale * (max_multiplier - 1.0)
+                    effective_sl_mult = sl_mult * boost
+                    sl_guard_tags.append(f"volBoost×{boost:.2f}")
+
+        stop_distance = atr_value * effective_sl_mult if atr_value > 0 else 0.0
+
+        # Optional: hard floor for SL distance in live trade.
+        min_stop_points = max(0.0, float(getattr(self.settings.risk, "min_stop_loss_points", 0.0)))
+        if min_stop_points > 0 and stop_distance < min_stop_points:
+            stop_distance = min_stop_points
+            sl_guard_tags.append(f"minSL${min_stop_points:.1f}")
+
+        min_stop_atr_mult = max(0.0, float(getattr(self.settings.risk, "min_stop_loss_atr_multiple", 0.0)))
+        if atr_value > 0 and min_stop_atr_mult > 0:
+            atr_floor = atr_value * min_stop_atr_mult
+            if stop_distance < atr_floor:
+                stop_distance = atr_floor
+                sl_guard_tags.append(f"minSL{min_stop_atr_mult:.1f}ATR")
+
         if hyp_side == "buy":
             hyp_sl = entry - stop_distance if stop_distance > 0 else 0.0
             hyp_tp = entry + stop_distance * rr if stop_distance > 0 else 0.0
@@ -301,5 +359,7 @@ class HybridStrategy:
         stop_loss = hyp_sl
         take_profit = hyp_tp
         regime_label = {0: "SIDEWAYS", 1: "NORMAL", 2: "VOLATILE"}.get(volatility_regime, "NORMAL")
-        reason = f"Hybrid aligned | {regime_label} sl×{sl_mult:.1f} RR{rr:.1f}"
+        reason = f"Hybrid aligned | {regime_label} sl×{effective_sl_mult:.2f} RR{rr:.1f}"
+        if sl_guard_tags:
+            reason = f"{reason} | {'/'.join(dict.fromkeys(sl_guard_tags))}"
         return TradeDecision(True, hyp_side, confidence, reason, entry, stop_loss, take_profit)

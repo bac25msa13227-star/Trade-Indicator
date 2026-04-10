@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import os
+import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+import urllib.parse as _urlparse
+import urllib.request as _urllib
+import urllib.error as _urlerr
 
 import pandas as pd
 import yfinance as yf
@@ -85,6 +89,24 @@ class MarketDataService:
         self.settings = settings
         self.news_filter = NewsFilter(settings)
 
+    def _bridge_url(self) -> str:
+        return os.getenv("MT5_BRIDGE_URL", "").rstrip("/")
+
+    def _bridge_call_json(self, path: str):
+        bridge_url = self._bridge_url()
+        if not bridge_url:
+            raise RuntimeError("MT5_BRIDGE_URL is not set")
+        url = bridge_url + path
+        req = _urllib.Request(url, method="GET")
+        try:
+            with _urllib.urlopen(req, timeout=15) as resp:
+                payload = json.loads(resp.read())
+                if isinstance(payload, dict) and "error" in payload:
+                    raise RuntimeError(str(payload["error"]))
+                return payload
+        except _urlerr.URLError as exc:
+            raise RuntimeError(f"MT5 bridge unreachable at {url}: {exc}") from exc
+
     def _initialize_mt5(self) -> None:
         if mt5 is None:
             raise RuntimeError("MetaTrader5 package is not installed in this environment")
@@ -109,6 +131,8 @@ class MarketDataService:
             raise RuntimeError(f"MT5 initialize failed: {mt5.last_error()}")
 
     def _fetch_rates_mt5(self, timeframe_name: str, bars: int) -> pd.DataFrame:
+        if mt5 is None and self._bridge_url():
+            return self._fetch_rates_bridge(timeframe_name, bars)
         self._initialize_mt5()
         mt5_timeframe_map = {
             "M1": mt5.TIMEFRAME_M1,
@@ -140,6 +164,49 @@ class MarketDataService:
         frame["volume_imbalance"] = (
             (frame["close"] - frame["open"]).abs() / (frame["high"] - frame["low"]).replace(0, pd.NA)
         ).fillna(0)
+        return frame
+
+    def _fetch_rates_bridge(self, timeframe_name: str, bars: int) -> pd.DataFrame:
+        symbol = self.settings.market.symbol
+        query = _urlparse.urlencode(
+            {
+                "symbol": symbol,
+                "timeframe": timeframe_name,
+                "count": int(bars),
+                "start_pos": 0,
+            }
+        )
+        payload = self._bridge_call_json(f"/bars?{query}")
+        if not payload:
+            raise RuntimeError(f"No bridge bars returned for {symbol} {timeframe_name}")
+
+        frame = pd.DataFrame(payload).rename(columns={"spread": "spread_points"})
+        required_columns = {"time", "open", "high", "low", "close"}
+        missing = required_columns.difference(frame.columns)
+        if missing:
+            raise RuntimeError(f"Bridge bars missing columns: {sorted(missing)}")
+
+        if "tick_volume" not in frame.columns:
+            frame["tick_volume"] = 0.0
+        if "spread_points" not in frame.columns:
+            frame["spread_points"] = 0.0
+
+        if pd.api.types.is_numeric_dtype(frame["time"]):
+            frame["time"] = pd.to_datetime(frame["time"], unit="s", utc=True)
+        else:
+            frame["time"] = pd.to_datetime(frame["time"], utc=True)
+
+        frame = (
+            frame.sort_values("time")
+            .drop_duplicates(subset=["time"])
+            .tail(int(bars))
+            .reset_index(drop=True)
+        )
+        frame["tick_volume_delta"] = pd.to_numeric(frame["tick_volume"], errors="coerce").fillna(0.0).diff().fillna(0.0)
+        frame["volume_imbalance"] = (
+            (pd.to_numeric(frame["close"], errors="coerce") - pd.to_numeric(frame["open"], errors="coerce")).abs()
+            / (pd.to_numeric(frame["high"], errors="coerce") - pd.to_numeric(frame["low"], errors="coerce")).replace(0, pd.NA)
+        ).fillna(0.0)
         return frame
 
     def _fetch_rates_yfinance(self, timeframe_name: str, bars: int) -> pd.DataFrame:
@@ -194,6 +261,8 @@ class MarketDataService:
     def _fetch_rates(self, timeframe_name: str, bars: int, source: str) -> pd.DataFrame:
         if source == "yfinance":
             return self._fetch_rates_yfinance(timeframe_name, bars)
+        if source in {"bridge", "mt5_bridge"}:
+            return self._fetch_rates_bridge(timeframe_name, bars)
         if source == "csv_folder":
             return self._fetch_rates_csv_folder(timeframe_name, bars)
         if source == "csv":
@@ -312,6 +381,10 @@ class MarketDataService:
             self.settings.market.structure_timeframe,
             self.settings.market.execution_timeframe,
         }
+        # Live/scalp profiles often need the full configured TF stack available.
+        # Prefer the bars-config universe as the fetch set so D1/H4/H1/M30/M15/M5/M1
+        # are all hydrated when present in config, especially for bridge-backed live mode.
+        required.update({str(tf).upper() for tf in self.settings.market.bars.keys()})
         resolved_source = source or self.settings.market.live_data_source
         for timeframe_name in required:
             # all_bars=True dùng cho training — load toàn bộ CSV không giới hạn

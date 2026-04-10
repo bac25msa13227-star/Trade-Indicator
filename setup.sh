@@ -3,8 +3,8 @@
 # setup.sh — Trade Indicator automated setup (macOS / Linux)
 #
 # Usage:
-#   bash setup.sh --bot acc2        # M1 Scalp bot (ACC2) only
-#   bash setup.sh --bot acc1        # M5 PF3v2 bot (ACC1) only
+#   bash setup.sh --bot acc2        # ACC2 freeze scalp M1 only
+#   bash setup.sh --bot acc1        # ACC1 scalp M1 reversal only
 #   bash setup.sh --bot both        # both bots
 #
 # Prerequisites: Docker Desktop, git, git-lfs
@@ -46,9 +46,10 @@ echo "[3/7] Checking .env..."
 if [[ ! -f .env ]]; then
   if [[ -f .env.example ]]; then
     cp .env.example .env
-    warn ".env created from .env.example — EDIT it with your MT5 credentials before starting!"
-    echo "      Required: MT5_LOGIN_ACC2, MT5_PASSWORD_ACC2, MT5_SERVER_ACC2"
+    warn ".env created from .env.example — EDIT Telegram settings before starting!"
+    echo "      Required: TELEGRAM_BOT_TOKEN_ACC1, TELEGRAM_CHAT_ID_ACC1"
     echo "      Required: TELEGRAM_BOT_TOKEN_ACC2, TELEGRAM_CHAT_ID_ACC2"
+    echo "      Live Docker mode expects MT5 Bridge on host ports 5600/5601"
     read -p "      Press ENTER after editing .env to continue..." _
   else
     err ".env.example not found. Cannot create .env."
@@ -81,10 +82,10 @@ check_pkl() {
 }
 
 if [[ "$BOT" == "acc2" || "$BOT" == "both" ]]; then
-  check_pkl "outputs/acc2_scalp_m1_model.pkl"
+  check_pkl "outputs/acc2_scalp_m1_h10_setup_exit_model.pkl"
 fi
 if [[ "$BOT" == "acc1" || "$BOT" == "both" ]]; then
-  check_pkl "outputs/acc1_expand_net127313_dd3215_model.pkl"
+  check_pkl "outputs/acc1_scalp_m1_reversal_model.pkl"
 fi
 
 # ── 6. Build Docker image ────────────────────────────────────────────────────
@@ -112,6 +113,6 @@ echo "║  Logs:    docker compose logs live-scalp-acc2 -f"
 echo "║  Status:  cat outputs/live_status_acc2.json"
 echo "║  Stop:    docker compose stop live-scalp-acc2"
 echo "║"
-echo "║  ⚠️  Make sure MT5 Bridge is running on host port 5601"
+echo "║  ⚠️  Make sure MT5 Bridge is running on host ports 5600 and 5601"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo ""
