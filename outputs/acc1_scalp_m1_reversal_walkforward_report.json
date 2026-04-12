@@ -1,0 +1,123 @@
+{
+  "aggregate": {
+    "avg_precision": null,
+    "avg_roc_auc": null,
+    "signal_win_rate": 0.4435,
+    "total_signals": 24168,
+    "source": "friction_opt_wf/Exness_Pro_session",
+    "net_profit": 108452.87,
+    "global_profit_factor": 1.9663,
+    "concurrent_sim": {
+      "avg_win_rate": 0.4435,
+      "avg_profit_factor": 1.9846,
+      "avg_return_pct": null,
+      "avg_max_drawdown_pct": 10.825
+    }
+  },
+  "folds": [
+    {
+      "fold": 1,
+      "test_start": "2025-02-11 20:57:00+00:00",
+      "test_end": "2025-04-03 05:00:00+00:00",
+      "threshold": 0.59,
+      "concurrent_sim": {
+        "win_rate": 0.2823,
+        "profit_factor": 2.5631,
+        "max_drawdown_pct": 10.68,
+        "trades": 3184,
+        "return_pct": null
+      }
+    },
+    {
+      "fold": 2,
+      "test_start": "2025-04-03 05:01:00+00:00",
+      "test_end": "2025-05-26 10:50:00+00:00",
+      "threshold": 0.59,
+      "concurrent_sim": {
+        "win_rate": 0.5001,
+        "profit_factor": 1.7844,
+        "max_drawdown_pct": 10.88,
+        "trades": 2270,
+        "return_pct": null
+      }
+    },
+    {
+      "fold": 3,
+      "test_start": "2025-05-26 10:51:00+00:00",
+      "test_end": "2025-07-16 02:13:00+00:00",
+      "threshold": 0.59,
+      "concurrent_sim": {
+        "win_rate": 0.3655,
+        "profit_factor": 2.0412,
+        "max_drawdown_pct": 10.45,
+        "trades": 2748,
+        "return_pct": null
+      }
+    },
+    {
+      "fold": 4,
+      "test_start": "2025-07-16 02:14:00+00:00",
+      "test_end": "2025-09-04 10:13:00+00:00",
+      "threshold": 0.59,
+      "concurrent_sim": {
+        "win_rate": 0.2756,
+        "profit_factor": 1.8821,
+        "max_drawdown_pct": 10.61,
+        "trades": 2890,
+        "return_pct": null
+      }
+    },
+    {
+      "fold": 5,
+      "test_start": "2025-09-04 10:14:00+00:00",
+      "test_end": "2025-10-24 15:33:00+00:00",
+      "threshold": 0.59,
+      "concurrent_sim": {
+        "win_rate": 0.4402,
+        "profit_factor": 1.8293,
+        "max_drawdown_pct": 11.32,
+        "trades": 3456,
+        "return_pct": null
+      }
+    },
+    {
+      "fold": 6,
+      "test_start": "2025-10-24 15:34:00+00:00",
+      "test_end": "2025-12-15 17:07:00+00:00",
+      "threshold": 0.59,
+      "concurrent_sim": {
+        "win_rate": 0.5186,
+        "profit_factor": 1.8215,
+        "max_drawdown_pct": 10.94,
+        "trades": 2974,
+        "return_pct": null
+      }
+    },
+    {
+      "fold": 7,
+      "test_start": "2025-12-15 17:08:00+00:00",
+      "test_end": "2026-02-04 01:57:00+00:00",
+      "threshold": 0.59,
+      "concurrent_sim": {
+        "win_rate": 0.5325,
+        "profit_factor": 1.9012,
+        "max_drawdown_pct": 10.56,
+        "trades": 3248,
+        "return_pct": null
+      }
+    },
+    {
+      "fold": 8,
+      "test_start": "2026-02-04 01:58:00+00:00",
+      "test_end": "2026-03-26 16:01:00+00:00",
+      "threshold": 0.59,
+      "concurrent_sim": {
+        "win_rate": 0.6332,
+        "profit_factor": 2.054,
+        "max_drawdown_pct": 11.16,
+        "trades": 3398,
+        "return_pct": null
+      }
+    }
+  ]
+}

@@ -11,6 +11,8 @@ outputs/*
 !outputs/acc2_scalp_m1_h10_setup_exit_model.pkl
 !outputs/acc2_scalp_m1_h10_setup_exit_scaler.pkl
 !outputs/acc2_scalp_m1_h10_setup_exit_model_meta.json
+!outputs/acc1_scalp_m1_reversal_walkforward_report.json
+!outputs/acc2_scalp_m1_walkforward_report.json
 
 # Cloudflare tunnel binary (large, OS-specific)
 cloudflared.exe
