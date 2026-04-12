@@ -64,8 +64,8 @@ strategy:
   swing_lookback: 20
   volatility_window: 20
 
-  # ── M1 scalp: probability threshold gate (safe patch: stricter to reduce churn) ───
-  signal_threshold: 0.61
+  # ── M1 scalp: probability threshold gate (WF best: thr=0.60 for normal regime) ───
+  signal_threshold: 0.60
   sideways_volatility_threshold: 0.003
   strong_volatility_threshold: 0.016
   news_block_minutes: 0                     # news filter handled by integrations.news
@@ -81,29 +81,27 @@ strategy:
   require_trend_alignment: false
   force_trade: false
 
-  # ── Trading hours: all liquid sessions ────────────────────────────────────
-  # M1 scalp works in all sessions — ATH folds confirm regime-agnostic edge
-  # Focus on London/NY liquid hours to reduce M1 noise/whipsaw
+  # ── Trading hours: all sessions ────────────────────────────────────────────
+  # No hour restriction — live/WF parity requires both to trade all hours
+  # Former value Mon-Fri [7-11,13-17] cut ~58% of trades vs pre-patch behavior
   blocked_hours_utc: []
   blocked_weekdays_utc: []
   blocked_weekday_hours_utc: {}
-  allowed_weekday_hours_utc:
-    Monday: [7, 8, 9, 10, 11, 13, 14, 15, 16, 17]
-    Tuesday: [7, 8, 9, 10, 11, 13, 14, 15, 16, 17]
-    Wednesday: [7, 8, 9, 10, 11, 13, 14, 15, 16, 17]
-    Thursday: [7, 8, 9, 10, 11, 13, 14, 15, 16, 17]
-    Friday: [7, 8, 9, 10, 11, 13, 14, 15, 16, 17]
+  allowed_weekday_hours_utc: {}
 
   # ── ICT Silver Bullet windows ────────────────────────────────────────────
   silver_bullet_enabled: true
   silver_bullet_windows_utc: [[3, 4], [6, 7], [10, 11], [14, 15]]
   silver_bullet_confidence_boost: 0.03
+  scalp_quality_adjustment_enabled: false   # disabled: WF does not apply quality adjustment at inference
+  scalp_quality_adjustment_weight: 0.02
+  scalp_quality_adjustment_max_delta: 0.06
 
   # ── ADX gate: DISABLED — M1 micro-moves work in all trend conditions ──────
   adx_gate_enabled: false
   adx_min_trend: 15.0
-  sideway_min_confidence: 0.58
-  volatile_min_confidence: 0.58
+  sideway_min_confidence: 0.60
+  volatile_min_confidence: 0.60
 
   regime_shutdown_rules: []
 
@@ -144,16 +142,16 @@ risk:
   setup_exit_scale: 0.75
 
   # ── Confidence gate ────────────────────────────────────────────────────────
-  min_confidence: 0.61
+  min_confidence: 0.60
 
   fixed_lot: 0.01
   sideway_risk_multiplier: 1.0
   normal_risk_multiplier: 1.0
   strong_volatility_risk_multiplier: 1.2
 
-  spread_cost_rr: 0.01
+  spread_cost_rr: 0.035                    # Exness Pro XAUUSD ~$0.15 spread / $4.38 1R
   slippage_rr: 0.01
-  commission_rr: 0.0
+  commission_rr: 0.0                        # Exness Pro: no commission (spread-only)
 
   # ── Kill switch ────────────────────────────────────────────────────────────
   kill_switch_enabled: true
@@ -163,7 +161,7 @@ risk:
   # ── Loss management ───────────────────────────────────────────────────────
   # M1: re-enter fast — market moves every minute
   consecutive_loss_pause_count: 2
-  consecutive_loss_cooldown_bars: 6
+  consecutive_loss_cooldown_bars: 4
   anti_martingale_factor: 0.2              # minimal size reduction after loss streak
   anti_martingale_max_reductions: 2
 
@@ -173,7 +171,7 @@ risk:
   reentry_min_distance_atr: 0.45           # require more distance before same-side re-entry
 
   # ── Partial TP: take 50% at 1.0R, let rest run to 1.5R ───────────────────
-  partial_tp_enabled: true
+  partial_tp_enabled: false
   partial_tp_rr: 1.0                      # take partial at 1R
   partial_tp_pct: 0.50                    # close 50% of position
 
@@ -193,11 +191,11 @@ execution:
   paper_data_source: bridge
 
   # ── Direction flip: close opposite when model reverses ───────────────────
-  close_opposite_on_signal: true
+  close_opposite_on_signal: false
 
   # ── Trailing SL: tight trail for M1 scalp ────────────────────────────────
   trailing_sl:
-    enabled: true
+    enabled: false
     breakeven_at_rr: 0.5                  # move to BE at 0.5R
     activation_rr: 0.8                    # start trailing at 0.8R
     trail_atr_multiple: 0.5               # tight trail (M1 ATR-scaled)

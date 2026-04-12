@@ -145,6 +145,16 @@ class StrategySettings(StrictSettingsModel):
         default_factory=lambda: [[3, 4], [10, 11], [14, 15]]  # Asian, London, NY
     )
     silver_bullet_confidence_boost: float = 0.05  # Boost confidence by 5% during SB windows
+    # Optional runtime calibration layer for scalp profiles.
+    # Uses existing setup/trend/pullback/execution features to nudge model
+    # probability up/down before thresholding. Default off for backward compatibility.
+    scalp_quality_adjustment_enabled: bool = False
+    scalp_quality_adjustment_weight: float = 0.0
+    scalp_quality_adjustment_max_delta: float = 0.12
+    scalp_dynamic_threshold_enabled: bool = False
+    scalp_threshold_offset_strong_regime: float = 0.0
+    scalp_threshold_offset_sideway_regime: float = 0.0
+    scalp_threshold_offset_off_session: float = 0.0
     # ADX gate — only trade when trend strength is sufficient
     adx_gate_enabled: bool = False
     adx_min_trend: float = 20.0  # Minimum ADX value to allow entry

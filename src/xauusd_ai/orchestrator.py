@@ -472,7 +472,11 @@ def run_walkforward(settings: Settings) -> None:
             fold_dataset = pd.concat([fold_train, fold_test], ignore_index=True)
             fold_dataset["split"] = "train"
             fold_dataset.loc[len(fold_train):, "split"] = "test"
-            metrics = trainer.train(fold_dataset, save_artifacts=False)
+            # ── Use DualScalpM1 training path when dataset has direction labels ──
+            if "expected_direction" in fold_dataset.columns:
+                metrics = trainer.train_dual_scalp_fold(fold_dataset, save_artifacts=False)
+            else:
+                metrics = trainer.train(fold_dataset, save_artifacts=False)
             predictions = trainer.predict_dataset(fold_dataset)
             simulation = simulate_prediction_backtest(predictions, candidate_settings, risk_manager)
             fold_report = {

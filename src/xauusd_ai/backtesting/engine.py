@@ -71,7 +71,8 @@ def simulate_prediction_backtest(
             effective_bal = max_balance
         # P1a: Session-aware friction
         _sess_mult = float(getattr(row, 'session_spread_mult', 1.0))
-        _row_friction = _spread_rr * _sess_mult + _slippage_rr + _commission_rr
+        _slip_mult = float(getattr(row, 'session_slippage_mult', 1.0))
+        _row_friction = _spread_rr * _sess_mult + _slippage_rr * _slip_mult + _commission_rr
         net_rr = row.realized_rr - _row_friction
         pnl = effective_bal * risk_fraction * net_rr
         balance_before = balance
@@ -249,6 +250,8 @@ def simulate_dynamic_concurrent_backtest(
     _pause_count = int(getattr(settings.risk, "consecutive_loss_pause_count", 3))
     _cooldown_bars = int(getattr(settings.risk, "consecutive_loss_cooldown_bars", 8))
     _daily_limit = float(getattr(settings.risk, "daily_loss_limit_pct", 0.0))
+    _max_dd_kill_pct = float(getattr(settings.risk, "max_drawdown_kill_pct", 0.0))
+    _killed_by_dd = False  # once True, no new trades for rest of fold
 
     for i, row in enumerate(test_rows.itertuples(index=False)):
         # ── close matured positions ────────────────────────────────────────
@@ -259,6 +262,8 @@ def simulate_dynamic_concurrent_backtest(
                 balance += pnl
                 peak_balance = max(peak_balance, balance)
                 dd = (peak_balance - balance) / peak_balance if peak_balance > 0 else 0.0
+                if _max_dd_kill_pct > 0 and dd >= _max_dd_kill_pct:
+                    _killed_by_dd = True
                 entry["meta"]["balance_after"] = round(balance, 4)
                 entry["meta"]["drawdown"] = round(-dd, 4)
                 entry["meta"]["is_win"] = bool(pnl > 0)
@@ -311,6 +316,10 @@ def simulate_dynamic_concurrent_backtest(
             balance_history.append(balance)
             continue
         if _daily_limit > 0 and peak_balance > 0 and _daily_loss >= peak_balance * _daily_limit:
+            skipped_circuit_breaker += 1
+            balance_history.append(balance)
+            continue
+        if _killed_by_dd:
             skipped_circuit_breaker += 1
             balance_history.append(balance)
             continue
@@ -482,7 +491,8 @@ def simulate_dynamic_concurrent_backtest(
 
         # P1a: Session-aware friction
         _sess_mult = float(getattr(row, "session_spread_mult", 1.0))
-        _row_friction = _spread_rr * _sess_mult + _slippage_rr + _commission_rr
+        _slip_mult = float(getattr(row, "session_slippage_mult", 1.0))
+        _row_friction = _spread_rr * _sess_mult + _slippage_rr * _slip_mult + _commission_rr
         net_rr = raw_rr - _row_friction
         rf, throttle_mult, throttle_reason = risk_manager.apply_risk_throttle(
             rf,
@@ -618,6 +628,7 @@ def simulate_dynamic_concurrent_backtest(
         "signals_filtered_out": skipped_by_filters,
         "signals_no_slot": skipped_no_slot,
         "signals_circuit_breaker": skipped_circuit_breaker,
+        "killed_by_max_dd": _killed_by_dd,
         "signals_reentry_guard": skipped_reentry_guard,
         "dynamic_sltp_eval_enabled": dynamic_sltp_eval_enabled,
         "dynamic_sltp_eval_active": dynamic_sltp_eval_active,

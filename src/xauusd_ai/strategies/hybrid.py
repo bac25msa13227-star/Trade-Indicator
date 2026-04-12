@@ -72,6 +72,30 @@ class HybridStrategy:
             return True, "blocked_weekday_hour"
         return False, "ok"
 
+    def _effective_probability(self, row: pd.Series | object, probability: float) -> float:
+        effective_prob = float(probability)
+        if not self.settings.strategy.silver_bullet_enabled:
+            return effective_prob
+
+        timestamp = getattr(row, "time", None)
+        if timestamp is None and isinstance(row, pd.Series):
+            timestamp = row.get("time")
+        if timestamp is None:
+            return effective_prob
+
+        resolved = timestamp
+        if not isinstance(resolved, (pd.Timestamp, datetime)):
+            resolved = pd.to_datetime(resolved, utc=True, errors="coerce")
+        if pd.isna(resolved):
+            return effective_prob
+
+        hour = int(resolved.hour)
+        for window in self.settings.strategy.silver_bullet_windows_utc:
+            if len(window) == 2 and window[0] <= hour <= window[1]:
+                effective_prob += self.settings.strategy.silver_bullet_confidence_boost
+                break
+        return effective_prob
+
     def _regime_shutdown(self, row: pd.Series | object, probability: float, side: str | None = None) -> tuple[bool, str]:
         rules = getattr(self.settings.strategy, "regime_shutdown_rules", [])
         if not rules:
@@ -168,20 +192,7 @@ class HybridStrategy:
         else:
             min_conf = self.settings.risk.min_confidence
 
-        # Silver Bullet boost: increase effective probability during high-probability windows
-        effective_prob = probability
-        if self.settings.strategy.silver_bullet_enabled:
-            timestamp = getattr(row, "time", None)
-            if timestamp is not None:
-                resolved = timestamp
-                if not isinstance(resolved, (pd.Timestamp, datetime)):
-                    resolved = pd.to_datetime(resolved, utc=True, errors="coerce")
-                if not pd.isna(resolved):
-                    hour = int(resolved.hour)
-                    for window in self.settings.strategy.silver_bullet_windows_utc:
-                        if len(window) == 2 and window[0] <= hour <= window[1]:
-                            effective_prob += self.settings.strategy.silver_bullet_confidence_boost
-                            break
+        effective_prob = self._effective_probability(row, probability)
 
         shutdown, shutdown_reason = self._regime_shutdown(row, effective_prob)
         if shutdown:
@@ -239,7 +250,7 @@ class HybridStrategy:
 
     def build_trade_decision(self, frames: dict[str, pd.DataFrame], live_row: pd.Series, model_signal: dict[str, float]) -> TradeDecision:
         confidence = float(model_signal["probability"])
-        signal_on = bool(model_signal["prediction"] == 1 and confidence >= self.settings.risk.min_confidence)
+        signal_on = bool(model_signal["prediction"] == 1)
         strategy_score = float(live_row["strategy_score"])
         volatility_regime = int(live_row.get("volatility_regime", 1))
 
@@ -346,13 +357,9 @@ class HybridStrategy:
 
         if not signal_on:
             return TradeDecision(False, hyp_side, confidence, "Model confidence below threshold", entry, hyp_sl, hyp_tp)
-        shutdown, shutdown_reason = self._regime_shutdown(live_row, confidence, hyp_side)
-        if shutdown:
-            return TradeDecision(False, hyp_side, confidence, f"Regime shutdown: {shutdown_reason}", entry, hyp_sl, hyp_tp)
-        if abs(strategy_score) < self.required_strategy_score(int(live_row["volatility_regime"])):
-            return TradeDecision(False, hyp_side, confidence, "Strategy consensus is weak", entry, hyp_sl, hyp_tp)
-        if self.settings.strategy.require_trend_alignment and int(live_row["trend_alignment"]) != 1:
-            return TradeDecision(False, hyp_side, confidence, "Higher timeframe trend is misaligned", entry, hyp_sl, hyp_tp)
+        allowed, gate_reason = self.should_allow_row(row_for_sltp, confidence)
+        if not allowed:
+            return TradeDecision(False, hyp_side, confidence, gate_reason, entry, hyp_sl, hyp_tp)
         if not no_news_block:
             return TradeDecision(False, hyp_side, confidence, "News filter blocked trade", entry, hyp_sl, hyp_tp)
 

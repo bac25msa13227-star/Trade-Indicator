@@ -72,10 +72,26 @@ def _load_m5(start_date: str | None = None,
         end_ts = pd.Timestamp(end_date, tz="UTC") + pd.Timedelta(days=1)
         df = df[df["time"] <= end_ts]
 
+    return compute_m5_context_features(df)
+
+
+def compute_m5_context_features(frame: pd.DataFrame) -> pd.DataFrame:
+    """
+    Compute the exact M5 context columns used by scalp training.
+
+    This helper is shared by both dataset build and live inference so M5 context
+    stays numerically identical across train/WF/live paths.
+    """
+    if frame is None or frame.empty:
+        return pd.DataFrame(columns=["time", "m5_bias", "m5_rsi_14", "m5_atr_norm"])
+
+    df = frame.copy()
+    df["time"] = pd.to_datetime(df["time"], utc=True)
+    df = df.sort_values("time").reset_index(drop=True)
+
     c  = df["close"]
     h  = df["high"]
     l  = df["low"]
-    tv = df["tick_volume"]
 
     # M5 bias: EMA8 vs EMA21
     e8  = c.ewm(span=8,  adjust=False).mean()
@@ -332,15 +348,26 @@ def _scalp_regime_proxy(df: pd.DataFrame) -> np.ndarray:
     Infer scalp volatility regime from M1 volatility expansion.
       0 sideway / 1 normal / 2 strong
     """
+    return infer_scalp_volatility_regime(df).to_numpy(dtype=int)
+
+
+def infer_scalp_volatility_regime(df: pd.DataFrame) -> pd.Series:
+    """
+    Shared scalp volatility regime inference for training and live runtime.
+
+    Priority:
+      1. M1 ATR expansion (same as label generation)
+      2. M5 ATR norm fallback
+    """
     if "ms_atr_expansion" in df.columns:
         exp = pd.to_numeric(df["ms_atr_expansion"], errors="coerce").fillna(1.0).to_numpy(dtype=float)
         regime = np.where(exp <= 0.95, 0, np.where(exp >= 1.30, 2, 1))
-        return regime.astype(int)
+        return pd.Series(regime.astype(int), index=df.index, dtype=int)
     if "m5_atr_norm" in df.columns:
         exp = pd.to_numeric(df["m5_atr_norm"], errors="coerce").fillna(1.0).to_numpy(dtype=float)
         regime = np.where(exp <= 0.95, 0, np.where(exp >= 1.25, 2, 1))
-        return regime.astype(int)
-    return np.ones(len(df), dtype=int)
+        return pd.Series(regime.astype(int), index=df.index, dtype=int)
+    return pd.Series(np.ones(len(df), dtype=int), index=df.index, dtype=int)
 
 
 def apply_dynamic_sltp_labels(

@@ -1,316 +1,629 @@
-# Latest Live Guide
+# XAUUSD AI Trading System — Live Deployment Guide
 
-Last updated: `2026-04-11`
+> **AI PROMPT — ĐỌC TRƯỚC KHI LÀM BẤT CỨ GÌ:**
+>
+> Bạn là AI assistant được giao nhiệm vụ deploy và verify hệ thống XAUUSD AI Trading trên máy mới.
+> Hệ thống này là một **ML-powered scalping bot** giao dịch vàng XAU/USD trên khung M1, sử dụng
+> mô hình Random Forest (scikit-learn) kết hợp ICT + Wyckoff + momentum fusion, chạy qua MT5 bridge.
+>
+> **Kiến trúc:** 2 tài khoản (ACC1, ACC2) chạy song song, mỗi tài khoản có config YAML + model .pkl riêng.
+> Tất cả tham số đã được tối ưu bằng Walk-Forward (WF) 8-fold với friction model thực tế theo từng sàn.
+>
+> **QUAN TRỌNG:**
+> - Project **KHÔNG cần** MLflow, Airflow, MinIO, Grafana để chạy core (train/backtest/WF/live/paper).
+> - Tất cả infra services (MLflow, MinIO, Airflow, Grafana, Prometheus) là **optional** — chỉ dùng khi cần observability.
+> - Core chỉ cần `requirements-core.txt` (pandas, numpy, scikit-learn, PyYAML, pydantic).
+> - Docker chỉ cần `postgres` (optional, có CSV fallback) + `api` + `nginx` cho dashboard.
+>
+> **SAU KHI HOÀN TẤT**, bạn **PHẢI** chạy checklist ở Section 14 và xuất báo cáo theo template ở Section 15.
 
-Đây là file hướng dẫn duy nhất cần đọc để chạy đúng project trên máy khác.
-
-Quan trọng:
-- Repo này **không còn dùng Streamlit**.
-- Dashboard realtime chuẩn là **dashboard WebSocket của FastAPI** tại:
-  - `http://localhost/dashboard`
-  - hoặc `http://localhost:8000/dashboard`
-- Hai profile đang dùng:
-  - `ACC1 = scalp M1 reversal`
-  - `ACC2 = scalp M1 freeze H10 setup-exit`
-
----
-
-## 1. Bộ config/model đang khóa
-
-### ACC1 live
-- Config: `configs/live_acc1_scalp_m1.yaml`
-- Model: `outputs/acc1_scalp_m1_reversal_model.pkl`
-- Scaler: `outputs/acc1_scalp_m1_reversal_scaler.pkl`
-- Meta: `outputs/acc1_scalp_m1_reversal_model_meta.json`
-- Live bars/tick source: `MT5 bridge`
-- Vai trò: nhiều lệnh hơn, bắt đảo chiều tốt hơn ACC2
-
-### ACC2 live
-- Config: `configs/live_acc2_scalp_m1.yaml`
-- Model: `outputs/acc2_scalp_m1_h10_setup_exit_model.pkl`
-- Scaler: `outputs/acc2_scalp_m1_h10_setup_exit_scaler.pkl`
-- Meta: `outputs/acc2_scalp_m1_h10_setup_exit_model_meta.json`
-- Live bars/tick source: `MT5 bridge`
-- Vai trò: profile freeze, guarded, không sửa tùy tiện
-
-### Service live đúng
-- ACC1: `docker compose up -d live-acc1`
-- ACC2: `docker compose up -d live-scalp-acc2`
-
-Không dùng:
-- `configs/live_acc1.yaml`
-- `configs/live_acc2.yaml`
-- `configs/live_acc2_scalp.yaml`
-- Streamlit / `frontend`
+Last updated: `2026-04-13`
 
 ---
 
-## 2. Preflight máy mới
+## Mục lục
+
+1. [Tổng quan hệ thống](#1-tổng-quan-hệ-thống)
+2. [Config & Model đang khóa](#2-config--model-đang-khóa)
+3. [WF-Validated Parameters (Exness Pro)](#3-wf-validated-parameters-exness-pro)
+4. [WF-Validated Parameters (VT Markets STP)](#4-wf-validated-parameters-vt-markets-stp)
+5. [Friction Model theo sàn](#5-friction-model-theo-sàn)
+6. [Preflight máy mới](#6-preflight-máy-mới)
+7. [File .env tối thiểu](#7-file-env-tối-thiểu)
+8. [Chạy LITE (không MLflow/Airflow/MinIO/Grafana)](#8-chạy-lite-không-mlflowairflowminiografana)
+9. [Chạy Full Stack (optional)](#9-chạy-full-stack-optional)
+10. [Train / Backtest / Walkforward (local, không Docker)](#10-train--backtest--walkforward-local-không-docker)
+11. [Live trade qua MT5 Bridge](#11-live-trade-qua-mt5-bridge)
+12. [Chạy trên Windows host](#12-chạy-trên-windows-host)
+13. [Verify binding & health check](#13-verify-binding--health-check)
+14. [Checklist cho AI / người deploy](#14-checklist-cho-ai--người-deploy)
+15. [Template báo cáo sau deploy](#15-template-báo-cáo-sau-deploy)
+
+---
+
+## 1. Tổng quan hệ thống
+
+- **Repo**: `https://github.com/bac25msa13227-star/Trade-Indicator.git`
+- **Branch**: `codex/pf-optimize-from-task4-clean`
+- **Python**: 3.11+
+- **Execution TF**: M1 (1 phút), multi-TF analysis: D1/H4/H1/M30/M15/M5/M1
+- **ML Model**: scikit-learn RandomForest trên 50+ features (momentum, order flow, microstructure, structure, session)
+- **2 accounts chạy song song**:
+  - `ACC1` = scalp M1 reversal (nhiều lệnh, threshold thấp hơn)
+  - `ACC2` = scalp M1 freeze H10 setup-exit (bảo thủ, guarded)
+- **Không dùng**: Streamlit, old configs (`live_acc1.yaml`, `live_acc2.yaml`, `live_acc2_scalp.yaml`)
+- **Dashboard**: FastAPI WebSocket tại `http://localhost/dashboard`
+
+### Dependency tối thiểu (core only)
+
+```
+pandas>=2.2.3, numpy>=1.26.4, scikit-learn>=1.5.2
+PyYAML>=6.0.2, pydantic>=2.9.2, requests>=2.32.3
+matplotlib>=3.9.2, python-dotenv>=1.0.1
+yfinance>=0.2.54, SQLAlchemy>=2.0.35, prometheus-client>=0.20.0
+```
+
+**Không bắt buộc** (infra — `requirements-infra.txt`):
+- `mlflow-skinny` — experiment tracking (graceful no-op nếu thiếu)
+- `minio`, `boto3` — object storage (fallback local filesystem)
+- `psycopg2-binary` — PostgreSQL (fallback CSV)
+- `fastapi`, `uvicorn` — REST API/dashboard
+- `evidently` — drift monitoring (graceful no-op)
+
+---
+
+## 2. Config & Model đang khóa
+
+### ACC1
+
+| Item | Path |
+|------|------|
+| Config | `configs/live_acc1_scalp_m1.yaml` |
+| Model | `outputs/acc1_scalp_m1_reversal_model.pkl` |
+| Scaler | `outputs/acc1_scalp_m1_reversal_scaler.pkl` |
+| Meta | `outputs/acc1_scalp_m1_reversal_model_meta.json` |
+| WF Report | `outputs/acc1_scalp_m1_reversal_walkforward_report.json` |
+| Vai trò | Nhiều lệnh hơn, bắt đảo chiều tốt, threshold thấp |
+
+### ACC2
+
+| Item | Path |
+|------|------|
+| Config | `configs/live_acc2_scalp_m1.yaml` |
+| Model | `outputs/acc2_scalp_m1_h10_setup_exit_model.pkl` |
+| Scaler | `outputs/acc2_scalp_m1_h10_setup_exit_scaler.pkl` |
+| Meta | `outputs/acc2_scalp_m1_h10_setup_exit_model_meta.json` |
+| WF Report | `outputs/acc2_scalp_m1_walkforward_report.json` |
+| Vai trò | Profile freeze, guarded, bảo thủ, không sửa tùy tiện |
+
+### Docker service tương ứng
 
 ```bash
+docker compose up -d live-acc1          # ACC1
+docker compose up -d live-scalp-acc2    # ACC2
+```
+
+---
+
+## 3. WF-Validated Parameters (Exness Pro)
+
+> Cả ACC1 và ACC2 hiện tại đều đang chạy demo trên **Exness Pro**.
+
+**Friction model Exness Pro:**
+- `spread_cost_rr: 0.035` (~$0.15 spread / $4.38 1R)
+- `slippage_rr: 0.01`
+- `commission_rr: 0.0` (spread-only, no commission)
+
+### ACC1 — Exness Pro (WF 8-fold validated)
+
+| Parameter | Giá trị | WF Source |
+|-----------|---------|-----------|
+| `signal_threshold` | **0.59** | Best from 120 candidates |
+| `min_confidence` | **0.59** | = threshold |
+| `risk_per_trade` | **0.026** (2.6%) | WF optimized |
+| `setup_exit_scale` | **0.75** | WF optimized |
+| `cooldown_bars` | **4** | WF synced |
+| `silver_bullet_enabled` | **false** | A/B test: OFF wins by $6,162 |
+| `daily_loss_limit_pct` | **0.20** | |
+| `max_drawdown_kill_pct` | **0.12** | |
+
+**WF kết quả (8-fold, Exness Pro friction, $200 initial):**
+- Net profit: **$108,452** | PF: **1.966** | Win rate: **44.4%**
+- Avg fold max DD: **10.8%** | Total trades: **24,168**
+- Feasible candidates: **7/120**
+
+### ACC2 — Exness Pro (WF 8-fold validated)
+
+| Parameter | Giá trị | WF Source |
+|-----------|---------|-----------|
+| `signal_threshold` | **0.60** | Best from 120 candidates |
+| `min_confidence` | **0.60** | = threshold |
+| `risk_per_trade` | **0.022** (2.2%) | WF locked |
+| `setup_exit_scale` | **0.75** | WF locked |
+| `cooldown_bars` | **4** | WF synced |
+| `silver_bullet_enabled` | **true** | A/B test: ON wins by $2,399 |
+| `silver_bullet_confidence_boost` | **0.03** | |
+| `daily_loss_limit_pct` | **0.12** | |
+| `max_drawdown_kill_pct` | **0.12** | |
+
+**WF kết quả (8-fold, Exness Pro friction, $200 initial):**
+- Net profit: **$75,948** | PF: **1.979** | Win rate: **42.3%**
+- Avg fold max DD: **9.7%** | Total trades: **21,450**
+- Feasible candidates: **1/120**
+
+---
+
+## 4. WF-Validated Parameters (VT Markets STP)
+
+> Nếu chuyển sang **VT Markets STP**, cần thay đổi friction model trong config.
+
+**Friction model VT Markets STP:**
+- `spread_cost_rr: 0.057` (~$0.25 spread / $4.38 1R)
+- `slippage_rr: 0.01`
+- `commission_rr: 0.0` (spread-only)
+
+### ACC1 — VT Markets STP
+
+| Parameter | Giá trị |
+|-----------|---------|
+| `signal_threshold` | **0.62** |
+| `min_confidence` | **0.62** |
+| `risk_per_trade` | **0.026** |
+| `setup_exit_scale` | **0.80** |
+| `spread_cost_rr` | **0.057** |
+
+**WF kết quả:** Net profit: **$83,455** | PF: **1.94** | Feasible: **4/120**
+
+### ACC2 — VT Markets STP
+
+| Parameter | Giá trị |
+|-----------|---------|
+| `signal_threshold` | **0.60** |
+| `min_confidence` | **0.60** |
+| `risk_per_trade` | **0.020** |
+| `setup_exit_scale` | **0.80** |
+| `spread_cost_rr` | **0.057** |
+
+**WF kết quả:** Net profit: ~**$63,000** | PF: ~**1.86** | Feasible: **1/120**
+
+### Cách chuyển sàn
+
+Sửa trong file YAML config (`configs/live_accX_scalp_m1.yaml`):
+
+```yaml
+# Exness Pro (hiện tại)
+spread_cost_rr: 0.035
+commission_rr: 0.0
+
+# VT Markets STP
+# spread_cost_rr: 0.057
+# commission_rr: 0.0
+```
+
+Sau đó chạy lại WF friction search:
+
+```bash
+PYTHONPATH=src python3 scripts/acc1_friction_opt_wf.py --config configs/live_acc1_scalp_m1.yaml --n-folds 8 --out-prefix acc1_wf
+PYTHONPATH=src python3 scripts/acc2_friction_opt_wf.py --config configs/live_acc2_scalp_m1.yaml --n-folds 8 --out-prefix acc2_wf
+```
+
+Session spread multiplier đã cài trong script theo từng sàn. Nếu đổi sàn, sửa `_SESSION_SPREAD_MULT` trong script tương ứng.
+
+---
+
+## 5. Friction Model theo sàn
+
+### Session Spread Multipliers
+
+| Session | UTC Hours | Exness Pro | VT Markets STP |
+|---------|-----------|-----------|----------------|
+| Asian | 22:00–02:00 | 1.65 | 1.75 |
+| Pre-London | 05:00–07:00 | 1.20 | 1.20 |
+| London | 07:00–11:00 | 0.67 | 0.65 |
+| Lunch | 11:00–12:30 | 0.87 | 0.90 |
+| NY–London Overlap | 12:30–16:00 | 0.53 | 0.50 |
+| NY Solo | 16:00–20:00 | 0.80 | 0.80 |
+| NY Close | 20:00–22:00 | 1.20–1.50 | 1.20–1.50 |
+
+### Session Slippage Multipliers (cả 2 sàn giống nhau)
+
+| Session | Multiplier |
+|---------|------------|
+| Asian (22–03) | 1.80 |
+| London (07–12) | 0.70 |
+| NY–London Overlap (12–16) | 0.60 |
+| Other hours | 1.00 |
+
+---
+
+## 6. Preflight máy mới
+
+```bash
+# 1. Clone repo
 git clone https://github.com/bac25msa13227-star/Trade-Indicator.git
 cd Trade-Indicator
 git checkout codex/pf-optimize-from-task4-clean
-docker compose config -q
+
+# 2. Tạo venv
+python3 -m venv .venv
+source .venv/bin/activate   # macOS/Linux
+# .venv\Scripts\activate    # Windows
+
+# 3. Install core (đủ cho train/backtest/WF/live/paper)
+pip install -r requirements-core.txt
+pip install -e .
+
+# 4. (Optional) Install infra nếu cần API/dashboard/Docker
+pip install -r requirements-infra.txt
+
+# 5. Verify config load
+PYTHONPATH=src python3 -c "
+from pathlib import Path
+from xauusd_ai.config import load_settings
+load_settings(Path('configs/live_acc1_scalp_m1.yaml'))
+load_settings(Path('configs/live_acc2_scalp_m1.yaml'))
+print('OK: Both configs loaded')
+"
+
+# 6. Verify model files
+ls -lh outputs/*.pkl outputs/*.json
+
+# 7. Verify market data (cần cho backtest/WF/train)
+ls -lh src/xauusd_ai/real_data/XAUUSDm_M1.csv
 ```
 
-Kiểm tra data:
-
-```bash
-ls -lh src/xauusd_ai/real_data
-```
-
-Tối thiểu phải có bộ CSV XAUUSD/XAUUSDm từ `D1` xuống `M1` trong `src/xauusd_ai/real_data/`.
+> **Lưu ý:** File CSV data (`src/xauusd_ai/real_data/XAUUSDm_*.csv`) **KHÔNG** được push lên git (gitignore).
+> Cần copy thủ công hoặc fetch bằng `scripts/fetch_xauusd_dukascopy.py`.
 
 ---
 
-## 3. File `.env` tối thiểu
+## 7. File `.env` tối thiểu
 
 ```env
+# PostgreSQL (optional — code có CSV fallback nếu không có DB)
 POSTGRES_USER=trader
 POSTGRES_PASSWORD=trader_secret
 POSTGRES_DB=tradedb
 
-MINIO_ACCESS_KEY=minioadmin
-MINIO_SECRET_KEY=minioadmin
-
+# Telegram notifications (optional nhưng recommended)
 TELEGRAM_BOT_TOKEN_ACC1=<token_acc1>
 TELEGRAM_CHAT_ID_ACC1=<chat_id_acc1>
 TELEGRAM_BOT_TOKEN_ACC2=<token_acc2>
 TELEGRAM_CHAT_ID_ACC2=<chat_id_acc2>
 ```
 
-Ghi chú:
-- `live-acc1` tự map `ACC1` token/chat vào `TELEGRAM_BOT_TOKEN` và `TELEGRAM_CHAT_ID`.
-- `live-scalp-acc2` tự map `ACC2` token/chat vào `TELEGRAM_BOT_TOKEN` và `TELEGRAM_CHAT_ID`.
-- Vì vậy cứ điền `*_ACC1` và `*_ACC2` trong `.env` là đủ.
+**Không cần** (chỉ khi dùng full stack):
+- `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` — MinIO object storage
+- `GRAFANA_USER` / `GRAFANA_PASSWORD` — Grafana dashboards
+- `AIRFLOW_*` — Airflow orchestration
 
 ---
 
-## 4. Chạy LITE
+## 8. Chạy LITE (không MLflow/Airflow/MinIO/Grafana)
 
-Phù hợp cho Macbook hoặc máy chỉ cần dashboard/API/WF/backtest, không cần full observability stack.
+> **Đây là cách chạy chính, recommended cho hầu hết trường hợp.**
+
+### Option A: Docker (minimal services)
 
 ```bash
+# Bước 1: Tạo .env
+cp .env.example .env
+# Sửa TELEGRAM tokens nếu cần
+
+# Bước 2: Build & start (chỉ 3 service)
 docker compose up -d postgres api nginx
+
+# Bước 3: Chạy live bots
+docker compose up -d live-acc1 live-scalp-acc2 healthwatch
+
+# Bước 4: Verify
+docker compose ps
+curl -sS http://localhost:8000/health
 ```
 
-Health check:
+**Dashboard:** `http://localhost/dashboard` hoặc `http://localhost:8000/dashboard`
+
+### Option B: Local Python (không Docker)
 
 ```bash
-curl -sS http://localhost:8000/health
-curl -I http://localhost/dashboard
-docker compose ps
+source .venv/bin/activate
+
+# Train model (nếu chưa có .pkl)
+PYTHONPATH=src python3 src/xauusd_ai/main.py train --config configs/live_acc1_scalp_m1.yaml
+PYTHONPATH=src python3 src/xauusd_ai/main.py train --config configs/live_acc2_scalp_m1.yaml
+
+# Backtest
+PYTHONPATH=src python3 src/xauusd_ai/main.py backtest --config configs/live_acc1_scalp_m1.yaml
+PYTHONPATH=src python3 src/xauusd_ai/main.py backtest --config configs/live_acc2_scalp_m1.yaml
+
+# Walk-Forward
+PYTHONPATH=src python3 src/xauusd_ai/main.py walkforward --config configs/live_acc1_scalp_m1.yaml
+PYTHONPATH=src python3 src/xauusd_ai/main.py walkforward --config configs/live_acc2_scalp_m1.yaml
+
+# Paper trade
+PYTHONPATH=src python3 src/xauusd_ai/main.py paper --config configs/live_acc1_scalp_m1.yaml
+PYTHONPATH=src python3 src/xauusd_ai/main.py paper --config configs/live_acc2_scalp_m1.yaml
+
+# Live (cần MT5 bridge)
+PYTHONPATH=src python3 src/xauusd_ai/main.py live --config configs/live_acc1_scalp_m1.yaml
+PYTHONPATH=src python3 src/xauusd_ai/main.py live --config configs/live_acc2_scalp_m1.yaml
 ```
 
-Dashboard:
-- `http://localhost/dashboard`
-- `http://localhost:8000/dashboard`
+> MLflow tự fallback sang `file:///tmp/mlruns` — không cần server.
+> PostgreSQL tự fallback sang CSV — không cần DB.
 
 ---
 
-## 5. Chạy FULL STACK
+## 9. Chạy Full Stack (optional)
 
-Khi cần cả `MLflow + Airflow + Grafana + MinIO + Prometheus`.
-
-### Bước 1: bật nền
+Chỉ cần khi muốn đầy đủ observability: experiment tracking (MLflow), workflow scheduling (Airflow), dashboard monitoring (Grafana).
 
 ```bash
+# 1. Infra
 docker compose up -d postgres minio prometheus grafana api nginx healthwatch
-```
 
-### Bước 2: tạo DB Airflow một lần
-
-```bash
+# 2. Airflow DB (chạy 1 lần)
 docker exec xauusd-postgres psql -U trader -d postgres -c "CREATE DATABASE airflow;" || true
-```
 
-### Bước 3: bật Airflow
-
-```bash
+# 3. Airflow
 docker compose up -d airflow-init
+sleep 15
 docker compose up -d airflow-webserver airflow-scheduler
-```
 
-### Bước 4: bật MLflow nếu cần
-
-```bash
+# 4. MLflow
 docker compose up -d mlflow
-```
 
-Health check full stack:
+# 5. Live bots
+docker compose up -d live-acc1 live-scalp-acc2
 
-```bash
-curl -sS http://localhost:8000/health
-curl -I http://localhost/dashboard
-curl -I http://localhost:9090/-/healthy
-curl -I http://localhost:3000/api/health
-curl -I http://localhost:8080/health
-docker compose ps
+# Health check
+curl -sS http://localhost:8000/health     # API
+curl -I http://localhost:9090/-/healthy    # Prometheus
+curl -I http://localhost:3000/api/health   # Grafana
+curl -I http://localhost:8080/health       # Airflow
+curl -I http://localhost:5000              # MLflow
 ```
 
 ---
 
-## 6. Live trade thật qua MT5 Bridge
+## 10. Train / Backtest / Walkforward (local, không Docker)
 
-Project này trên macOS không auto trade trực tiếp bằng MT5 package. Cách chạy chuẩn là:
-- MT5 terminal + bridge chạy trên Windows/VPS
-- Repo + bot + dashboard có thể chạy ở máy Docker hiện tại
+### Friction-optimized WF search (recommended)
 
-Bridge mặc định:
+Các script walk-forward tối ưu friction đã bao gồm session spread/slippage model:
+
+```bash
+# ACC1 friction WF (Exness Pro session mults built-in)
+PYTHONPATH=src python3 scripts/acc1_friction_opt_wf.py \
+  --config configs/live_acc1_scalp_m1.yaml \
+  --n-folds 8 --out-prefix acc1_wf
+
+# ACC2 friction WF (Exness Pro session mults built-in)
+PYTHONPATH=src python3 scripts/acc2_friction_opt_wf.py \
+  --config configs/live_acc2_scalp_m1.yaml \
+  --n-folds 8 --out-prefix acc2_wf
+
+# Silver Bullet A/B test
+PYTHONPATH=src python3 scripts/silver_bullet_ab_test.py
+PYTHONPATH=src python3 scripts/silver_bullet_ab_test.py --acc1-only
+PYTHONPATH=src python3 scripts/silver_bullet_ab_test.py --acc2-only
+```
+
+### Standard WF (qua main.py)
+
+```bash
+PYTHONPATH=src python3 src/xauusd_ai/main.py walkforward --config configs/live_acc1_scalp_m1.yaml
+PYTHONPATH=src python3 src/xauusd_ai/main.py walkforward --config configs/live_acc2_scalp_m1.yaml
+```
+
+### Docker shortcut
+
+```bash
+docker compose run --rm train           # Train ACC2
+docker compose run --rm train-acc1      # Train ACC1
+docker compose run --rm backtest        # Backtest ACC2
+```
+
+---
+
+## 11. Live trade qua MT5 Bridge
+
+macOS/Linux chạy bot trong Docker, MT5 terminal + bridge chạy trên Windows/VPS.
+
+**Bridge ports:**
 - ACC1: `http://host.docker.internal:5600`
 - ACC2: `http://host.docker.internal:5601`
 
-Hiện tại bot live lấy:
-- tick giá hiện tại từ bridge
-- OHLCV bars đa khung từ bridge qua endpoint `/bars`
-- full TF stack theo config: `D1/H4/H1/M30/M15/M5/M1`
-- không dùng `yfinance` cho live nữa
-
-Chạy live:
+**Bot lấy:**
+- Tick giá realtime từ bridge
+- OHLCV bars đa khung từ bridge `/bars` endpoint
+- Full TF stack: D1/H4/H1/M30/M15/M5/M1
 
 ```bash
+# Start live bots
 docker compose up -d live-acc1 live-scalp-acc2 healthwatch
 docker compose logs -f live-acc1 live-scalp-acc2 healthwatch
 ```
 
-Nếu chưa có bridge:
-- `live-acc1` và `live-scalp-acc2` có thể `unhealthy` do `Connection refused`
-- đó là expected
-- khi đó vẫn dùng được `API`, `dashboard`, `backtest`, `walkforward`
+> Nếu chưa có bridge, bots sẽ `unhealthy` (Connection refused) — đây là expected.
+> Dashboard/API/backtest/WF vẫn hoạt động bình thường.
 
-Nếu vừa pull code mới sang máy Windows đang chạy bridge:
-- restart lại `scripts/windows/mt5_bridge.py`
-- để bridge nhận endpoint `/bars` mới nhất
-
----
-
-## 7. Public dashboard
-
-Nếu muốn public dashboard realtime:
+### Public dashboard (optional)
 
 ```bash
 docker compose up -d cloudflared
 docker compose logs cloudflared 2>&1 | grep -i trycloudflare
 ```
 
-Dashboard public sẽ proxy vào nginx/FastAPI WebSocket dashboard, không cần Streamlit.
-
 ---
 
-## 8. Backtest / Walkforward / Train không cần MLflow server
+## 12. Chạy trên Windows host
 
-Nếu không bật service `mlflow`, vẫn chạy được bằng local file store:
-
-```bash
-MLFLOW_TRACKING_URI=file:///tmp/mlruns PYTHONPATH=src python3 src/xauusd_ai/main.py train --config configs/live_acc1_scalp_m1.yaml
-MLFLOW_TRACKING_URI=file:///tmp/mlruns PYTHONPATH=src python3 src/xauusd_ai/main.py train --config configs/live_acc2_scalp_m1.yaml
-
-MLFLOW_TRACKING_URI=file:///tmp/mlruns PYTHONPATH=src python3 src/xauusd_ai/main.py backtest --config configs/live_acc1_scalp_m1.yaml
-MLFLOW_TRACKING_URI=file:///tmp/mlruns PYTHONPATH=src python3 src/xauusd_ai/main.py backtest --config configs/live_acc2_scalp_m1.yaml
-
-MLFLOW_TRACKING_URI=file:///tmp/mlruns PYTHONPATH=src python3 src/xauusd_ai/main.py walkforward --config configs/live_acc1_scalp_m1.yaml
-MLFLOW_TRACKING_URI=file:///tmp/mlruns PYTHONPATH=src python3 src/xauusd_ai/main.py walkforward --config configs/live_acc2_scalp_m1.yaml
-```
-
-Docker shortcut:
-
-```bash
-docker compose run --rm train
-docker compose run --rm train-acc1
-docker compose run --rm backtest
-```
-
-Mặc định hiện tại:
-- `train` = ACC2 freeze scalp M1
-- `train-acc1` = ACC1 scalp M1 reversal
-- `backtest` = ACC2 freeze scalp M1
-
----
-
-## 9. Verify đúng binding sau khi pull
-
-### Verify model/config runtime qua API
-
-```bash
-curl -s http://localhost:8000/api/v1/dashboard
-```
-
-Kỳ vọng:
-- ACC1 model là `outputs/acc1_scalp_m1_reversal_model.pkl`
-- ACC2 model là `outputs/acc2_scalp_m1_h10_setup_exit_model.pkl`
-
-Ví dụ kiểm tra nhanh đúng artifact:
-
-```bash
-python3 -c "import json, urllib.request; obj=json.load(urllib.request.urlopen('http://localhost:8000/api/v1/dashboard')); print(obj['accounts']['acc1']['model']['binding_actual']); print(obj['accounts']['acc2']['model']['binding_actual'])"
-```
-
-### Verify config YAML load được
-
-```bash
-PYTHONPATH=src python3 -c "from pathlib import Path; from xauusd_ai.config import load_settings; load_settings(Path('configs/live_acc1_scalp_m1.yaml')); load_settings(Path('configs/live_acc2_scalp_m1.yaml')); print('settings ok')"
-```
-
-### Verify compose
-
-```bash
-docker compose config -q
-```
-
----
-
-## 10. Chạy trực tiếp trên Windows host
-
-Nếu chạy bot trực tiếp trên Windows host thay vì Docker:
-
-### ACC1
 ```bat
 scripts\windows\run_acc1.bat
-```
-
-### ACC2
-```bat
 scripts\windows\run_acc2.bat
 ```
 
-Hai script này tự map:
-- `TELEGRAM_BOT_TOKEN_ACC1/ACC2`
-- `TELEGRAM_CHAT_ID_ACC1/ACC2`
-- `MT5_BRIDGE_URL`
+Scripts tự map `TELEGRAM_BOT_TOKEN_ACC1/ACC2`, `TELEGRAM_CHAT_ID_ACC1/ACC2`, `MT5_BRIDGE_URL`.
+
+**MT5 bridge:**
+
+```bat
+python scripts\windows\mt5_bridge.py
+```
 
 ---
 
-## 11. Dừng hệ thống
+## 13. Verify binding & health check
+
+### Config load
 
 ```bash
-docker compose down
+PYTHONPATH=src python3 -c "
+from pathlib import Path
+from xauusd_ai.config import load_settings
+s1 = load_settings(Path('configs/live_acc1_scalp_m1.yaml'))
+s2 = load_settings(Path('configs/live_acc2_scalp_m1.yaml'))
+print(f'ACC1: thr={s1.strategy.signal_threshold}, risk={s1.risk.risk_per_trade}, spread={s1.risk.spread_cost_rr}')
+print(f'ACC2: thr={s2.strategy.signal_threshold}, risk={s2.risk.risk_per_trade}, spread={s2.risk.spread_cost_rr}')
+print('OK')
+"
 ```
 
-Xóa volume local:
+**Kỳ vọng (Exness Pro):**
+```
+ACC1: thr=0.59, risk=0.026, spread=0.035
+ACC2: thr=0.60, risk=0.022, spread=0.035
+```
+
+### Model files
 
 ```bash
-docker compose down -v
+python3 -c "
+import pickle, json, os
+for f in ['outputs/acc1_scalp_m1_reversal_model.pkl', 'outputs/acc2_scalp_m1_h10_setup_exit_model.pkl']:
+    sz = os.path.getsize(f)
+    assert sz > 1000, f'{f} too small ({sz} bytes) — may be LFS pointer stub'
+    print(f'{f}: {sz:,} bytes OK')
+"
 ```
 
-Cẩn thận vì lệnh này sẽ xóa DB/object storage local.
+### WF binding reports
+
+```bash
+python3 -c "
+import json
+for f, label in [('outputs/acc1_scalp_m1_reversal_walkforward_report.json', 'ACC1'),
+                  ('outputs/acc2_scalp_m1_walkforward_report.json', 'ACC2')]:
+    r = json.load(open(f))
+    a = r['aggregate']
+    print(f'{label}: source={a[\"source\"]}, net=\${a[\"net_profit\"]:,.0f}, PF={a[\"global_profit_factor\"]:.3f}, folds={len(r[\"folds\"])}')
+"
+```
+
+### Unit tests
+
+```bash
+PYTHONPATH=src python3 -m pytest tests/ -v
+```
+
+**Kỳ vọng:** 92 tests passed.
+
+### Docker compose
+
+```bash
+docker compose config -q && echo "compose OK"
+```
+
+### Dừng hệ thống
+
+```bash
+docker compose down        # Dừng services
+docker compose down -v     # Dừng + xóa volumes (CẢNH BÁO: mất DB data)
+```
 
 ---
 
-## 12. Kết luận ngắn
+## 14. Checklist cho AI / người deploy
 
-Nếu chỉ muốn chạy đúng, ít rủi ro nhất:
+Sau khi clone và setup xong, chạy từng bước và đánh dấu:
 
-```bash
-docker compose up -d postgres api nginx
-docker compose up -d live-acc1 live-scalp-acc2 healthwatch
+- [ ] **C1.** `git checkout codex/pf-optimize-from-task4-clean` — đúng branch
+- [ ] **C2.** `pip install -r requirements-core.txt && pip install -e .` — install thành công
+- [ ] **C3.** Config load test — cả 2 config load không lỗi
+- [ ] **C4.** Model .pkl > 1KB — không phải LFS pointer stub
+- [ ] **C5.** Verify ACC1 params: `thr=0.59, risk=0.026, spread=0.035, silver_bullet=false`
+- [ ] **C6.** Verify ACC2 params: `thr=0.60, risk=0.022, spread=0.035, silver_bullet=true`
+- [ ] **C7.** WF report ACC1: source chứa `Exness_Pro`, net > $100k
+- [ ] **C8.** WF report ACC2: source chứa `Exness_Pro`, net > $70k
+- [ ] **C9.** `pytest tests/` — tất cả pass (expect 92 tests)
+- [ ] **C10.** Market data CSV tồn tại: `src/xauusd_ai/real_data/XAUUSDm_M1.csv`
+- [ ] **C11.** (Nếu Docker) `docker compose config -q` — không lỗi
+- [ ] **C12.** (Nếu Docker) `docker compose up -d postgres api nginx` — services healthy
+- [ ] **C13.** (Nếu Docker) `curl http://localhost:8000/health` — trả về OK
+- [ ] **C14.** (Nếu backtest) Chạy backtest cả 2 config — không crash, có output
+- [ ] **C15.** (Nếu live) MT5 bridge reachable — bots sẽ healthy
+
+---
+
+## 15. Template báo cáo sau deploy
+
+```
+=== XAUUSD AI DEPLOYMENT REPORT ===
+Date: YYYY-MM-DD
+Machine: <OS, CPU, RAM>
+Branch: codex/pf-optimize-from-task4-clean
+Commit: <git rev-parse --short HEAD>
+
+--- Checklist ---
+C1  Branch:           [PASS/FAIL]
+C2  Install:          [PASS/FAIL]
+C3  Config load:      [PASS/FAIL]
+C4  Model .pkl:       [PASS/FAIL] (ACC1: XX KB, ACC2: XX KB)
+C5  ACC1 params:      [PASS/FAIL] (thr=X.XX, risk=X.XXX, spread=X.XXX)
+C6  ACC2 params:      [PASS/FAIL] (thr=X.XX, risk=X.XXX, spread=X.XXX)
+C7  WF report ACC1:   [PASS/FAIL] (source=XX, net=$XX)
+C8  WF report ACC2:   [PASS/FAIL] (source=XX, net=$XX)
+C9  Tests:            [PASS/FAIL] (XX/92 passed)
+C10 Market data:      [PASS/FAIL] (M1 CSV: XX MB)
+C11 Docker compose:   [PASS/FAIL/SKIP]
+C12 Docker services:  [PASS/FAIL/SKIP]
+C13 API health:       [PASS/FAIL/SKIP]
+C14 Backtest:         [PASS/FAIL/SKIP]
+C15 MT5 bridge:       [PASS/FAIL/SKIP]
+
+--- Summary ---
+Overall: [READY / NOT READY]
+Issues: <nếu có>
+Notes: <ghi chú thêm>
 ```
 
-Rồi mở:
-- `http://localhost/dashboard`
+---
 
-Và nhớ:
-- `ACC1` dùng `live_acc1_scalp_m1.yaml`
-- `ACC2` dùng `live_acc2_scalp_m1.yaml`
-- Không dùng Streamlit
-- Không dùng config/model cũ
+## Appendix: Cấu trúc thư mục quan trọng
+
+```
+configs/
+  live_acc1_scalp_m1.yaml           # ACC1 config (Exness Pro)
+  live_acc2_scalp_m1.yaml           # ACC2 config (Exness Pro)
+outputs/
+  acc1_scalp_m1_reversal_model.pkl  # ACC1 model
+  acc1_scalp_m1_reversal_scaler.pkl
+  acc2_scalp_m1_h10_setup_exit_model.pkl  # ACC2 model
+  acc2_scalp_m1_h10_setup_exit_scaler.pkl
+scripts/
+  acc1_friction_opt_wf.py           # ACC1 WF search
+  acc2_friction_opt_wf.py           # ACC2 WF search
+  silver_bullet_ab_test.py          # Silver Bullet A/B test
+  live_runner.py                    # Live bot launcher
+  healthwatch.py                    # Telegram health monitor
+src/xauusd_ai/
+  main.py                           # CLI: train/backtest/walkforward/live/paper
+  config.py                         # YAML config loader
+  orchestrator.py                   # Core orchestration
+  backtesting/engine.py             # WF + backtest engine
+  strategies/hybrid.py              # Trading strategy
+  model/scalp_model.py              # ML model
+  model/scalp_runtime.py            # Runtime inference
+tests/                              # 92 unit tests
+```

@@ -74,16 +74,20 @@ strategy:
   blocked_hours_utc: []
   blocked_weekdays_utc: []
   blocked_weekday_hours_utc: {}
-  allowed_weekday_hours_utc:
-    Monday: [6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18]
-    Tuesday: [6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18]
-    Wednesday: [6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18]
-    Thursday: [6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18]
-    Friday: [6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18]
+  # allowed_weekday_hours_utc: {} → no restriction, trade all hours (pre-patch parity)
+  # Former value was Mon-Fri [6-11,13-18] which cut ~50% of trades vs live-old behavior
+  allowed_weekday_hours_utc: {}
 
-  silver_bullet_enabled: true
+  silver_bullet_enabled: false
   silver_bullet_windows_utc: [[3, 4], [6, 7], [10, 11], [14, 15]]
   silver_bullet_confidence_boost: 0.04
+  scalp_quality_adjustment_enabled: false
+  scalp_quality_adjustment_weight: 0.0
+  scalp_quality_adjustment_max_delta: 0.06
+  scalp_dynamic_threshold_enabled: false   # disabled: WF does not adjust thresholds at inference
+  scalp_threshold_offset_strong_regime: -0.04
+  scalp_threshold_offset_sideway_regime: 0.0
+  scalp_threshold_offset_off_session: 0.0
 
   adx_gate_enabled: false
   adx_min_trend: 12.0
@@ -129,16 +133,16 @@ risk:
   normal_risk_multiplier: 1.0
   strong_volatility_risk_multiplier: 1.20
 
-  spread_cost_rr: 0.01
+  spread_cost_rr: 0.035                    # Exness Pro XAUUSD ~$0.15 spread / $4.38 1R
   slippage_rr: 0.01
-  commission_rr: 0.0
+  commission_rr: 0.0                        # Exness Pro: no commission (spread-only)
 
   kill_switch_enabled: true
   daily_loss_limit_pct: 0.20
   max_drawdown_kill_pct: 0.12
 
   consecutive_loss_pause_count: 2
-  consecutive_loss_cooldown_bars: 2
+  consecutive_loss_cooldown_bars: 4
   anti_martingale_factor: 0.2
   anti_martingale_max_reductions: 2
 
@@ -146,7 +150,7 @@ risk:
   reentry_cooldown_bars_after_sl: 3
   reentry_min_distance_atr: 0.35
 
-  partial_tp_enabled: true
+  partial_tp_enabled: false
   partial_tp_rr: 1.0
   partial_tp_pct: 0.50
   compound_cap: 10.0
@@ -159,9 +163,9 @@ execution:
   comment: xauusd-ai-acc1-scalp-m1-reversal
   paper_trade_max_loops: 0
   paper_data_source: bridge
-  close_opposite_on_signal: true
+  close_opposite_on_signal: false
   trailing_sl:
-    enabled: true
+    enabled: false
     breakeven_at_rr: 0.5
     activation_rr: 0.8
     trail_atr_multiple: 0.5

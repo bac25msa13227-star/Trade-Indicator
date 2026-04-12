@@ -593,6 +593,10 @@ def _build_live_scalp_feature_frame(settings: Settings, frames: dict[str, pd.Dat
     """
     from xauusd_ai.execution.sltp import resolve_setup_exit_targets, setup_label_horizon
     from xauusd_ai.features.scalp_features import build_all_scalp_features, SCALP_FEATURE_COLUMNS
+    from xauusd_ai.features.scalp_dataset import (
+        compute_m5_context_features,
+        infer_scalp_volatility_regime,
+    )
 
     exec_tf = settings.market.execution_timeframe  # "M1"
     m1 = frames.get(exec_tf, frames.get("M1"))
@@ -608,39 +612,31 @@ def _build_live_scalp_feature_frame(settings: Settings, frames: dict[str, pd.Dat
 
     featured = build_all_scalp_features(m1)
 
-    # ── Merge M5 context (m5_bias, m5_rsi_14, m5_atr_norm) ────────────────
+    # ── Merge M5 context exactly like scalp training ───────────────────────
     m5 = frames.get("M5")
     if m5 is not None and not m5.empty:
-        m5 = m5.copy().sort_values("time").reset_index(drop=True)
-        from xauusd_ai.features.indicators import rsi as _rsi_ind, atr as _atr_ind
-        m5_rsi = _rsi_ind(m5["close"], 14).iloc[-1]
-        m5_atr_series = _atr_ind(m5, 14)
-        m5_atr = m5_atr_series.iloc[-1]
-        m5_atr_mean = m5_atr_series.rolling(50).mean().iloc[-1]
-        m5_bias = float(1 if m5["close"].iloc[-1] > m5["close"].rolling(20).mean().iloc[-1] else -1)
-        m5_atr_norm = float(m5_atr / m5_atr_mean) if m5_atr_mean and m5_atr_mean > 0 else 1.0
-        featured["m5_bias"]    = m5_bias
-        featured["m5_rsi_14"]  = float(m5_rsi)
-        featured["m5_atr_norm"] = m5_atr_norm
+        m5_ctx = compute_m5_context_features(m5)
+        featured = pd.merge_asof(
+            featured.sort_values("time"),
+            m5_ctx.sort_values("time"),
+            on="time",
+            direction="backward",
+        )
+        featured["m5_bias"] = pd.to_numeric(featured["m5_bias"], errors="coerce").fillna(0).astype(int)
+        featured["m5_rsi_14"] = pd.to_numeric(featured["m5_rsi_14"], errors="coerce").fillna(0.0)
+        featured["m5_atr_norm"] = pd.to_numeric(featured["m5_atr_norm"], errors="coerce").fillna(featured["ms_atr5_norm"])
     else:
-        featured["m5_bias"]    = 0.0
-        featured["m5_rsi_14"]  = 50.0
-        featured["m5_atr_norm"] = 1.0
+        # Match training fallback defaults when M5 is unavailable.
+        featured["m5_bias"] = 0
+        featured["m5_rsi_14"] = 0.0
+        featured["m5_atr_norm"] = featured["ms_atr5_norm"]
 
     # ── Compute ATR14 for SL/TP (used by RiskManager) ─────────────────────
     from xauusd_ai.features.indicators import atr as _atr_ind2
     featured["atr"] = _atr_ind2(featured, 14)
 
-    # ── Compute volatility_regime from ATR expansion ───────────────────────
-    atr5_norm = featured.get("atr5_norm_pct", featured["atr"] / featured["atr"].rolling(50).mean().fillna(1))
-    latest_atr_norm = float(atr5_norm.ffill().iloc[-1]) if not atr5_norm.empty else 1.0
-    if latest_atr_norm < float(settings.strategy.sideways_volatility_threshold) * 100:
-        vol_regime = 0  # sideways
-    elif latest_atr_norm > float(settings.strategy.strong_volatility_threshold) * 100:
-        vol_regime = 2  # volatile
-    else:
-        vol_regime = 1  # normal
-    featured["volatility_regime"] = vol_regime
+    # Keep live regime inference identical to scalp label generation.
+    featured["volatility_regime"] = infer_scalp_volatility_regime(featured).astype(int)
 
     featured["trend_strength_score"] = featured.get("trend_strength_score", 0.0)
     featured["pullback_quality"] = featured.get("pullback_quality", 0.0)

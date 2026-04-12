@@ -367,6 +367,9 @@ class ModelTrainer:
         return x
 
     def predict_dataset(self, dataset: pd.DataFrame) -> pd.DataFrame:
+        from xauusd_ai.model.scalp_model import DualScalpModel as _DualScalpModel
+        if isinstance(self.model, _DualScalpModel) and "expected_direction" in dataset.columns:
+            return self._predict_dual_scalp_dataset(dataset)
         frame = dataset.copy()
         feat_frame = self._aligned_feature_frame(frame)
         x_scaled = self.scaler.transform(feat_frame)
@@ -378,6 +381,141 @@ class ModelTrainer:
         frame["probability"] = probabilities
         frame["prediction"] = (probabilities >= self.decision_threshold).astype(int)
         return frame
+
+    def _predict_dual_scalp_dataset(self, dataset: pd.DataFrame) -> pd.DataFrame:
+        """Direction-aware batch prediction for DualScalpModel (WF backtest path)."""
+        from xauusd_ai.model.scalp_model import DualScalpModel as _DualScalpModel
+        assert isinstance(self.model, _DualScalpModel)
+        frame = dataset.copy()
+        feat_cols = self.model.feature_columns
+        for c in feat_cols:
+            if c not in frame.columns:
+                frame[c] = 0.0
+        X = frame[feat_cols].fillna(0.0).values
+        dirs = pd.to_numeric(
+            frame.get("expected_direction", pd.Series(1, index=frame.index)),
+            errors="coerce",
+        ).fillna(1).astype(int).values
+        probs = np.zeros(len(frame), dtype=float)
+        buy_mask = dirs == 1
+        sell_mask = dirs == -1
+        if buy_mask.any():
+            probs[buy_mask] = self.model.score_buy(X[buy_mask])
+        if sell_mask.any():
+            probs[sell_mask] = self.model.score_sell(X[sell_mask])
+        thr_arr = np.where(buy_mask, float(self.model.thr_buy), float(self.model.thr_sell))
+        frame["probability"] = probs
+        frame["prediction"] = (probs >= thr_arr).astype(int)
+        frame["trade_side"] = np.where(buy_mask, "buy", "sell")
+        return frame
+
+    def train_dual_scalp_fold(
+        self,
+        dataset: pd.DataFrame,
+        save_artifacts: bool = False,
+    ) -> dict[str, float]:
+        """Train BUY+SELL DualScalpModel for one WF fold. Sets self.model to DualScalpModel.
+
+        Requires dataset to have 'expected_direction', 'split', 'target' columns.
+        Uses identical hyperparameters and sample weighting as acc2_scalp_m1_save_model.py.
+        """
+        from sklearn.isotonic import IsotonicRegression
+        from sklearn.metrics import (
+            accuracy_score as _acc,
+            f1_score as _f1,
+            precision_score as _prec,
+            recall_score as _rec,
+            roc_auc_score as _auc,
+        )
+        from xauusd_ai.features.scalp_features import SCALP_FEATURE_COLUMNS
+        from xauusd_ai.model.scalp_model import CalibratedDirModel, DualScalpModel
+
+        feat_cols = list(SCALP_FEATURE_COLUMNS)
+        thr = float(self.settings.strategy.signal_threshold)
+        train_df = dataset[dataset["split"] == "train"].copy()
+        test_df = dataset[dataset["split"] == "test"].copy()
+
+        def _build_one(sub: pd.DataFrame, direction: int) -> CalibratedDirModel | None:
+            label = "BUY" if direction == 1 else "SELL"
+            n = len(sub)
+            if n < 2000:
+                LOGGER.debug("train_dual_scalp_fold [%s]: skip — only %d rows", label, n)
+                return None
+            for c in feat_cols:
+                if c not in sub.columns:
+                    sub[c] = 0.0
+            X = sub[feat_cols].fillna(0.0).values
+            y = sub["target"].values
+            pos = int(y.sum())
+            neg = n - pos
+            if pos < 200 or neg < 200:
+                LOGGER.debug("train_dual_scalp_fold [%s]: skip — pos=%d neg=%d", label, pos, neg)
+                return None
+            scaler = StandardScaler()
+            X_s = scaler.fit_transform(X)
+            cw = np.where(y == 1, float(neg) / float(pos), 1.0).astype(float)
+            decay_half = n * 0.30
+            tw = np.exp(np.log(2) * np.arange(n) / decay_half)
+            tw /= tw.mean()
+            sw = cw * tw
+            sw /= sw.mean()
+            mdl = HistGradientBoostingClassifier(
+                max_iter=300, learning_rate=0.05, max_depth=5,
+                min_samples_leaf=50, l2_regularization=1.0, max_bins=63,
+                early_stopping=True, validation_fraction=0.10,
+                n_iter_no_change=20, random_state=42,
+            )
+            mdl.fit(X_s, y, sample_weight=sw)
+            val_size = max(int(n * 0.15), 500)
+            raw_p = mdl.predict_proba(X_s[-val_size:])[:, 1]
+            iso = IsotonicRegression(y_min=0.0, y_max=1.0, out_of_bounds="clip")
+            iso.fit(raw_p, y[-val_size:])
+            return CalibratedDirModel(base_model=mdl, isotonic=iso, scaler=scaler, direction=direction)
+
+        buy_model = _build_one(train_df[train_df["expected_direction"] == 1].copy(), 1)
+        sell_model = _build_one(train_df[train_df["expected_direction"] == -1].copy(), -1)
+
+        dual = DualScalpModel(
+            buy_model=buy_model,
+            sell_model=sell_model,
+            feature_columns=feat_cols,
+            thr_buy=thr,
+            thr_sell=thr,
+        )
+        self.model = dual
+        self.feature_columns = feat_cols
+        self.decision_threshold = thr
+
+        if save_artifacts:
+            self._save_artifacts()
+
+        metrics: dict[str, float] = {
+            "train_rows": float(len(train_df)),
+            "test_rows": float(len(test_df)),
+            "positive_rate_train": float(train_df["target"].mean()) if len(train_df) else 0.0,
+            "positive_rate_test": float(test_df["target"].mean()) if len(test_df) else 0.0,
+            "selected_threshold": thr,
+            "buy_model_ok": float(buy_model is not None),
+            "sell_model_ok": float(sell_model is not None),
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "accuracy": 0.0,
+            "roc_auc": 0.5,
+        }
+        if len(test_df) > 0 and "target" in test_df.columns:
+            preds = self._predict_dual_scalp_dataset(test_df)
+            y_true = test_df["target"].values.astype(int)
+            y_pred = preds["prediction"].values.astype(int)
+            y_prob = preds["probability"].values
+            if y_true.sum() > 0 and len(y_true) - y_true.sum() > 0:
+                metrics["precision"] = float(_prec(y_true, y_pred, zero_division=0))
+                metrics["recall"] = float(_rec(y_true, y_pred, zero_division=0))
+                metrics["f1"] = float(_f1(y_true, y_pred, zero_division=0))
+                metrics["accuracy"] = float(_acc(y_true, y_pred))
+                if len(np.unique(y_true)) > 1:
+                    metrics["roc_auc"] = float(_auc(y_true, y_prob))
+        return metrics
 
     def score_live_row(self, live_frame: pd.DataFrame) -> dict[str, float]:
         # ── DualScalpModel path: direction-aware BUY/SELL routing ──────────────
@@ -399,6 +537,7 @@ class ModelTrainer:
     def _score_dual_scalp_row(self, live_frame: pd.DataFrame) -> dict[str, float]:
         """Inference for DualScalpModel: compute direction, route to buy/sell sub-model."""
         from xauusd_ai.features.scalp_dataset import _compute_direction
+        from xauusd_ai.model.scalp_runtime import adjust_scalp_probabilities, adjust_scalp_thresholds
         row = live_frame.iloc[[-1]].copy()
         direction = int(_compute_direction(row).iloc[0])
         feat_cols = self.model.feature_columns
@@ -407,20 +546,38 @@ class ModelTrainer:
                 row[c] = 0.0
         X = row[feat_cols].fillna(0.0).values
         if direction == 1:
-            prob = float(self.model.score_buy(X)[0])
+            raw_prob = float(self.model.score_buy(X)[0])
             thr = self.model.thr_buy
             trade_side = "buy"
         else:
-            prob = float(self.model.score_sell(X)[0])
+            raw_prob = float(self.model.score_sell(X)[0])
             thr = self.model.thr_sell
             trade_side = "sell"
-        prediction = int(prob >= thr)
-        margin = prob - thr
+        row["trade_side"] = trade_side
+        prob_series, quality_series, delta_series = adjust_scalp_probabilities(
+            self.settings,
+            row,
+            [raw_prob],
+            side_col="trade_side",
+        )
+        prob = float(prob_series.iloc[0])
+        quality_score = float(quality_series.iloc[0])
+        prob_delta = float(delta_series.iloc[0])
+        thr_series, thr_delta_series = adjust_scalp_thresholds(self.settings, row, [thr])
+        eff_thr = float(thr_series.iloc[0])
+        thr_delta = float(thr_delta_series.iloc[0])
+        prediction = int(prob >= eff_thr)
+        margin = prob - eff_thr
         return {
             "probability": prob,
+            "probability_raw": raw_prob,
+            "probability_delta": prob_delta,
             "prediction": prediction,
             "margin": margin,
             "trade_side": trade_side,
+            "quality_score": quality_score,
+            "threshold_effective": eff_thr,
+            "threshold_delta": thr_delta,
         }
 
     def train_with_loss_weights(

@@ -327,10 +327,24 @@ def _evaluate_candidate(
         s.strategy.require_trend_alignment = False
 
         dirs      = fold.directions
-        buy_probs = fold.buy_probs
-        sell_probs= fold.sell_probs
+        buy_probs = fold.buy_probs.copy()
+        sell_probs= fold.sell_probs.copy()
 
         preds = fold.base_df.copy()
+
+        # ── Silver bullet boost: mirror live _effective_probability() ────────
+        sb_boost = float(cand.get("silver_bullet_boost", 0.0))
+        sb_windows = cand.get("silver_bullet_windows", [[3, 4], [6, 7], [10, 11], [14, 15]])
+        if sb_boost > 0 and "time" in preds.columns:
+            t_utc = pd.to_datetime(preds["time"], utc=True, errors="coerce")
+            sb_hours = set()
+            for w in sb_windows:
+                if len(w) == 2:
+                    sb_hours.update(range(int(w[0]), int(w[1]) + 1))
+            sb_mask = t_utc.dt.hour.isin(sorted(sb_hours)).fillna(False).values
+            buy_probs = buy_probs + np.where(sb_mask, sb_boost, 0.0)
+            sell_probs = sell_probs + np.where(sb_mask, sb_boost, 0.0)
+
         preds["probability"] = np.where(dirs == -1, sell_probs, buy_probs)
         preds["trade_side"]  = np.where(dirs == -1, "sell", "buy")
 
@@ -399,6 +413,7 @@ def _evaluate_candidate(
             "max_drawdown_pct_abs": abs(float(rep.get("max_drawdown_pct", 0.0))),
             "trades":               int(rep.get("trades", 0)),
             "win_rate":             float(rep.get("win_rate", 0.0)),
+            "killed_by_max_dd":     bool(rep.get("killed_by_max_dd", False)),
             **dmet,
         })
         sum_net  += float(rep.get("net_profit", 0.0))
@@ -421,6 +436,7 @@ def _evaluate_candidate(
         "max_fold_days_neg_pct":   round(float((fold_df["days_pnl_neg"] * 100).max()), 4) if not fold_df.empty else 100.0,
         "min_fold_trades":         int(fold_df["trades"].min()) if not fold_df.empty else 0,
         "worst_fold_max_daily_dd":  round(float(fold_df["max_daily_dd_pct"].max()), 4) if not fold_df.empty else 0.0,
+        "folds_killed_by_max_dd":  int(fold_df["killed_by_max_dd"].sum()) if "killed_by_max_dd" in fold_df.columns else 0,
         "global_trades":           int(sum_trades),
         "global_win_rate":         round(sum_wins / max(sum_wins + sum_losses, 1), 4),
         "folds":                   int(len(fold_df)),

@@ -81,6 +81,7 @@ class HybridStrategyTests(unittest.TestCase):
     def test_build_trade_decision_happy_path(self) -> None:
         live_row = pd.Series(
             {
+                "time": pd.Timestamp("2026-03-30 09:00:00+00:00"),
                 "strategy_score": 0.7,
                 "volatility_regime": 1,
                 "trend_alignment": 1,
@@ -101,11 +102,61 @@ class HybridStrategyTests(unittest.TestCase):
         self.assertGreater(decision.take_profit, decision.entry_price)
         self.assertLess(decision.stop_loss, decision.entry_price)
 
+    def test_build_trade_decision_blocks_when_outside_allowed_hours(self) -> None:
+        self.settings.strategy.allowed_weekday_hours_utc = {"monday": [9]}
+        live_row = pd.Series(
+            {
+                "time": pd.Timestamp("2026-03-30 10:00:00+00:00"),
+                "strategy_score": 0.7,
+                "volatility_regime": 1,
+                "trend_alignment": 1,
+                "atr": 1.5,
+                "close": 2050.0,
+                "news_is_blackout": 0,
+                "news_impact_ahead": 0,
+                "news_hours_ahead": 10.0,
+            }
+        )
+        decision = self.strategy.build_trade_decision(
+            frames={},
+            live_row=live_row,
+            model_signal={"prediction": 1, "probability": 0.9},
+        )
+        self.assertFalse(decision.should_trade)
+        self.assertEqual(decision.reason, "not_in_allowed_weekday_hour")
+
+    def test_build_trade_decision_uses_silver_bullet_boost_for_gate(self) -> None:
+        self.settings.strategy.silver_bullet_enabled = True
+        self.settings.strategy.silver_bullet_windows_utc = [[9, 9]]
+        self.settings.strategy.silver_bullet_confidence_boost = 0.05
+        self.settings.risk.min_confidence = 0.60
+        live_row = pd.Series(
+            {
+                "time": pd.Timestamp("2026-03-30 09:00:00+00:00"),
+                "strategy_score": 0.7,
+                "volatility_regime": 1,
+                "trend_alignment": 1,
+                "atr": 1.5,
+                "close": 2050.0,
+                "news_is_blackout": 0,
+                "news_impact_ahead": 0,
+                "news_hours_ahead": 10.0,
+            }
+        )
+        decision = self.strategy.build_trade_decision(
+            frames={},
+            live_row=live_row,
+            model_signal={"prediction": 1, "probability": 0.57},
+        )
+        self.assertTrue(decision.should_trade)
+        self.assertEqual(decision.side, "buy")
+
     def test_build_trade_decision_applies_min_stop_loss_points(self) -> None:
         self.settings.risk.min_stop_loss_points = 5.0
         self.settings.risk.min_stop_loss_atr_multiple = 0.0
         live_row = pd.Series(
             {
+                "time": pd.Timestamp("2026-03-30 09:00:00+00:00"),
                 "strategy_score": 0.7,
                 "volatility_regime": 1,
                 "trend_alignment": 1,
@@ -133,6 +184,7 @@ class HybridStrategyTests(unittest.TestCase):
         self.settings.risk.min_stop_loss_atr_multiple = 0.0
         live_row = pd.Series(
             {
+                "time": pd.Timestamp("2026-03-30 09:00:00+00:00"),
                 "strategy_score": 0.7,
                 "volatility_regime": 1,
                 "trend_alignment": 1,
