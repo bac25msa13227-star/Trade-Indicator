@@ -16,6 +16,8 @@
 > - Docker chỉ cần `postgres` (optional, có CSV fallback) + `api` + `nginx` cho dashboard.
 >
 > **SAU KHI HOÀN TẤT**, bạn **PHẢI** chạy checklist ở Section 14 và xuất báo cáo theo template ở Section 15.
+>
+> **⚠️ CẢNH BÁO — WF-LIVE GAP:** Hệ thống từng bị live thua liên tục (1W/8L ≈ −$17/acc, tuần 14/4) dù WF $85k+ do 3 GAP kỹ thuật. Tất cả đã fix 2026-04-13. Đọc **Section 0** bên dưới trước khi deploy.
 
 Last updated: `2026-04-13` (post-gap-fix revalidation — models retrained, WF re-run)
 
@@ -23,6 +25,7 @@ Last updated: `2026-04-13` (post-gap-fix revalidation — models retrained, WF r
 
 ## Mục lục
 
+0. [Cảnh báo — Tại sao live lệch WF & Cách tránh](#0-cảnh-báo--tại-sao-live-lệch-wf--cách-tránh)
 1. [Tổng quan hệ thống](#1-tổng-quan-hệ-thống)
 2. [Config & Model đang khóa](#2-config--model-đang-khóa)
 3. [WF-Validated Parameters (Exness Pro)](#3-wf-validated-parameters-exness-pro)
@@ -38,6 +41,60 @@ Last updated: `2026-04-13` (post-gap-fix revalidation — models retrained, WF r
 13. [Verify binding & health check](#13-verify-binding--health-check)
 14. [Checklist cho AI / người deploy](#14-checklist-cho-ai--người-deploy)
 15. [Template báo cáo sau deploy](#15-template-báo-cáo-sau-deploy)
+
+---
+
+## 0. Cảnh báo — Tại sao live lệch WF & Cách tránh
+
+> **⚠️ ĐỌC PHẦN NÀY TRƯỚC KHI DEPLOY LIVE.** Hệ thống đã từng xảy ra sự cố: live −$17/acc/tuần dù WF backtest $85k+. Root cause: 4 GAP kỹ thuật giữa code path WF (train) và code path live (inference).
+
+### 4 Nguyên nhân đã confirm & fix (2026-04-13)
+
+| ID | Mức độ | Vấn đề | Fix đã áp dụng |
+|----|--------|--------|----------------|
+| **G1** | CRITICAL | `save_model.py` dùng `baseline` sample weighting. WF dùng `day_stability_strict` (giảm weight giờ xấu 02-07/17-21 UTC → 0.75×, thứ Hai → 0.80×, ATR spike → 0.85×). Model live học phân phối khác WF. | Thêm `day_stability_strict` vào `_train_dir()` trong `acc*_scalp_m1_save_model.py` |
+| **G2** | HIGH | WF dataset thiếu cột `atr` → engine fallback sang ATR5 proxy (không ổn định). Live dùng `ATR(14)` thực tế. Feature drift lớn ở tất cả signal. | Thêm `m1["atr"] = _atr14_fn(m1, 14)` vào `build_scalp_dataset()` trong `scalp_dataset.py` |
+| **G3** | MEDIUM | WF hardcode `volatility_regime = 1` cho mọi bar. Live tính `infer_scalp_volatility_regime()` → real 0/1/2. 100% mismatch feature này. | Thêm `m1["volatility_regime"] = infer_scalp_volatility_regime(m1).astype(int)` vào `build_scalp_dataset()` |
+| **G4** | MEDIUM | `slippage_rr: 0.01` quá lạc quan — M1 execution drift thực tế ~0.4 pts ≈ 0.05 RR. WF overstate PF. | `slippage_rr: 0.01 → 0.05` trong cả 2 YAML config |
+
+### Format CSV bắt buộc — 9 cột (đúng thứ tự)
+
+```
+time,open,high,low,close,tick_volume,spread_points,tick_volume_delta,volume_imbalance
+```
+
+| Cột | Tính như thế nào |
+|-----|------------------|
+| `tick_volume_delta` | `tv[i] - tv[i-1]` — order flow proxy |
+| `volume_imbalance` | `(close-low)/(high-low)` — body pressure; `0.5` nếu flat bar |
+| `atr` | **KHÔNG** cần trong CSV — tự tính trong `scalp_dataset.py` |
+| `volatility_regime` | **KHÔNG** cần trong CSV — tự tính trong `scalp_dataset.py` |
+
+Dùng `scripts/realtime_bar_appender.py` để append bars mới từ MT5 bridge — script tự tính `tick_volume_delta` và `volume_imbalance` đúng cách.
+
+### 5 Nguyên tắc để live ≡ WF benchmark
+
+1. **Đúng training objective:** Train bằng `scripts/acc*_scalp_m1_save_model.py` (đã dùng `day_stability_strict`) — KHÔNG dùng `main.py train` nếu chưa verify weighting.
+2. **CSV đúng 9 cột:** Dùng `scripts/realtime_bar_appender.py` để update data realtime, không tự append thủ công nếu không tính `tick_volume_delta`/`volume_imbalance` đúng.
+3. **ATR(14) trong dataset:** `scalp_dataset.py` phải có dòng `m1["atr"] = _atr14_fn(m1, 14)` ở cuối `build_scalp_dataset()` (G2 fix).
+4. **Regime tính thực:** `scalp_dataset.py` phải có dòng `m1["volatility_regime"] = infer_scalp_volatility_regime(m1).astype(int)` (G3 fix).
+5. **Slippage realistic:** `slippage_rr: 0.05` trong config — KHÔNG đổi về `0.01`.
+
+### Verify nhanh sau `git clone`
+
+```bash
+# Verify G2+G3 fix có trong scalp_dataset.py
+grep -n '_atr14_fn\|infer_scalp_volatility_regime' src/xauusd_ai/features/scalp_dataset.py | tail -4
+# Kỳ vọng: 2 dòng assignment cuối build_scalp_dataset() — m1["atr"] và m1["volatility_regime"]
+
+# Verify slippage config
+grep 'slippage_rr' configs/live_acc1_scalp_m1.yaml configs/live_acc2_scalp_m1.yaml
+# Kỳ vọng: slippage_rr: 0.05 (cả 2 file)
+
+# Verify CSV header (nếu đã có data)
+head -1 src/xauusd_ai/real_data/XAUUSDm_M1.csv 2>/dev/null || echo 'No CSV yet — cần setup bar appender'
+# Kỳ vọng: time,open,high,low,close,tick_volume,spread_points,tick_volume_delta,volume_imbalance
+```
 
 ---
 
@@ -272,6 +329,14 @@ ls -lh outputs/*.pkl outputs/*.json
 
 # 7. Verify market data (cần cho backtest/WF/train)
 ls -lh src/xauusd_ai/real_data/XAUUSDm_M1.csv
+
+# 8. Verify CSV có đúng 9 cột bắt buộc (bao gồm tick_volume_delta + volume_imbalance)
+head -1 src/xauusd_ai/real_data/XAUUSDm_M1.csv
+# Kỳ vọng: time,open,high,low,close,tick_volume,spread_points,tick_volume_delta,volume_imbalance
+
+# 9. Verify G2+G3 fix có trong scalp_dataset.py (bắt buộc để live = WF)
+grep -n '_atr14_fn\|infer_scalp_volatility_regime' src/xauusd_ai/features/scalp_dataset.py | tail -4
+# Kỳ vọng: thấy 2 dòng assignment cuối build_scalp_dataset() — m1["atr"] và m1["volatility_regime"]
 ```
 
 > **Lưu ý:** File CSV data (`src/xauusd_ai/real_data/XAUUSDm_*.csv`) **KHÔNG** được push lên git (gitignore).
@@ -450,6 +515,35 @@ docker compose logs -f live-acc1 live-scalp-acc2 healthwatch
 > Nếu chưa có bridge, bots sẽ `unhealthy` (Connection refused) — đây là expected.
 > Dashboard/API/backtest/WF vẫn hoạt động bình thường.
 
+### Realtime Bar Appender (bắt buộc khi chạy live)
+
+Script `scripts/realtime_bar_appender.py` fetch closed bars từ MT5 bridge và append vào CSV data, tự tính `tick_volume_delta` + `volume_imbalance` đúng cách (bảo đảm live features = WF features).
+
+```bash
+# Chạy thủ công 1 lần
+PYTHONPATH=src python3 scripts/realtime_bar_appender.py
+
+# Chạy loop liên tục (poll mỗi 60s)
+RUN_LOOP=1 PYTHONPATH=src python3 scripts/realtime_bar_appender.py
+
+# Crontab — khách hàng khuyến nghị cho production (chạy mỗi phút)
+# Cài crontab: crontab -e
+# * * * * * cd /path/to/Trade-Indicator && BRIDGE_HOST=localhost BRIDGE_PORT=5600 DATA_DIR=src/xauusd_ai/real_data PYTHONPATH=src python3 scripts/realtime_bar_appender.py >> /tmp/bar_appender.log 2>&1
+```
+
+**Biến ENV:**
+
+| Var | Default | Mô tả |
+|-----|---------|------|
+| `BRIDGE_HOST` | `localhost` | Host của MT5 bridge |
+| `BRIDGE_PORT` | `5600` | Port của MT5 bridge |
+| `MT5_SYMBOL` | `XAUUSDm` | Symbol MT5 |
+| `DATA_DIR` | `src/xauusd_ai/real_data` | Thư mục chứa CSV |
+| `RUN_LOOP` | `0` | `1` = chạy loop vô hạn |
+
+> CSV được ghi atomic (`.tmp_append` → rename) — không bao giờ corrupt nếu bị kill giữa chừng.
+> Bridge lỗi: skip TF đó, log warning, không crash toàn bộ script.
+
 ### Public dashboard (optional)
 
 ```bash
@@ -531,6 +625,33 @@ PYTHONPATH=src python3 -m pytest tests/ -v
 
 **Kỳ vọng:** 92 tests passed.
 
+### Dataset column integrity (verify G2 + G3 fix)
+
+```bash
+PYTHONPATH=src python3 -c "
+import sys
+from pathlib import Path
+from xauusd_ai.config import load_settings
+from xauusd_ai.features.scalp_dataset import build_scalp_dataset
+cfg = load_settings(Path('configs/live_acc1_scalp_m1.yaml'))
+df, _ = build_scalp_dataset(cfg)
+errors = []
+for col in ['atr', 'volatility_regime']:
+    if col not in df.columns:
+        errors.append(f'FAIL: {col} missing')
+if errors:
+    print('\n'.join(errors)); sys.exit(1)
+regime = df.volatility_regime.value_counts().sort_index().to_dict()
+print(f'atr: mean={df.atr.mean():.2f}, min={df.atr.min():.2f}')
+print(f'regime distribution: {regime}  (phải có cả 0, 1, 2)')
+print('OK: G2+G3 fix verified')
+"
+```
+
+**Kỳ vọng:**
+- `atr` mean ~10–30 (XAU/USD points), min > 0
+- `regime distribution` có cả key 0, 1, 2 (không chỉ `{1: N}` — nếu chỉ có key 1 thì G3 chưa fix)
+
 ### Docker compose
 
 ```bash
@@ -565,6 +686,9 @@ Sau khi clone và setup xong, chạy từng bước và đánh dấu:
 - [ ] **C13.** (Nếu Docker) `curl http://localhost:8000/health` — trả về OK
 - [ ] **C14.** (Nếu backtest) Chạy backtest cả 2 config — không crash, có output
 - [ ] **C15.** (Nếu live) MT5 bridge reachable — bots sẽ healthy
+- [ ] **C16.** CSV M1 có đúng 9 cột: `time,open,high,low,close,tick_volume,spread_points,tick_volume_delta,volume_imbalance`
+- [ ] **C17.** Dataset build trả về `atr` (mean > 0, không phải ATR5 proxy) và `volatility_regime` (có cả 0, 1, 2) — G2+G3 verified
+- [ ] **C18.** (Nếu live) `realtime_bar_appender.py` chạy được hoặc crontab đã setup
 
 ---
 
@@ -593,6 +717,9 @@ C12 Docker services:  [PASS/FAIL/SKIP]
 C13 API health:       [PASS/FAIL/SKIP]
 C14 Backtest:         [PASS/FAIL/SKIP]
 C15 MT5 bridge:       [PASS/FAIL/SKIP]
+C16 CSV 9 columns:    [PASS/FAIL] (header: time,open,...,tick_volume_delta,volume_imbalance)
+C17 G2+G3 dataset:    [PASS/FAIL] (atr mean=XX, regime={0:XX,1:XX,2:XX})
+C18 Bar appender:     [PASS/FAIL/SKIP]
 
 --- Summary ---
 Overall: [READY / NOT READY]
@@ -619,6 +746,7 @@ scripts/
   silver_bullet_ab_test.py          # Silver Bullet A/B test
   live_runner.py                    # Live bot launcher
   healthwatch.py                    # Telegram health monitor
+  realtime_bar_appender.py          # Fetch MT5 bars → CSV (bắt buộc khi live, thiếu là data stale)
 src/xauusd_ai/
   main.py                           # CLI: train/backtest/walkforward/live/paper
   config.py                         # YAML config loader
