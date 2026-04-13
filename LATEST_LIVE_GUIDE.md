@@ -1,6 +1,6 @@
 # XAUUSD AI Trading System — Live Deployment Guide
 
-> **AI PROMPT — ĐỌC TRƯỚC KHI LÀM BẤT CỨ GÌ:**
+> **AI PROMPT — ĐỌC TRƯỚC KHI LÀM BẤT CỨ GÌ:** Luôn nhớ phải lấy data để trade từ bridge chứ không được phép lấy từ yfinace vì sẽ làm trễ quyết định của bot, phải lấy data được chuẩn từng tick
 >
 > Bạn là AI assistant được giao nhiệm vụ deploy và verify hệ thống XAUUSD AI Trading trên máy mới.
 > Hệ thống này là một **ML-powered scalping bot** giao dịch vàng XAU/USD trên khung M1, sử dụng
