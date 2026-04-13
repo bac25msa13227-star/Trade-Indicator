@@ -154,9 +154,9 @@ risk:
   commission_rr: 0.0                        # Exness Pro: no commission (spread-only)
 
   # ── Kill switch ────────────────────────────────────────────────────────────
-  kill_switch_enabled: true
-  daily_loss_limit_pct: 0.12               # 12% daily cap (WF lock)
-  max_drawdown_kill_pct: 0.12              # kill at 12% DD (WF max was 9.5% at 0.3%)
+  kill_switch_enabled: false
+  daily_loss_limit_pct: 99.0               # DISABLED
+  max_drawdown_kill_pct: 99.0              # DISABLED
 
   # ── Loss management ───────────────────────────────────────────────────────
   # M1: re-enter fast — market moves every minute

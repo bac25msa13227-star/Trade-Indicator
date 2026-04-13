@@ -137,9 +137,9 @@ risk:
   slippage_rr: 0.01
   commission_rr: 0.0                        # Exness Pro: no commission (spread-only)
 
-  kill_switch_enabled: true
-  daily_loss_limit_pct: 0.20
-  max_drawdown_kill_pct: 0.12
+  kill_switch_enabled: false
+  daily_loss_limit_pct: 99.0
+  max_drawdown_kill_pct: 99.0
 
   consecutive_loss_pause_count: 2
   consecutive_loss_cooldown_bars: 4

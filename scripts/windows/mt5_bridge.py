@@ -59,6 +59,34 @@ _TIMEFRAME_MAP = {
     "D1": mt5.TIMEFRAME_D1,
 }
 
+# ── Symbol remapping ───────────────────────────────────────────────────────────
+# Nếu bot request XAUUSDm nhưng terminal chỉ có XAUUSD (Exness Trial), tự remap.
+_SYMBOL_REMAP: dict[str, str] = {}
+
+def _resolve_symbol(symbol: str) -> str:
+    """Return the actual symbol name available in this MT5 terminal."""
+    if symbol in _SYMBOL_REMAP:
+        return _SYMBOL_REMAP[symbol]
+    # Try as-is first
+    if mt5.symbol_select(symbol, True):
+        info = mt5.symbol_info(symbol)
+        if info is not None:
+            _SYMBOL_REMAP[symbol] = symbol
+            return symbol
+    # Try common variants
+    for candidate in (symbol.replace("m", ""), symbol + "m", symbol.replace(".", "")):
+        if candidate == symbol:
+            continue
+        if mt5.symbol_select(candidate, True):
+            info = mt5.symbol_info(candidate)
+            if info is not None:
+                log.info("Symbol remap: %s -> %s", symbol, candidate)
+                _SYMBOL_REMAP[symbol] = candidate
+                return candidate
+    # Return original and let caller handle the error
+    return symbol
+
+
 # ── MT5 lifecycle ──────────────────────────────────────────────────────────────
 
 def _init_mt5() -> bool:
@@ -98,7 +126,7 @@ def _ensure() -> None:
 
 def op_place_order(body: dict) -> dict:
     _ensure()
-    symbol    = str(body["symbol"])
+    symbol    = _resolve_symbol(str(body["symbol"]))
     side      = str(body["side"])
     volume    = float(body["volume"])
     stop_loss = float(body.get("stop_loss") or 0)
@@ -106,7 +134,7 @@ def op_place_order(body: dict) -> dict:
     entry_price = float(body.get("entry_price") or 0)
     deviation = int(body.get("deviation", 20))
     magic     = int(body.get("magic", 0))
-    comment   = str(body.get("comment", "mt5-bridge"))
+    comment   = str(body.get("comment", "mt5-bridge"))[:29]  # MT5 practical limit 29 chars
 
     tick = mt5.symbol_info_tick(symbol)
     if tick is None:
@@ -172,6 +200,7 @@ def op_place_order(body: dict) -> dict:
 
 def op_get_positions(symbol: str, magic: int | None = None) -> list:
     _ensure()
+    symbol = _resolve_symbol(symbol)
     positions = mt5.positions_get(symbol=symbol)
     if not positions:
         return []
@@ -281,6 +310,7 @@ def op_get_account() -> dict:
 def op_get_tick(symbol: str) -> dict:
     """Return current real-time ask/bid price for symbol."""
     _ensure()
+    symbol = _resolve_symbol(symbol)
     tick = mt5.symbol_info_tick(symbol)
     if tick is None:
         raise RuntimeError(f"No tick data for {symbol}: {mt5.last_error()}")
@@ -296,6 +326,7 @@ def op_get_tick(symbol: str) -> dict:
 def op_get_bars(symbol: str, timeframe: str, count: int, start_pos: int = 0) -> list[dict]:
     """Return OHLCV bars directly from MT5 terminal history."""
     _ensure()
+    symbol = _resolve_symbol(symbol)
     tf_name = str(timeframe or "M1").upper()
     if tf_name not in _TIMEFRAME_MAP:
         raise RuntimeError(f"Unsupported timeframe: {timeframe}")
@@ -317,19 +348,19 @@ def op_get_bars(symbol: str, timeframe: str, count: int, start_pos: int = 0) -> 
     if rates is None or len(rates) == 0:
         raise RuntimeError(f"No rates returned for {symbol} {tf_name}")
 
+    names = rates.dtype.names or ()
     out: list[dict] = []
     for row in rates:
-        data = dict(row)
         out.append(
             {
-                "time": int(data.get("time", 0)),
-                "open": float(data.get("open", 0.0)),
-                "high": float(data.get("high", 0.0)),
-                "low": float(data.get("low", 0.0)),
-                "close": float(data.get("close", 0.0)),
-                "tick_volume": float(data.get("tick_volume", 0.0)),
-                "spread": float(data.get("spread", 0.0)),
-                "real_volume": float(data.get("real_volume", 0.0)),
+                "time": int(row["time"]) if "time" in names else 0,
+                "open": float(row["open"]) if "open" in names else 0.0,
+                "high": float(row["high"]) if "high" in names else 0.0,
+                "low": float(row["low"]) if "low" in names else 0.0,
+                "close": float(row["close"]) if "close" in names else 0.0,
+                "tick_volume": float(row["tick_volume"]) if "tick_volume" in names else 0.0,
+                "spread": float(row["spread"]) if "spread" in names else 0.0,
+                "real_volume": float(row["real_volume"]) if "real_volume" in names else 0.0,
             }
         )
     return out
@@ -377,6 +408,7 @@ def _collect_session_windows(symbol: str, now_utc: _dt.datetime, days_ahead: int
 def op_market_state(symbol: str, stale_seconds: int = 300) -> dict:
     """Best-effort broker market state for XAUUSD via MT5 server sessions + tick freshness."""
     _ensure()
+    symbol = _resolve_symbol(symbol)
     now_utc = _dt.datetime.now(_dt.timezone.utc)
     stale_seconds = max(int(stale_seconds or 300), 30)
 
@@ -451,6 +483,7 @@ def op_get_history_deals(symbol: str, since_epoch: float, magic: int | None = No
     """Return all OUT deals for symbol since since_epoch (Unix timestamp)."""
     import datetime as _dt
     _ensure()
+    symbol = _resolve_symbol(symbol)
     from_dt = _dt.datetime.fromtimestamp(since_epoch, tz=_dt.timezone.utc)
     to_dt   = _dt.datetime.now(_dt.timezone.utc)
     deals = mt5.history_deals_get(from_dt, to_dt)
