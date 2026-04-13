@@ -503,6 +503,16 @@ class MT5Executor:
         return r
 
     def place_order(self, plan: OrderPlan) -> dict[str, Any]:
+        # Hard safety gate (both direct MT5 and bridge paths).
+        import logging as _log
+        _exlog = _log.getLogger(__name__)
+        if not plan.stop_loss or not plan.take_profit:
+            _exlog.error(
+                "Order rejected: stop_loss=%s take_profit=%s are zero — "
+                "cannot place order without SL/TP. Check ATR data.",
+                plan.stop_loss, plan.take_profit,
+            )
+            return None
         self._ensure_connection()
         if mt5 is None:
             if _BRIDGE_URL:
@@ -521,8 +531,7 @@ class MT5Executor:
         # Log trạng thái AutoTrading để debug
         _tinfo = mt5.terminal_info()
         if _tinfo is not None:
-            import logging as _log
-            _log.getLogger(__name__).info(
+            _exlog.info(
                 "MT5 terminal: trade_allowed=%s path=%s account=%s",
                 _tinfo.trade_allowed,
                 getattr(_tinfo, "path", "?"),
@@ -536,8 +545,7 @@ class MT5Executor:
         _spread_pts = tick.ask - tick.bid
         _max_spread = float(getattr(self.settings.risk, 'max_spread_points', 0))
         if _max_spread > 0 and _spread_pts > _max_spread:
-            import logging as _log
-            _log.getLogger(__name__).warning(
+            _exlog.warning(
                 "Spread %.1f > max %.1f — order rejected for %s",
                 _spread_pts, _max_spread, plan.symbol,
             )

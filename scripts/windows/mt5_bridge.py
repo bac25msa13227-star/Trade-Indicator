@@ -146,6 +146,14 @@ def op_place_order(body: dict) -> dict:
     order_type = mt5.ORDER_TYPE_BUY if side == "buy" else mt5.ORDER_TYPE_SELL
     price = tick.ask if side == "buy" else tick.bid
 
+    # Hard safety gate: reject order if SL or TP is missing/zero.
+    # A scalp order without SL on a $200 account = uncapped loss risk.
+    if not stop_loss or not take_profit:
+        raise RuntimeError(
+            f"Order rejected: stop_loss={stop_loss} take_profit={take_profit} are zero — "
+            "SL/TP must be set before placing order. Check ATR data."
+        )
+
     # Re-anchor SL/TP to current execution price using original signal distances.
     # This prevents retcode=10016 when price moves between signal generation and execution.
     if stop_loss and take_profit:
