@@ -17,7 +17,7 @@
 >
 > **SAU KHI HOÀN TẤT**, bạn **PHẢI** chạy checklist ở Section 14 và xuất báo cáo theo template ở Section 15.
 
-Last updated: `2026-04-13`
+Last updated: `2026-04-13` (post-gap-fix revalidation — models retrained, WF re-run)
 
 ---
 
@@ -111,7 +111,7 @@ docker compose up -d live-scalp-acc2    # ACC2
 
 **Friction model Exness Pro:**
 - `spread_cost_rr: 0.035` (~$0.15 spread / $4.38 1R)
-- `slippage_rr: 0.01`
+- `slippage_rr: 0.05` (M1 execution drift ~0.4 pts — cập nhật 2026-04-13, trước là 0.01 quá lạc quan)
 - `commission_rr: 0.0` (spread-only, no commission)
 
 ### ACC1 — Exness Pro (WF 8-fold validated)
@@ -127,10 +127,11 @@ docker compose up -d live-scalp-acc2    # ACC2
 | `daily_loss_limit_pct` | **0.20** | |
 | `max_drawdown_kill_pct` | **0.12** | |
 
-**WF kết quả (8-fold, Exness Pro friction, $200 initial):**
-- Net profit: **$108,452** | PF: **1.966** | Win rate: **44.4%**
-- Avg fold max DD: **10.8%** | Total trades: **24,168**
+**WF kết quả (8-fold, Exness Pro friction, $200 initial) — post-gap-fix 2026-04-13:**
+- Net profit: **$85,327** | PF: **1.761** | Win rate: ~45%
+- Fold 8 (Feb–Apr 2026): **+$18,103** | Avg fold DD: **10.8%** | Total trades: **22,786**
 - Feasible candidates: **7/120**
+- *(Số thấp hơn run cũ do slippage_rr 0.01→0.05 — friction thực tế hơn)*
 
 ### ACC2 — Exness Pro (WF 8-fold validated)
 
@@ -138,7 +139,7 @@ docker compose up -d live-scalp-acc2    # ACC2
 |-----------|---------|-----------|
 | `signal_threshold` | **0.60** | Best from 120 candidates |
 | `min_confidence` | **0.60** | = threshold |
-| `risk_per_trade` | **0.022** (2.2%) | WF locked |
+| `risk_per_trade` | **0.020** (2.0%) | WF postgap opt 2026-04-13 (trước là 2.2%) |
 | `setup_exit_scale` | **0.75** | WF locked |
 | `cooldown_bars` | **4** | WF synced |
 | `silver_bullet_enabled` | **true** | A/B test: ON wins by $2,399 |
@@ -146,10 +147,11 @@ docker compose up -d live-scalp-acc2    # ACC2
 | `daily_loss_limit_pct` | **0.12** | |
 | `max_drawdown_kill_pct` | **0.12** | |
 
-**WF kết quả (8-fold, Exness Pro friction, $200 initial):**
-- Net profit: **$75,948** | PF: **1.979** | Win rate: **42.3%**
-- Avg fold max DD: **9.7%** | Total trades: **21,450**
+**WF kết quả (8-fold, Exness Pro friction, $200 initial) — post-gap-fix 2026-04-13:**
+- Net profit: **$57,356** | PF: **1.773** | Win rate: ~46%
+- Fold 8 (Feb–Apr 2026): **+$14,725** | Avg fold DD: **10.1%** | Total trades: **20,937**
 - Feasible candidates: **1/120**
+- *(Số thấp hơn run cũ do slippage_rr 0.01→0.05 + risk giảm 2.2→2.0%)*
 
 ---
 
@@ -490,10 +492,10 @@ print('OK')
 "
 ```
 
-**Kỳ vọng (Exness Pro):**
+**Kỳ vọng (Exness Pro, post-gap-fix 2026-04-13):**
 ```
 ACC1: thr=0.59, risk=0.026, spread=0.035
-ACC2: thr=0.60, risk=0.022, spread=0.035
+ACC2: thr=0.60, risk=0.020, spread=0.035
 ```
 
 ### Model files
@@ -552,10 +554,10 @@ Sau khi clone và setup xong, chạy từng bước và đánh dấu:
 - [ ] **C2.** `pip install -r requirements-core.txt && pip install -e .` — install thành công
 - [ ] **C3.** Config load test — cả 2 config load không lỗi
 - [ ] **C4.** Model .pkl > 1KB — không phải LFS pointer stub
-- [ ] **C5.** Verify ACC1 params: `thr=0.59, risk=0.026, spread=0.035, silver_bullet=false`
-- [ ] **C6.** Verify ACC2 params: `thr=0.60, risk=0.022, spread=0.035, silver_bullet=true`
-- [ ] **C7.** WF report ACC1: source chứa `Exness_Pro`, net > $100k
-- [ ] **C8.** WF report ACC2: source chứa `Exness_Pro`, net > $70k
+- [ ] **C5.** Verify ACC1 params: `thr=0.59, risk=0.026, spread=0.035, slippage=0.05, silver_bullet=false`
+- [ ] **C6.** Verify ACC2 params: `thr=0.60, risk=0.020, spread=0.035, slippage=0.05, silver_bullet=true`
+- [ ] **C7.** WF re-run ACC1: net > $80k, PF > 1.7 (post-gap-fix benchmark)
+- [ ] **C8.** WF re-run ACC2: net > $50k, PF > 1.7 (post-gap-fix benchmark)
 - [ ] **C9.** `pytest tests/` — tất cả pass (expect 92 tests)
 - [ ] **C10.** Market data CSV tồn tại: `src/xauusd_ai/real_data/XAUUSDm_M1.csv`
 - [ ] **C11.** (Nếu Docker) `docker compose config -q` — không lỗi
@@ -625,5 +627,49 @@ src/xauusd_ai/
   strategies/hybrid.py              # Trading strategy
   model/scalp_model.py              # ML model
   model/scalp_runtime.py            # Runtime inference
+  features/scalp_dataset.py         # WF dataset builder (ATR14 + regime fixed)
+dags/
+  scalp_model_retrain.py            # Weekly Airflow retrain DAG (Sun 03:00 UTC)
 tests/                              # 92 unit tests
 ```
+
+---
+
+## 16. Changelog
+
+### 2026-04-13 — Post-Gap-Fix Revalidation
+
+**Bối cảnh:** Live results tuần 14/4: ACC1 1W/8L (−$17), ACC2 1W/8L (−$15). Audit toàn bộ WF vs live code path → tìm ra 3 GAP thực sự.
+
+#### G1 — Model training objective (CRITICAL)
+- **Vấn đề:** `acc2_scalp_m1_save_model.py` dùng `baseline` weighting khi train model live, trong khi WF train bằng `day_stability_strict` (penalty giờ xấu, thứ Hai, vol spike).
+- **Fix:** Thêm `day_stability_strict` vào `_train_dir()` của save_model script — giờ khớp với WF.
+
+#### G2 — ATR computation mismatch (HIGH)
+- **Vấn đề:** WF dataset không có cột `atr` → engine fallback sang `ms_atr5_norm × close / 1000` (ATR5). Live dùng `ATR(14)` thực tế.
+- **Fix:** Thêm `atr = ATR(14)` vào `build_scalp_dataset()` trong `scalp_dataset.py`.
+
+#### G3 — volatility_regime hardcoded (MEDIUM)
+- **Vấn đề:** WF dataset mặc định `volatility_regime = 1` (normal) cho tất cả bars. Live tính `infer_scalp_volatility_regime()` → real 0/1/2.
+- **Fix:** Thêm `volatility_regime = infer_scalp_volatility_regime(m1).astype(int)` vào `build_scalp_dataset()`.
+
+#### Slippage correction
+- **Vấn đề:** `slippage_rr: 0.01` quá lạc quan. Thực đo M1 execution: ~0.4 pts drift.
+- **Fix:** `slippage_rr: 0.01 → 0.05` trong cả 2 config.
+
+#### ACC2 risk re-optimization
+- WF post-fix tối ưu: `risk_per_trade: 0.022 → 0.020` (ATR/regime mới strict hơn → giảm sizing).
+- `max_risk_fraction: 0.054 → 0.048` (duy trì tỉ lệ 1.8×).
+
+#### Models retrained
+- Cả ACC1 và ACC2 retrained với `day_stability_strict` + `train_end=2026-04-13`.
+- Mean proba: 0.401, std: 0.183, ≥0.55: 24%.
+
+#### WF re-run results (post-fix)
+| Account | Net (8-fold) | PF | Fold 8 | Feasible |
+|---------|-------------|-----|--------|----------|
+| ACC1 | $85,327 | 1.761 | +$18,103 | 7/120 |
+| ACC2 | $57,356 | 1.773 | +$14,725 | 1/120 |
+
+#### Weekly retrain DAG
+- Tạo mới `dags/scalp_model_retrain.py` — chạy tự động mỗi Chủ nhật 03:00 UTC qua Airflow.

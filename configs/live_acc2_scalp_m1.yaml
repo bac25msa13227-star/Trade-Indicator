@@ -2,7 +2,7 @@
 # ─────────────────────────────────────────────────────────────────
 # Locked values (best guarded profile in current code path):
 #   - threshold: 0.61
-#   - risk_per_trade: 0.022
+#   - risk_per_trade: 0.020
 #   - daily_loss_limit_pct: 0.12
 #   - max_open_positions: 2
 #   - sideway_risk_multiplier: 0.70
@@ -109,10 +109,10 @@ risk:
   mode: fixed_fractional
 
   # ── Sizing: locked realistic WF profile ────────────────────────────────────
-  risk_per_trade: 0.0220                    # 2.2% per trade (setup-exit H10 lock)
+  risk_per_trade: 0.0200                    # 2.0% per trade (WF postgap opt 2026-04-13)
   risk_tier_floor: 0.002                    # floor at 0.2%
   max_open_positions: 2                     # reduce concurrent exposure
-  max_risk_fraction: 0.054                  # ~= 1.8x risk_per_trade
+  max_risk_fraction: 0.048                  # ~= 1.8x risk_per_trade (was 0.054)
   max_total_exposure_pct: 0.060             # align with WF eval profile
 
   # ── SL/TP (safe patch: avoid too-short SL on volatile M1 bursts) ─────────
@@ -150,7 +150,7 @@ risk:
   strong_volatility_risk_multiplier: 1.2
 
   spread_cost_rr: 0.035                    # Exness Pro XAUUSD ~$0.15 spread / $4.38 1R
-  slippage_rr: 0.01
+  slippage_rr: 0.05                         # M1 scalp execution drift ~0.4 pts (was 0.01 — too optimistic)
   commission_rr: 0.0                        # Exness Pro: no commission (spread-only)
 
   # ── Kill switch ────────────────────────────────────────────────────────────

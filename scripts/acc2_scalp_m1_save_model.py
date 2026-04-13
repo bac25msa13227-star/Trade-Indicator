@@ -20,6 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import numpy as np
+import pandas as pd
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.isotonic import IsotonicRegression
 from sklearn.preprocessing import FunctionTransformer, StandardScaler
@@ -47,8 +48,10 @@ def _make_model() -> HistGradientBoostingClassifier:
     )
 
 
-def _train_dir(df, direction: int) -> CalibratedDirModel | None:
-    """Train a calibrated direction model. Returns None if insufficient data."""
+def _train_dir(df, direction: int, bad_hours_penalty: float = 0.75,
+               monday_penalty: float = 0.80) -> CalibratedDirModel | None:
+    """Train a calibrated direction model with day_stability_strict weighting
+    (identical to WF _train_dir_model) to eliminate WF-vs-live model gap."""
     label = "BUY" if direction == 1 else "SELL"
     sub   = df[df["expected_direction"] == direction].copy()
     n     = len(sub)
@@ -74,7 +77,46 @@ def _train_dir(df, direction: int) -> CalibratedDirModel | None:
     decay_half = n * 0.30
     tw = np.exp(np.log(2) * np.arange(n) / decay_half)
     tw /= tw.mean()
-    sw = cw * tw; sw /= sw.mean()
+    sw = cw * tw
+
+    # ── day_stability_strict: match WF _train_dir_model exactly ────────
+    t = pd.to_datetime(sub.get("time"), utc=True, errors="coerce")
+    # 1) Equalize contribution per day
+    day_w = np.ones(n, dtype=float)
+    if t.notna().any():
+        d = t.dt.date
+        counts = d.value_counts()
+        day_w = np.array(
+            d.map(lambda v: 1.0 / float(counts.get(v, 1))).fillna(1.0).to_numpy(dtype=float),
+            dtype=float, copy=True,
+        )
+        if day_w.mean() > 0:
+            day_w /= day_w.mean()
+    sw *= day_w
+
+    # 2) Penalize historically noisy windows (hours 2-7 and 17-21)
+    if t.notna().any():
+        hh = t.dt.hour.fillna(-1).astype(int)
+        bad = hh.between(2, 7) | hh.between(17, 21)
+        hp = min(0.75, float(bad_hours_penalty))
+        hour_w = np.where(bad.to_numpy(), hp, 1.0)
+        sw *= hour_w
+
+        dow = t.dt.weekday.fillna(-1).astype(int)
+        mp = min(0.8, float(monday_penalty))
+        monday_w = np.where(dow.to_numpy() == 0, mp, 1.0)
+        sw *= monday_w
+
+    # 3) Mild penalty on extreme micro-vol spikes
+    if "ms_atr5_norm" in sub.columns:
+        vol = pd.to_numeric(sub["ms_atr5_norm"], errors="coerce").fillna(0.0)
+        q = float(vol.quantile(0.90))
+        if q > 0:
+            vol_w = np.where(vol.to_numpy() >= q, 0.85, 1.0)
+            sw *= vol_w
+
+    if sw.mean() > 0:
+        sw /= sw.mean()
 
     model = _make_model()
     model.fit(X_s, y, sample_weight=sw)

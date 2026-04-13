@@ -587,6 +587,11 @@ def build_scalp_dataset(
     m1["target"]       = labels.values
     m1["realized_rr"]  = rr.values
 
+    # ── ATR14 + volatility_regime — match live feature frame exactly ──
+    from xauusd_ai.features.indicators import atr as _atr14_fn
+    m1["atr"] = _atr14_fn(m1, 14)
+    m1["volatility_regime"] = infer_scalp_volatility_regime(m1).astype(int)
+
     # ── Drop warm-up rows ─────────────────────────────────────────────
     m1 = m1.iloc[250:].reset_index(drop=True)
 

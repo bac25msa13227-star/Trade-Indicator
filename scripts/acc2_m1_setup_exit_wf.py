@@ -315,9 +315,17 @@ def _evaluate_candidate(
         s.risk.sideway_risk_multiplier = float(cand["sideway_risk_multiplier"])
         s.risk.strong_volatility_risk_multiplier = float(cand["strong_volatility_risk_multiplier"])
         s.risk.kill_switch_enabled = True
-        s.risk.min_confidence = min(float(cand["thr_buy"]), float(cand["thr_sell"]))
+        _cand_thr = min(float(cand["thr_buy"]), float(cand["thr_sell"]))
+        s.risk.min_confidence = _cand_thr
         s.risk.setup_exit_enabled = bool(cand.get("setup_exit_enabled", True))
         s.risk.setup_exit_scale = float(cand.get("setup_exit_scale", 1.0))
+        # ── Reentry guard: mirror live config exactly ─────────────────────
+        s.risk.reentry_guard_enabled          = bool(getattr(settings.risk, "reentry_guard_enabled", True))
+        s.risk.reentry_cooldown_bars_after_sl = int(getattr(settings.risk, "reentry_cooldown_bars_after_sl", 3))
+        s.risk.reentry_min_distance_atr       = float(getattr(settings.risk, "reentry_min_distance_atr", 0.35))
+        # ── Sync regime thresholds with candidate threshold ───────────────
+        s.strategy.sideway_min_confidence     = _cand_thr
+        s.strategy.volatile_min_confidence    = _cand_thr
         s.training.backtest_initial_balance = 200.0
         s.training.label_horizon = int(getattr(settings.training, "label_horizon", 8) or 8)
         s.strategy.adx_gate_enabled = False
