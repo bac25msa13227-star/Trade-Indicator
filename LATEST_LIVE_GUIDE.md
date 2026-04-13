@@ -297,25 +297,68 @@ Session spread multiplier đã cài trong script theo từng sàn. Nếu đổi 
 
 ## 6. Preflight máy mới
 
+### Bước 1 — Clone repo
+
 ```bash
-# 1. Clone repo
 git clone https://github.com/bac25msa13227-star/Trade-Indicator.git
 cd Trade-Indicator
 git checkout codex/pf-optimize-from-task4-clean
+```
 
-# 2. Tạo venv
+### Bước 2 — Kiểm tra Docker (ưu tiên trước)
+
+```bash
+docker --version && docker compose version
+# Nếu OK → dùng Docker (xem Bước 3a). Không cần cài Python packages thủ công.
+# Nếu không có Docker → dùng local Python (xem Bước 3b).
+```
+
+### Bước 3a — Dùng Docker ✅ (recommended)
+
+```bash
+# Build images (lần đầu hoặc sau khi đổi code)
+docker compose build
+
+# Verify config + model bên trong container
+docker compose run --rm api python3 -c "
+from pathlib import Path
+from xauusd_ai.config import load_settings
+s1 = load_settings(Path('configs/live_acc1_scalp_m1.yaml'))
+s2 = load_settings(Path('configs/live_acc2_scalp_m1.yaml'))
+print(f'ACC1: thr={s1.strategy.signal_threshold}, risk={s1.risk.risk_per_trade}')
+print(f'ACC2: thr={s2.strategy.signal_threshold}, risk={s2.risk.risk_per_trade}')
+print('OK: Both configs loaded')
+"
+
+# Verify model files bên trong container
+docker compose run --rm api ls -lh /app/outputs/*.pkl /app/outputs/*.json
+
+# Start minimal live stack
+docker compose up -d postgres api nginx
+docker compose up -d live-acc1 live-scalp-acc2 healthwatch
+
+# Kiểm tra health
+docker compose ps
+curl -sS http://localhost:8000/health
+```
+
+> Chuyển sang **Section 8** để biết chi tiết các service Docker. Bỏ qua Bước 3b.
+
+### Bước 3b — Local Python (fallback khi không có Docker)
+
+```bash
+# Chỉ làm khi Docker không có hoặc không muốn dùng Docker
+
+# Tạo venv
 python3 -m venv .venv
 source .venv/bin/activate   # macOS/Linux
 # .venv\Scripts\activate    # Windows
 
-# 3. Install core (đủ cho train/backtest/WF/live/paper)
+# Install core (đủ cho train/backtest/WF/live/paper)
 pip install -r requirements-core.txt
 pip install -e .
 
-# 4. (Optional) Install infra nếu cần API/dashboard/Docker
-pip install -r requirements-infra.txt
-
-# 5. Verify config load
+# Verify config load
 PYTHONPATH=src python3 -c "
 from pathlib import Path
 from xauusd_ai.config import load_settings
@@ -323,20 +366,24 @@ load_settings(Path('configs/live_acc1_scalp_m1.yaml'))
 load_settings(Path('configs/live_acc2_scalp_m1.yaml'))
 print('OK: Both configs loaded')
 "
+```
 
-# 6. Verify model files
+### Bước 4 — Verify chung (Docker hoặc local)
+
+```bash
+# Verify model files tồn tại và không phải LFS stub
 ls -lh outputs/*.pkl outputs/*.json
 
-# 7. Verify market data (cần cho backtest/WF/train)
+# Verify market data
 ls -lh src/xauusd_ai/real_data/XAUUSDm_M1.csv
 
-# 8. Verify CSV có đúng 9 cột bắt buộc (bao gồm tick_volume_delta + volume_imbalance)
+# Verify CSV có đúng 9 cột bắt buộc
 head -1 src/xauusd_ai/real_data/XAUUSDm_M1.csv
 # Kỳ vọng: time,open,high,low,close,tick_volume,spread_points,tick_volume_delta,volume_imbalance
 
-# 9. Verify G2+G3 fix có trong scalp_dataset.py (bắt buộc để live = WF)
+# Verify G2+G3 fix có trong scalp_dataset.py (bắt buộc để live = WF)
 grep -n '_atr14_fn\|infer_scalp_volatility_regime' src/xauusd_ai/features/scalp_dataset.py | tail -4
-# Kỳ vọng: thấy 2 dòng assignment cuối build_scalp_dataset() — m1["atr"] và m1["volatility_regime"]
+# Kỳ vọng: thấy 2 dòng assignment — m1["atr"] và m1["volatility_regime"]
 ```
 
 > **Lưu ý:** File CSV data (`src/xauusd_ai/real_data/XAUUSDm_*.csv`) **KHÔNG** được push lên git (gitignore).
