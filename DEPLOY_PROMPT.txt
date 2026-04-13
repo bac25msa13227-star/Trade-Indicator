@@ -1,0 +1,562 @@
+==========================================================================
+XAUUSD AI TRADING SYSTEM — PROMPT DEPLOY ĐẦY ĐỦ
+Dành cho AI assistant hoặc người deploy trên máy mới
+Cập nhật: 2026-04-13 (post-gap-fix, commit 70bd20c)
+==========================================================================
+
+BẠN LÀ AI ASSISTANT. ĐỌC TOÀN BỘ FILE NÀY TRƯỚC KHI LÀM BẤT CỨ ĐIỀU GÌ.
+
+===========================================================================
+PHẦN A — BỐI CẢNH & TẠI SAO LIVE HAY LỆCH WF
+===========================================================================
+
+Hệ thống này đã từng có live kết quả rất tệ dù WF tốt (ACC1: 1W/8L -$17,
+ACC2: 1W/8L -$15 trong 1 tuần). Nguyên nhân đã được tìm ra và fix hoàn toàn.
+Bạn BẮT BUỘC phải hiểu 3 lý do gốc rễ này để không tái phạm:
+
+── GAP #1 (CRITICAL): Model training objective sai ──────────────────────────
+  WF train model dùng "day_stability_strict" weighting:
+    - Penalty giờ xấu (Asian 00-07 UTC, late-NY 17-21 UTC): weight × 0.75
+    - Penalty thứ Hai: weight × 0.80
+    - Penalty vol spike cao (top 10% ATR): weight × 0.85
+  Nhưng script train model live (acc2_scalp_m1_save_model.py) trước đây
+  dùng "baseline" — không có penalty nào cả.
+  → Model live học sai distribution → dự đoán khác WF hoàn toàn.
+  ✅ ĐÃ FIX: save_model.py giờ dùng cùng day_stability_strict.
+
+── GAP #2 (HIGH): ATR trong dataset WF bị sai ───────────────────────────────
+  Live feature pipeline tính: atr = ATR(14) trên M1
+  WF dataset trước đây KHÔNG có cột atr → engine fallback sang:
+    atr_proxy = ms_atr5_norm × close / 1000   (ATR5, công thức khác ATR14)
+  → SL/TP sizing trong WF tính khác live → entry/exit khác nhau.
+  ✅ ĐÃ FIX: build_scalp_dataset() giờ thêm atr = ATR(14) vào dataset.
+
+── GAP #3 (MEDIUM): volatility_regime trong WF hardcoded ───────────────────
+  Live: infer_scalp_volatility_regime() → tính 0 (low) / 1 (normal) / 2 (high)
+  WF dataset trước đây: tất cả bars đều có volatility_regime = 1
+  → Threshold điều chỉnh theo regime trong WF không đúng với live.
+  ✅ ĐÃ FIX: build_scalp_dataset() giờ tính real volatility_regime.
+
+── GAP #4 (slippage quá lạc quan): ─────────────────────────────────────────
+  slippage_rr: 0.01 (cũ) → M1 execution drift thực tế ~0.4 pts ~ rr=0.05
+  ✅ ĐÃ FIX: cả 2 config dùng slippage_rr: 0.05
+
+NGUYÊN TẮC ĐỂ LIVE = WF:
+  1. Model train với CÙNG weighting như WF (day_stability_strict)
+  2. Dataset WF phải có ĐÚNG cột atr=ATR(14) và volatility_regime real
+  3. CSV data phải có ĐÚNG 9 cột (không thiếu tick_volume_delta, volume_imbalance)
+  4. slippage_rr phải realistic (0.05 cho M1 Exness Pro)
+  5. Tất cả threshold: min_confidence = sideway_min_confidence = volatile_min_confidence = signal_threshold
+
+===========================================================================
+PHẦN B — THÔNG SỐ KHÓA (KHÔNG ĐƯỢC THAY ĐỔI TÙY TIỆN)
+===========================================================================
+
+ACC1 — Exness Pro Demo (scalp M1 reversal):
+  signal_threshold:         0.59
+  min_confidence:           0.59
+  sideway_min_confidence:   0.59
+  volatile_min_confidence:  0.59
+  risk_per_trade:           0.026  (2.6%)
+  max_risk_fraction:        0.052  (~2× risk)
+  spread_cost_rr:           0.035
+  slippage_rr:              0.05   ← KHÔNG ĐƯỢC đặt < 0.05
+  silver_bullet_enabled:    false
+  setup_exit_scale:         0.75
+  cooldown_bars:            4
+
+ACC2 — Exness Pro Demo (scalp M1 freeze H10 setup-exit):
+  signal_threshold:         0.60
+  min_confidence:           0.60
+  sideway_min_confidence:   0.60
+  volatile_min_confidence:  0.60
+  risk_per_trade:           0.020  (2.0%)  ← 0.022 là sai (đã fix 2026-04-13)
+  max_risk_fraction:        0.048  (~2.4× risk)
+  spread_cost_rr:           0.035
+  slippage_rr:              0.05   ← KHÔNG ĐƯỢC đặt < 0.05
+  silver_bullet_enabled:    true
+  silver_bullet_confidence_boost: 0.03
+  setup_exit_scale:         0.75
+  cooldown_bars:            4
+
+WF Benchmark post-fix (slippage=0.05, 8-fold, $200 initial):
+  ACC1: net=$85,327  PF=1.761  fold8=+$18,103  feasible=7/120
+  ACC2: net=$57,356  PF=1.773  fold8=+$14,725  feasible=1/120
+
+Model artifacts (train_end=2026-04-13, day_stability_strict):
+  outputs/acc1_scalp_m1_reversal_model.pkl      (~1.9 MB)
+  outputs/acc1_scalp_m1_reversal_scaler.pkl
+  outputs/acc2_scalp_m1_h10_setup_exit_model.pkl (~1.9 MB)
+  outputs/acc2_scalp_m1_h10_setup_exit_scaler.pkl
+
+===========================================================================
+PHẦN C — CLONE & INSTALL
+===========================================================================
+
+git clone https://github.com/bac25msa13227-star/Trade-Indicator.git
+cd "Trade-Indicator"
+git checkout codex/pf-optimize-from-task4-clean
+git log --oneline -3   # phải thấy commit 70bd20c ở đầu
+
+# Install
+python3 -m venv .venv
+source .venv/bin/activate          # macOS/Linux
+# .venv\Scripts\activate           # Windows
+pip install -r requirements-core.txt
+pip install -r requirements-infra.txt
+pip install -e .
+
+# Verify config
+PYTHONPATH=src python3 -c "
+from pathlib import Path
+from xauusd_ai.config import load_settings
+s1 = load_settings(Path('configs/live_acc1_scalp_m1.yaml'))
+s2 = load_settings(Path('configs/live_acc2_scalp_m1.yaml'))
+assert abs(s1.strategy.signal_threshold - 0.59) < 0.001, 'ACC1 thr wrong'
+assert abs(s1.risk.risk_per_trade - 0.026) < 0.001, 'ACC1 risk wrong'
+assert abs(s1.risk.slippage_rr - 0.05) < 0.001, 'ACC1 slippage wrong'
+assert s1.strategy.silver_bullet_enabled == False, 'ACC1 silver_bullet wrong'
+assert abs(s2.strategy.signal_threshold - 0.60) < 0.001, 'ACC2 thr wrong'
+assert abs(s2.risk.risk_per_trade - 0.020) < 0.001, 'ACC2 risk wrong'
+assert abs(s2.risk.slippage_rr - 0.05) < 0.001, 'ACC2 slippage wrong'
+assert s2.strategy.silver_bullet_enabled == True, 'ACC2 silver_bullet wrong'
+print('ALL CONFIG PARAMS OK')
+"
+
+# Unit tests
+PYTHONPATH=src pytest tests/ -q
+# KỲ VỌNG: 92 passed, 0 failed
+
+# Verify model files thực sự (không phải LFS pointer stub)
+python3 -c "
+import os
+for f in ['outputs/acc1_scalp_m1_reversal_model.pkl',
+          'outputs/acc2_scalp_m1_h10_setup_exit_model.pkl']:
+    sz = os.path.getsize(f)
+    assert sz > 100_000, f'{f} quá nhỏ ({sz}B) — có thể là LFS stub, chạy: git lfs pull'
+    print(f'OK {f}: {sz:,} bytes')
+"
+
+===========================================================================
+PHẦN D — DỮ LIỆU CSV (QUAN TRỌNG NHẤT ĐỂ live=WF)
+===========================================================================
+
+CSV data nằm ở: src/xauusd_ai/real_data/XAUUSDm_{TF}.csv
+(bị .gitignore — phải tạo lại trên mỗi máy)
+
+CÁC TIMEFRAME CẦN CÓ: M1, M5, M15, M30, H1, H4, D1
+
+FORMAT BẮT BUỘC (9 cột, theo đúng thứ tự):
+  time,open,high,low,close,tick_volume,spread_points,tick_volume_delta,volume_imbalance
+
+  time             : ISO UTC, ví dụ: 2026-04-13 14:22:00+00:00
+  open/high/low/close: giá vàng USD (float, 3 chữ số thập phân)
+  tick_volume      : số tick trong bar (từ MT5)
+  spread_points    : spread tại lúc bar đóng (từ MT5 rates.spread)
+  tick_volume_delta: tick_volume[i] - tick_volume[i-1]
+                     (proxy order flow: dương = buyers tăng, âm = sellers tăng)
+  volume_imbalance : (close - low) / (high - low), nếu high=low thì = 0.5
+                     (body pressure: 1.0 = đóng cửa top bar, 0.0 = đáy bar)
+
+KHÔNG ĐƯỢC thiếu 2 cột cuối vì chúng dùng cho features:
+  tick_volume_delta → of_delta_cum5, of_delta_zscore, of_delta_accel (order flow)
+  volume_imbalance  → of_vi_ema5, of_vi_ema13, of_flow_score
+
+CÁC CỘT KHÔNG LƯU CSV (tính on-the-fly khi load):
+  atr              : ATR(14) — scalp_dataset.py tính sau khi load
+  volatility_regime: 0/1/2  — scalp_dataset.py tính sau khi load
+  m5_bias, m5_rsi_14, m5_atr_norm: merge từ M5 CSV trong scalp_dataset.py
+
+── D1: Fetch historical data (1 lần) ───────────────────────────────────────
+
+# Cần cài dukascopy-node trước:
+npm install -g dukascopy-node   # cần Node.js >= 16
+
+PYTHONPATH=src python3 scripts/fetch_xauusd_dukascopy.py \
+  --from 2003-01-01 \
+  --to $(date +%Y-%m-%d) \
+  --chunk year
+
+# Script sẽ:
+# 1. Download từ Dukascopy theo từng năm (chunk=year)
+# 2. Tự tính tick_volume_delta và volume_imbalance
+# 3. Tự resample sang M5, M15, M30, H1, H4, D1
+# 4. Lưu vào src/xauusd_ai/real_data/XAUUSDm_{TF}.csv
+
+# Verify sau khi fetch:
+python3 -c "
+import pandas as pd
+from pathlib import Path
+for tf in ['M1','M5','M15','M30','H1','H4','D1']:
+    p = Path('src/xauusd_ai/real_data') / f'XAUUSDm_{tf}.csv'
+    if not p.exists():
+        print(f'MISSING: {p}')
+        continue
+    df = pd.read_csv(p, nrows=2)
+    cols = set(df.columns)
+    need = {'time','open','high','low','close','tick_volume','spread_points','tick_volume_delta','volume_imbalance'}
+    missing = need - cols
+    if missing:
+        print(f'MISSING COLS in {tf}: {missing}')
+    else:
+        n = sum(1 for _ in open(p)) - 1
+        print(f'OK {tf}: {n:,} rows, cols={list(df.columns)}')
+"
+
+── D2: Realtime bar appender (chạy liên tục, cập nhật CSV từ MT5) ──────────
+
+Script: scripts/realtime_bar_appender.py (đã có sẵn trong repo)
+
+Yêu cầu: MT5 bridge đang chạy (xem Phần E)
+
+# Chạy 1 lần thử:
+BRIDGE_HOST=localhost BRIDGE_PORT=5600 MT5_SYMBOL=XAUUSDm \
+  python3 scripts/realtime_bar_appender.py
+
+# KỲ VỌNG: log như "Appended M1 bar 2026-04-13 14:22:00+00:00" hoặc "No new bars this cycle"
+
+# Crontab tự động mỗi phút (thêm vào crontab -e):
+* * * * * cd /DUONG_DAN/Trade-Indicator && \
+  BRIDGE_HOST=localhost BRIDGE_PORT=5600 MT5_SYMBOL=XAUUSDm \
+  PYTHONPATH=src python3 scripts/realtime_bar_appender.py >> /tmp/bar_appender.log 2>&1
+
+# Hoặc chạy loop nền (không cần crontab):
+RUN_LOOP=1 BRIDGE_HOST=localhost BRIDGE_PORT=5600 \
+  PYTHONPATH=src python3 scripts/realtime_bar_appender.py &
+
+# Biến môi trường của appender:
+#   BRIDGE_HOST    : ip/hostname Windows host (default: localhost)
+#   BRIDGE_PORT    : 5600 cho ACC1, 5601 cho ACC2
+#   MT5_SYMBOL     : XAUUSDm (hoặc XAUUSD nếu terminal không có 'm')
+#   DATA_DIR       : src/xauusd_ai/real_data (default)
+#   RUN_LOOP       : 1 = chạy vô tận mỗi 55s, 0 = chạy 1 lần
+#   LOG_LEVEL      : DEBUG / INFO
+
+===========================================================================
+PHẦN E — MT5 BRIDGE (chạy trên Windows host)
+===========================================================================
+
+Bridge là HTTP proxy giữa Docker bot (Linux) và MetaTrader 5 (Windows).
+ACC1 dùng port 5600, ACC2 dùng port 5601.
+
+# Setup Windows (chạy 1 lần):
+pip install MetaTrader5 requests
+
+# Thiết lập MT5 Terminal:
+# 1. Mở MetaTrader 5, login vào tài khoản Exness Pro Demo
+# 2. Tools → Options → Expert Advisors → bật "Allow automated trading"
+# 3. Tìm symbol XAUUSDm (hoặc XAUUSD tùy broker) trong Market Watch
+
+# Chạy bridge ACC1 (port 5600):
+set MT5_LOGIN=<so_tai_khoan>
+set MT5_PASSWORD=<mat_khau>
+set MT5_SERVER=Exness-MT5Trial17
+set MT5_SYMBOL=XAUUSDm
+set MT5_BRIDGE_PORT=5600
+python scripts\windows\mt5_bridge.py
+
+# Chạy bridge ACC2 (port 5601) trên terminal MT5 thứ 2:
+set MT5_BRIDGE_PORT=5601
+python scripts\windows\mt5_bridge.py
+
+# Verify bridge từ macOS/Linux:
+curl "http://<IP_WINDOWS>:5600/health"
+curl "http://<IP_WINDOWS>:5600/bars?symbol=XAUUSDm&timeframe=M1&count=3"
+# KỲ VỌNG: JSON với 3 bars gần nhất, có trường time, open, high, low, close, tick_volume
+
+# Nếu chạy trong Docker: dùng host.docker.internal thay vì localhost
+# MT5_BRIDGE_URL=http://host.docker.internal:5600   (trong .env)
+
+BRIDGE ENDPOINTS:
+  GET  /health                                         → status bridge
+  GET  /bars?symbol=X&timeframe=M1&count=N            → N bars OHLCV
+  GET  /tick?symbol=X                                 → bid/ask realtime
+  POST /order  body: {symbol,action,volume,sl,tp,...} → đặt lệnh
+  POST /close  body: {ticket}                         → đóng lệnh
+  GET  /positions                                     → positions hiện tại
+  GET  /account                                       → balance, equity
+
+===========================================================================
+PHẦN F — FILE .env
+===========================================================================
+
+Tạo file .env ở root project (copy từ .env.example nếu có):
+
+POSTGRES_USER=trader
+POSTGRES_PASSWORD=trader_secret
+POSTGRES_DB=tradedb
+POSTGRES_HOST=postgres
+POSTGRES_PORT=5432
+
+MINIO_ACCESS_KEY=minioadmin
+MINIO_SECRET_KEY=minioadmin123
+MINIO_ENDPOINT=http://minio:9000
+
+MLFLOW_TRACKING_URI=http://mlflow:5000
+MLFLOW_S3_ENDPOINT_URL=http://minio:9000
+AWS_ACCESS_KEY_ID=minioadmin
+AWS_SECRET_ACCESS_KEY=minioadmin123
+
+# Tạo FERNET_KEY: python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+AIRFLOW__CORE__EXECUTOR=LocalExecutor
+AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://trader:trader_secret@postgres:5432/airflow
+AIRFLOW__CORE__FERNET_KEY=<GENERATE_KEY>
+AIRFLOW__WEBSERVER__SECRET_KEY=<RANDOM_32_CHARS>
+AIRFLOW_ADMIN_USER=admin
+AIRFLOW_ADMIN_PASSWORD=admin123
+
+GF_SECURITY_ADMIN_USER=admin
+GF_SECURITY_ADMIN_PASSWORD=admin123
+
+# MT5 bridges
+MT5_BRIDGE_URL=http://host.docker.internal:5600
+MT5_BRIDGE_URL_ACC2=http://host.docker.internal:5601
+
+# Telegram (tùy chọn nhưng khuyến nghị)
+TELEGRAM_BOT_TOKEN_ACC1=
+TELEGRAM_CHAT_ID_ACC1=
+TELEGRAM_BOT_TOKEN_ACC2=
+TELEGRAM_CHAT_ID_ACC2=
+
+===========================================================================
+PHẦN G — KHỞI ĐỘNG FULL STACK (MLflow + Airflow + Prometheus + Grafana)
+===========================================================================
+
+# Bước 1: Tạo Airflow database (chạy 1 lần duy nhất)
+docker compose up -d postgres
+sleep 15
+docker exec xauusd-postgres psql -U trader -d postgres \
+  -c "CREATE DATABASE airflow;" 2>/dev/null || echo "airflow DB already exists"
+
+# Bước 2: Build images
+docker compose build
+
+# Bước 3: Khởi tạo Airflow admin user (chạy 1 lần)
+docker compose up airflow-init
+# Chờ đến khi log hiện "Admin user admin created" rồi Ctrl+C
+# Hoặc: docker compose logs -f airflow-init | grep -E "created|exist|error"
+
+# Bước 4: Start toàn bộ theo thứ tự dependency
+docker compose up -d postgres minio
+sleep 10
+echo "Postgres + MinIO up"
+
+docker compose up -d mlflow prometheus grafana
+sleep 10
+echo "MLflow + Prometheus + Grafana up"
+
+docker compose up -d airflow-webserver airflow-scheduler
+sleep 20
+echo "Airflow up"
+
+docker compose up -d api nginx
+sleep 5
+echo "API + Nginx up"
+
+docker compose up -d live-acc1 live-scalp-acc2 healthwatch
+echo "Bots up"
+
+# Bước 5: Kích hoạt Airflow DAGs
+docker exec xauusd-airflow-scheduler airflow dags unpause daily_data_ingest
+docker exec xauusd-airflow-scheduler airflow dags unpause scalp_model_retrain
+docker exec xauusd-airflow-scheduler airflow dags unpause drift_monitoring
+
+# Verify tất cả services
+docker compose ps
+# Tất cả phải healthy hoặc running
+
+──────────────────────────────────────────────────────
+URLS sau khi khởi động:
+  http://localhost/dashboard     → Trading dashboard (live PnL, positions)
+  http://localhost:5000          → MLflow (experiment tracking)
+  http://localhost:9001          → MinIO console (minioadmin/minioadmin123)
+  http://localhost:9090          → Prometheus (metrics)
+  http://localhost:3000          → Grafana (admin/admin123)
+  http://localhost:8080          → Airflow (admin/admin123)
+  http://localhost:8000/health   → API health check
+──────────────────────────────────────────────────────
+
+AIRFLOW DAGS (tự động):
+  daily_data_ingest.py     → 00:30 UTC: fetch bars → MinIO + Postgres
+  drift_monitoring.py      → hàng ngày: kiểm tra feature drift
+  model_training.py        → trigger khi có data mới
+  scalp_model_retrain.py   → Chủ nhật 03:00 UTC: retrain ACC1+ACC2 với day_stability_strict
+
+===========================================================================
+PHẦN H — CHẠY LITE (chỉ bot, không cần full stack)
+===========================================================================
+
+Nếu chỉ cần chạy bot (không cần MLflow/Airflow/Grafana):
+
+docker compose up -d postgres api nginx
+docker compose up -d live-acc1 live-scalp-acc2 healthwatch
+
+# Hoặc chạy local (không Docker):
+PYTHONPATH=src python3 src/xauusd_ai/main.py live \
+  --config configs/live_acc1_scalp_m1.yaml
+
+PYTHONPATH=src python3 src/xauusd_ai/main.py live \
+  --config configs/live_acc2_scalp_m1.yaml
+
+===========================================================================
+PHẦN I — RETRAIN MODEL (khi cần update model với data mới)
+===========================================================================
+
+# Retrain ACC1:
+PYTHONPATH=src python3 scripts/acc1_scalp_m1_save_model.py \
+  --config configs/live_acc1_scalp_m1.yaml
+
+# Retrain ACC2:
+PYTHONPATH=src python3 scripts/acc2_scalp_m1_save_model.py \
+  --config configs/live_acc2_scalp_m1.yaml
+
+# CÁC ĐIỀU KIỆN để model retrain đúng (tránh GAP #1):
+# 1. acc2_scalp_m1_save_model._train_dir() phải dùng day_stability_strict
+#    (đã fix trong commit 70bd20c — kiểm tra bằng grep _train_dir scripts/acc2_scalp_m1_save_model.py)
+# 2. build_scalp_dataset() phải có atr=ATR(14) và volatility_regime real
+#    (đã fix — kiểm tra bằng grep "atr\|volatility_regime" src/xauusd_ai/features/scalp_dataset.py | tail -5)
+# 3. Sau retrain: chạy WF để confirm benchmark vẫn giữ (xem Phần J)
+
+===========================================================================
+PHẦN J — WF VALIDATION (xác nhận benchmark sau mỗi thay đổi quan trọng)
+===========================================================================
+
+# Chạy WF để confirm params và benchmark:
+PYTHONPATH=src python3 scripts/acc1_friction_opt_wf.py \
+  --config configs/live_acc1_scalp_m1.yaml \
+  --n-folds 8 --out-prefix acc1_verify
+
+PYTHONPATH=src python3 scripts/acc2_friction_opt_wf.py \
+  --config configs/live_acc2_scalp_m1.yaml \
+  --n-folds 8 --out-prefix acc2_verify
+
+BENCHMARK PHẢI ĐẠT (nếu thấp hơn → có vấn đề):
+  ACC1: net > $80,000  PF > 1.70  best_params = thr=0.59, risk=0.026
+  ACC2: net > $50,000  PF > 1.70  best_params = thr=0.60, risk=0.020
+
+Nếu WF thấp hơn benchmark:
+  1. Kiểm tra slippage_rr có là 0.05 không (grep slippage_rr configs/*.yaml)
+  2. Kiểm tra CSV có đủ 9 cột không (head -1 src/xauusd_ai/real_data/XAUUSDm_M1.csv)
+  3. Kiểm tra atr và volatility_regime có trong scalp_dataset.py không
+     (grep "m1\[.atr.\]\|volatility_regime" src/xauusd_ai/features/scalp_dataset.py)
+  4. Chạy: PYTHONPATH=src python3 -c "
+     from xauusd_ai.features.scalp_dataset import build_scalp_dataset
+     df = build_scalp_dataset(start_date='2026-04-01')
+     print('atr' in df.columns, 'volatility_regime' in df.columns)
+     # Phải in: True True"
+
+===========================================================================
+PHẦN K — TROUBLESHOOTING
+===========================================================================
+
+"No module named xauusd_ai"
+  → Cần PYTHONPATH=src hoặc pip install -e .
+
+"FileNotFoundError: XAUUSDm_M1.csv"
+  → Chạy fetch_xauusd_dukascopy.py (Phần D1)
+  → Hoặc copy file từ máy cũ vào src/xauusd_ai/real_data/
+
+Model .pkl quá nhỏ (<1KB) — LFS pointer stub:
+  → Chạy: git lfs pull
+  → Hoặc cài git-lfs: brew install git-lfs && git lfs install && git lfs pull
+
+"Connection refused" khi gọi bridge:
+  → MT5 bridge chưa chạy trên Windows
+  → Kiểm tra firewall cho phép port 5600/5601
+  → Docker: dùng host.docker.internal thay localhost trong .env
+
+Airflow "Fernet key missing":
+  → Tạo key: python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+  → Thêm vào .env: AIRFLOW__CORE__FERNET_KEY=<key>
+
+Volume_imbalance toàn = 0 trong CSV:
+  → Script tạo CSV cũ không tính đúng → fetch lại data
+  → Kiểm tra: python3 -c "
+    import pandas as pd
+    df = pd.read_csv('src/xauusd_ai/real_data/XAUUSDm_M1.csv', nrows=10)
+    print(df['volume_imbalance'].describe())"
+  → Phải có std > 0.1
+
+Tick_volume_delta toàn = 0:
+  → Tương tự, fetch lại data
+  → Script fetch mới đã tính đúng (tv[i] - tv[i-1])
+
+===========================================================================
+PHẦN L — CHECKLIST CUỐI (chạy tuần tự, đánh dấu PASS/FAIL)
+===========================================================================
+
+[ ] L1.  git checkout codex/pf-optimize-from-task4-clean && git log --oneline -1
+         → Phải thấy commit 70bd20c
+
+[ ] L2.  pip install -r requirements-core.txt -r requirements-infra.txt && pip install -e .
+         → Không có error
+
+[ ] L3.  PYTHONPATH=src python3 -c "..." (verify config — xem Phần C)
+         → "ALL CONFIG PARAMS OK"
+
+[ ] L4.  PYTHONPATH=src pytest tests/ -q
+         → "92 passed"
+
+[ ] L5.  ls -lh outputs/*.pkl | grep -v " [0-9]B "
+         → Cả 2 file .pkl > 1MB
+
+[ ] L6.  ls src/xauusd_ai/real_data/XAUUSDm_M1.csv
+         → Tồn tại và > 100MB
+
+[ ] L7.  Kiểm tra 9 cột CSV:
+         head -1 src/xauusd_ai/real_data/XAUUSDm_M1.csv
+         → time,open,high,low,close,tick_volume,spread_points,tick_volume_delta,volume_imbalance
+
+[ ] L8.  Build scalp_dataset test:
+         PYTHONPATH=src python3 -c "
+         from xauusd_ai.features.scalp_dataset import build_scalp_dataset
+         df = build_scalp_dataset(start_date='2026-04-01')
+         print('atr:', 'atr' in df.columns, '| regime:', 'volatility_regime' in df.columns)
+         print('atr mean:', round(df.atr.mean(), 2), '| regime dist:', df.volatility_regime.value_counts().to_dict())"
+         → atr: True | regime: True
+         → atr mean ~2-5 (giá vàng USD)
+         → regime có cả 0, 1, 2
+
+[ ] L9.  MT5 bridge health:
+         curl http://localhost:5600/health
+         → {"status": "ok"} hoặc tương tự
+
+[ ] L10. Bar appender test:
+         BRIDGE_HOST=localhost PYTHONPATH=src python3 scripts/realtime_bar_appender.py
+         → Không crash, log "No new bars" hoặc "Appended X bar"
+
+[ ] L11. WF benchmark (tùy chọn, tốn ~15 phút):
+         PYTHONPATH=src python3 scripts/acc1_friction_opt_wf.py --n-folds 8 --out-prefix verify
+         → BEST net > $80,000 với thr=0.59 rf=0.026
+
+[ ] L12. Docker compose (nếu dùng):
+         docker compose config -q && docker compose ps
+         → Không có lỗi config, services running
+
+===========================================================================
+PHẦN M — BÁO CÁO CUỐI SAU DEPLOY
+===========================================================================
+
+Sau khi hoàn tất, báo cáo theo format này:
+
+=== XAUUSD AI DEPLOYMENT REPORT ===
+Date       : YYYY-MM-DD
+Machine    : <OS, CPU cores, RAM GB>
+Branch     : codex/pf-optimize-from-task4-clean
+Commit     : <git rev-parse --short HEAD>
+
+L1  Branch/commit     : [PASS/FAIL]
+L2  Install           : [PASS/FAIL]
+L3  Config params     : [PASS/FAIL] ACC1: thr=? risk=? slip=?  ACC2: thr=? risk=? slip=?
+L4  Tests             : [PASS/FAIL] ??/92 passed
+L5  Model .pkl size   : [PASS/FAIL] ACC1: ?? MB  ACC2: ?? MB
+L6  M1 CSV exists     : [PASS/FAIL] ?? rows, last bar: ???
+L7  CSV 9 columns     : [PASS/FAIL]
+L8  dataset atr+regime: [PASS/FAIL] atr_mean=?  regime={0:?,1:?,2:?}
+L9  Bridge health     : [PASS/FAIL/SKIP]
+L10 Bar appender      : [PASS/FAIL/SKIP]
+L11 WF benchmark      : [PASS/FAIL/SKIP] ACC1 net=$?? PF=?  ACC2 net=$?? PF=?
+L12 Docker services   : [PASS/FAIL/SKIP]
+
+Overall: [READY / NOT READY]
+Issues : <nếu có>
