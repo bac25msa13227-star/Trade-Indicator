@@ -358,14 +358,19 @@ def infer_scalp_volatility_regime(df: pd.DataFrame) -> pd.Series:
     Priority:
       1. M1 ATR expansion (same as label generation)
       2. M5 ATR norm fallback
+
+    Thresholds (tuned 2026-04-14):
+      - sideway:  expansion <= 0.80  (was 0.95 — too sensitive, caused false sideway)
+      - strong:   expansion >= 1.30
+      - normal:   everything in between
     """
     if "ms_atr_expansion" in df.columns:
         exp = pd.to_numeric(df["ms_atr_expansion"], errors="coerce").fillna(1.0).to_numpy(dtype=float)
-        regime = np.where(exp <= 0.95, 0, np.where(exp >= 1.30, 2, 1))
+        regime = np.where(exp <= 0.80, 0, np.where(exp >= 1.30, 2, 1))
         return pd.Series(regime.astype(int), index=df.index, dtype=int)
     if "m5_atr_norm" in df.columns:
         exp = pd.to_numeric(df["m5_atr_norm"], errors="coerce").fillna(1.0).to_numpy(dtype=float)
-        regime = np.where(exp <= 0.95, 0, np.where(exp >= 1.25, 2, 1))
+        regime = np.where(exp <= 0.80, 0, np.where(exp >= 1.25, 2, 1))
         return pd.Series(regime.astype(int), index=df.index, dtype=int)
     return pd.Series(np.ones(len(df), dtype=int), index=df.index, dtype=int)
 

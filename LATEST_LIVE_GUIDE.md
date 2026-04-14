@@ -19,7 +19,7 @@
 >
 > **⚠️ CẢNH BÁO — WF-LIVE GAP:** Hệ thống từng bị live thua liên tục (1W/8L ≈ −$17/acc, tuần 14/4) dù WF $85k+ do 3 GAP kỹ thuật. Tất cả đã fix 2026-04-13. Đọc **Section 0** bên dưới trước khi deploy.
 
-Last updated: `2026-04-13` (post-gap-fix revalidation — models retrained, WF re-run)
+Last updated: `2026-04-14` (G5 fix: yfinance guard — block delayed data in live/paper)
 
 ---
 
@@ -56,6 +56,7 @@ Last updated: `2026-04-13` (post-gap-fix revalidation — models retrained, WF r
 | **G2** | HIGH | WF dataset thiếu cột `atr` → engine fallback sang ATR5 proxy (không ổn định). Live dùng `ATR(14)` thực tế. Feature drift lớn ở tất cả signal. | Thêm `m1["atr"] = _atr14_fn(m1, 14)` vào `build_scalp_dataset()` trong `scalp_dataset.py` |
 | **G3** | MEDIUM | WF hardcode `volatility_regime = 1` cho mọi bar. Live tính `infer_scalp_volatility_regime()` → real 0/1/2. 100% mismatch feature này. | Thêm `m1["volatility_regime"] = infer_scalp_volatility_regime(m1).astype(int)` vào `build_scalp_dataset()` |
 | **G4** | MEDIUM | `slippage_rr: 0.01` quá lạc quan — M1 execution drift thực tế ~0.4 pts ≈ 0.05 RR. WF overstate PF. | `slippage_rr: 0.01 → 0.05` trong cả 2 YAML config |
+| **G5** | HIGH | `yfinance` có thể bị dùng làm data source live (GC=F proxy, delay 15-30s). SelfLearner fallback sang yfinance khi bridge fail. M1 scalping cần tick chính xác — delay = quyết định sai. | yfinance import lazy, guard chặn yfinance trong live/paper, SelfLearner không fallback yfinance (2026-04-14) |
 
 ### Format CSV bắt buộc — 9 cột (đúng thứ tự)
 
@@ -72,13 +73,14 @@ time,open,high,low,close,tick_volume,spread_points,tick_volume_delta,volume_imba
 
 Dùng `scripts/realtime_bar_appender.py` để append bars mới từ MT5 bridge — script tự tính `tick_volume_delta` và `volume_imbalance` đúng cách.
 
-### 5 Nguyên tắc để live ≡ WF benchmark
+### 6 Nguyên tắc để live ≡ WF benchmark
 
 1. **Đúng training objective:** Train bằng `scripts/acc*_scalp_m1_save_model.py` (đã dùng `day_stability_strict`) — KHÔNG dùng `main.py train` nếu chưa verify weighting.
 2. **CSV đúng 9 cột:** Dùng `scripts/realtime_bar_appender.py` để update data realtime, không tự append thủ công nếu không tính `tick_volume_delta`/`volume_imbalance` đúng.
 3. **ATR(14) trong dataset:** `scalp_dataset.py` phải có dòng `m1["atr"] = _atr14_fn(m1, 14)` ở cuối `build_scalp_dataset()` (G2 fix).
 4. **Regime tính thực:** `scalp_dataset.py` phải có dòng `m1["volatility_regime"] = infer_scalp_volatility_regime(m1).astype(int)` (G3 fix).
 5. **Slippage realistic:** `slippage_rr: 0.05` trong config — KHÔNG đổi về `0.01`.
+6. **KHÔNG dùng yfinance cho live/paper:** Data live PHẢI từ MT5 bridge (real-time tick). yfinance là GC=F proxy, delay 15-30s — chết cho M1 scalping. Code đã có guard tự chặn (G5 fix).
 
 ### Verify nhanh sau `git clone`
 
@@ -90,6 +92,18 @@ grep -n '_atr14_fn\|infer_scalp_volatility_regime' src/xauusd_ai/features/scalp_
 # Verify slippage config
 grep 'slippage_rr' configs/live_acc1_scalp_m1.yaml configs/live_acc2_scalp_m1.yaml
 # Kỳ vọng: slippage_rr: 0.05 (cả 2 file)
+
+# Verify G5: yfinance guard (không import ở module level)
+python -c "import sys; sys.path.insert(0,'src'); import xauusd_ai.data.market_data as m; assert not hasattr(m,'yf'), 'yfinance still at module level!'; print('OK: yfinance is lazy')"
+# Kỳ vọng: OK: yfinance is lazy
+
+# Verify live_data_source = bridge
+grep 'live_data_source' configs/live_acc1_scalp_m1.yaml configs/live_acc2_scalp_m1.yaml
+# Kỳ vọng: live_data_source: bridge (cả 2 file)
+
+# Run data source guard tests
+PYTHONPATH=src python -m pytest tests/test_live_data_source_guard.py -v
+# Kỳ vọng: 13 passed
 
 # Verify CSV header (nếu đã có data)
 head -1 src/xauusd_ai/real_data/XAUUSDm_M1.csv 2>/dev/null || echo 'No CSV yet — cần setup bar appender'

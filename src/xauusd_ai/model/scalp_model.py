@@ -156,7 +156,10 @@ class DualScalpModel:
         out["probability"]       = np.where(sell_mask, sell_p, buy_p)
         out["trade_side"]        = np.where(sell_mask, "sell", "buy")
         out["strategy_score"]    = 1.0
-        out["volatility_regime"] = 1
+        # Use real volatility_regime from dataset (computed by infer_scalp_volatility_regime)
+        # instead of hardcoding 1 — matches live regime inference.
+        if "volatility_regime" not in out.columns:
+            out["volatility_regime"] = 1
         out["trend_alignment"]   = 1
         out["adx"]               = 25.0
         return out

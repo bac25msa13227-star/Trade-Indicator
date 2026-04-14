@@ -2,7 +2,7 @@
 SelfLearner — Hệ thống tự học liên tục.
 
 Vòng lặp:
-  1. Mỗi N nến mới → fetch data bổ sung từ yfinance (hoặc CSV/MT5)
+  1. Mỗi N nến mới → fetch data bổ sung từ MT5 bridge (hoặc CSV/MT5)
   2. Gộp với data lịch sử → retrain toàn bộ model
   3. Đánh giá model mới vs model cũ (precision, recall, roc_auc)
   4. Nếu model tốt hơn (hoặc chưa có model cũ) → lưu
@@ -13,6 +13,8 @@ Loss Learning (Phase 2):
   - Log chi tiết features lúc vào lệnh vào outputs/loss_analysis.jsonl
   - Sau mỗi K lệnh thua → trigger retrain với sample_weight tăng
     cho các pattern tương tự → model học cẩn thận hơn
+
+Note: yfinance chỉ dùng cho training/backtest. Live MUST dùng bridge.
 """
 
 from __future__ import annotations
@@ -26,7 +28,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pandas as pd
-import yfinance as yf
 
 if TYPE_CHECKING:
     from xauusd_ai.config import Settings
@@ -40,7 +41,7 @@ LOGGER = logging.getLogger(__name__)
 class SelfLearner:
     """
     Quản lý vòng học liên tục:
-    - Fetch data mới từ yfinance / CSV / MT5
+    - Fetch data mới từ MT5 bridge (live) hoặc CSV/MT5
     - Gộp với data lịch sử trong bộ nhớ
     - Retrain model
     - So sánh kết quả và chỉ lưu khi tốt hơn
@@ -294,19 +295,30 @@ class SelfLearner:
             return pd.DataFrame()
 
     def fetch_fresh_data(self, timeframe: str = "M15") -> pd.DataFrame:
-        """Fetch fresh data using configured live_data_source (bridge / mt5 / yfinance)."""
-        src = getattr(self.settings.market, "live_data_source", "yfinance")
+        """Fetch fresh data using configured live_data_source (bridge / mt5 only).
+
+        yfinance is NEVER used here — it has 15-30s delay on GC=F proxy data,
+        which is fatal for M1 scalping decisions.
+        """
+        src = getattr(self.settings.market, "live_data_source", "bridge")
         if src in {"bridge", "mt5_bridge"}:
             return self.fetch_fresh_bridge(timeframe)
         if src == "mt5":
             return self.fetch_fresh_mt5(timeframe)
-        return self.fetch_fresh_yfinance(timeframe)
+        LOGGER.warning(
+            "SelfLearner: live_data_source=%s is not bridge/mt5 — "
+            "refusing to fall back to yfinance (delayed data). "
+            "Returning empty frame.",
+            src,
+        )
+        return pd.DataFrame()
 
     def fetch_fresh_yfinance(self, timeframe: str = "M15") -> pd.DataFrame:
         """
         Cào data mới nhất từ yfinance (XAUUSD=X).
-        Dùng làm bổ sung khi data CSV/MT5 chưa cập nhật.
+        CHỈ dùng cho training/backtest offline — KHÔNG dùng cho live/paper.
         """
+        import yfinance as yf
         from xauusd_ai.data.market_data import TIMEFRAME_MAP, YFINANCE_PERIOD_MAP
 
         interval = TIMEFRAME_MAP.get(timeframe, "15m")
@@ -357,7 +369,7 @@ class SelfLearner:
     def _merge_with_cache(self, frames: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
         """
         Gộp frames hiện tại với cache.
-        Nếu đã quá 1 giờ kể từ lần fetch cuối → cào thêm từ yfinance.
+        Nếu đã quá 1 giờ kể từ lần fetch cuối → cào thêm từ bridge/MT5.
         Tự động trim cache để tránh memory leak.
         """
         now = time.time()
@@ -382,7 +394,7 @@ class SelfLearner:
                 merged[tf] = frame
             self._cached_frames[tf] = merged[tf]
 
-        # Mỗi 1 giờ cào thêm data mới nhất (MT5 hoặc yfinance theo live_data_source)
+        # Mỗi 1 giờ cào thêm data mới nhất (MT5 bridge theo live_data_source)
         exec_tf = self.settings.market.execution_timeframe
         if now - self._last_fetch_ts > 3600:
             yf_frame = self.fetch_fresh_data(exec_tf)

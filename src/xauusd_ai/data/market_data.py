@@ -9,10 +9,29 @@ import urllib.parse as _urlparse
 import urllib.request as _urllib
 import urllib.error as _urlerr
 
+import logging as _logging
+
 import pandas as pd
-import yfinance as yf
 
 from xauusd_ai.config import Settings
+
+_log = _logging.getLogger(__name__)
+
+# yfinance is imported lazily — only when training/backtest actually needs it.
+# This prevents accidental usage in live/paper trading where it would introduce
+# 15-30s delay on GC=F proxy data, fatal for M1 scalping.
+
+
+def _import_yfinance():
+    """Lazy import yfinance — raises clear error if not installed."""
+    try:
+        import yfinance as yf
+        return yf
+    except ImportError:
+        raise ImportError(
+            "yfinance is not installed. It is only needed for training/backtest. "
+            "Install with: pip install yfinance"
+        )
 
 try:
     import MetaTrader5 as mt5
@@ -210,6 +229,7 @@ class MarketDataService:
         return frame
 
     def _fetch_rates_yfinance(self, timeframe_name: str, bars: int) -> pd.DataFrame:
+        yf = _import_yfinance()
         interval = TIMEFRAME_MAP[timeframe_name]
         period = YFINANCE_PERIOD_MAP[timeframe_name]
         requested_ticker = self.settings.market.training_symbol or "GC=F"
@@ -257,6 +277,9 @@ class MarketDataService:
             (frame["close"] - frame["open"]).abs() / (frame["high"] - frame["low"]).replace(0, pd.NA)
         ).fillna(0)
         return frame
+
+    # Sources that are safe for live/paper trading (real-time, no delay).
+    _LIVE_SAFE_SOURCES = frozenset({"bridge", "mt5_bridge", "mt5", "csv_folder", "csv"})
 
     def _fetch_rates(self, timeframe_name: str, bars: int, source: str) -> pd.DataFrame:
         if source == "yfinance":
@@ -386,6 +409,18 @@ class MarketDataService:
         # are all hydrated when present in config, especially for bridge-backed live mode.
         required.update({str(tf).upper() for tf in self.settings.market.bars.keys()})
         resolved_source = source or self.settings.market.live_data_source
+
+        # ── GUARD: block yfinance in live/paper trading ──────────────────────
+        live_src = self.settings.market.live_data_source
+        if resolved_source == "yfinance" and live_src in self._LIVE_SAFE_SOURCES:
+            _log.critical(
+                "BLOCKED: yfinance requested but live_data_source=%s. "
+                "yfinance has 15-30s delay — fatal for M1 scalping. "
+                "Using %s instead.",
+                live_src, live_src,
+            )
+            resolved_source = live_src
+
         for timeframe_name in required:
             # all_bars=True dùng cho training — load toàn bộ CSV không giới hạn
             bars = 999_999_999 if all_bars else self.settings.market.bars[timeframe_name]

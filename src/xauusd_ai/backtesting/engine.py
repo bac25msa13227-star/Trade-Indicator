@@ -384,6 +384,14 @@ def simulate_dynamic_concurrent_backtest(
         if _anti_mart_factor < 1.0 and _consecutive_losses > 0:
             _n_reductions = min(_consecutive_losses, _anti_mart_max)
             rf *= _anti_mart_factor ** _n_reductions
+        # Regime risk multiplier: match live risk_fraction() behavior.
+        # sideway → sideway_risk_multiplier, strong → strong_volatility_risk_multiplier.
+        if regime == 0:
+            rf *= float(getattr(settings.risk, "sideway_risk_multiplier", 1.0))
+        elif regime == 2:
+            rf *= float(getattr(settings.risk, "strong_volatility_risk_multiplier", 1.0))
+        else:
+            rf *= float(getattr(settings.risk, "normal_risk_multiplier", 1.0))
         # compound=False: always use starting balance -> linear expectancy (no explosion).
         effective_bal = balance if compound else start_bal
         # Apply compound cap: prevent unrealistic exponential growth

@@ -144,7 +144,9 @@ def _build_signals(fold_df: pd.DataFrame,
     # Required by engine / HybridStrategy
     p["trade_side"]       = np.where(dirs == -1, "sell", "buy")
     p["strategy_score"]   = 1.0   # M1 scalp: use own probability gate only
-    p["volatility_regime"] = 1
+    # Use real volatility_regime from dataset (computed by infer_scalp_volatility_regime)
+    if "volatility_regime" not in p.columns:
+        p["volatility_regime"] = 1
     p["trend_alignment"]  = 1
     p["adx"]              = 25.0  # pass ADX gate (our M1 momentum features replace ADX)
     return p
