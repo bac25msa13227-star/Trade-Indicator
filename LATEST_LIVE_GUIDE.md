@@ -1,6 +1,6 @@
 # Latest Live Guide
 
-Last updated: `2026-04-16` · Branch: `feature/dashboard-controls-v14pp`
+Last updated: `2026-04-17` · Branch: `feature/dashboard-controls-v14pp`
 
 ---
 
@@ -36,25 +36,30 @@ Script sẽ tự động: cài dependencies → verify models → khởi động
 
 | Account | `signal_threshold` | `decision_threshold` (meta) | `min_confidence` |
 |---|---|---|---|
-| ACC1 | `0.60` | `0.62` | `0.85` |
-| ACC2 | `0.60` | `0.72` | `0.85` |
+| ACC1 | `0.60` | `0.44` | `0.85` |
+| ACC2 | `0.60` | `0.46` | `0.85` |
 
 > **Note:** `signal_threshold` là gate ML đầu vào.  
-> `sideway_min_confidence` / `volatile_min_confidence` đều = `0.85` → gate thực tế nghiêm hơn.
+> `sideway_min_confidence` / `volatile_min_confidence` đều = `0.85` → gate thực tế nghiêm hơn.  
+> `decision_threshold` được tối ưu lại sau khi retrain 17/04/2026 với 65 features (ACC1: 0.44, ACC2: 0.46).
 
 ### WF Benchmark (V14++ đã validate 29 folds, 2024-09→2026-04)
 
-| Account | Strategy | PF avg | DD avg | Return avg | Positive folds |
-|---|---|---|---|---|---|
-| ACC1 | V14++ PROFIT | **4.07** | -8.63% | +47.96%/fold | 24/29 (83%) |
-| ACC2 | V14++ COMPOSITE | **3.75** | -6.69% | +33.38%/fold | 24/29 (83%) |
+| Account | Strategy | PF avg | DD avg | Return avg | Positive folds | Worst fold |
+|---|---|---|---|---|---|---|
+| ACC1 | V14++ PROFIT | **3.931** | -8.63% | +47.96%/fold | 24/29 (83%) | -12.69% |
+| ACC2 | V14++ COMPOSITE | **3.364** | -6.69% | +33.38%/fold | 25/29 (86%) | -8.87% |
 
-### Model performance (train/test split)
+> **Verified 17/04/2026:** WF chạy với **65 features** (đúng với FEATURE_COLUMNS hiện tại). Model pkl đã retrain lại với 65 features để align với WF. Avg win rate: PROFIT=57.4%, COMPOSITE=59.1%.
 
-- ROC-AUC: `0.659`
-- Precision: `0.783`
-- Feature columns: `84`
-- Train rows: `1,616,062`
+### Model performance (1-fold holdout, retrained 17/04/2026)
+
+| Account | ROC-AUC | Threshold | Features | Train window |
+|---|---|---|---|---|
+| ACC1 | `0.550` | `0.44` | **65** | 2025-10 → 2026-03 (30K bars) |
+| ACC2 | `0.562` | `0.46` | **65** | 2025-10 → 2026-03 (30K bars) |
+
+> **Note:** Model retrain mỗi ~6 tuần (xem `scripts/retrain_live_model.py`). Sau retrain: `docker restart trade-indicator-live-acc1-1`.
 
 ---
 
