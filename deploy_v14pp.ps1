@@ -14,10 +14,13 @@
 # ══════════════════════════════════════════════════════════════════════════════
 
 param(
-    [switch]$SkipWF,
-    [switch]$SkipBotStart,
-    [switch]$RetrainModels
+    [switch]$RunWF,           # Chạy WF verify (cần có data CSV ~1.2GB — xem phần DATA bên dưới)
+    [switch]$SkipBotStart,    # Chỉ chuẩn bị, không khởi bot
+    [switch]$RetrainModels    # Retrain model trước khi chạy (cần data CSV)
 )
+# NOTE: WF mặc định BỊ BỎ QUA vì cần data CSV ~1.2GB không có trong git.
+# WF benchmark đã được verify và lưu tại outputs/walkforward_report_*.json (có trong git).
+# Để chạy WF: thêm flag -RunWF và đảm bảo data CSV đã có tại src/xauusd_ai/real_data/
 
 $ErrorActionPreference = "Stop"
 
@@ -141,7 +144,15 @@ for acc, path in [('ACC1','outputs/acc1_v14pp_model_meta.json'),('ACC2','outputs
 }
 
 # ── 5. (TUỲ CHỌN) WALK-FORWARD VERIFY ──────────────────────────────────────
-if (-not $SkipWF) {
+# Data CSV cần có trước khi chạy WF:
+#   src/xauusd_ai/real_data/XAUUSDm_M15.csv  (65 MB)
+#   src/xauusd_ai/real_data/XAUUSDm_M5.csv  (193 MB)
+#   src/xauusd_ai/real_data/XAUUSDm_M1.csv  (896 MB)  ← lớn nhất
+#   src/xauusd_ai/real_data/XAUUSDm_H4.csv  (4 MB)
+#   src/xauusd_ai/real_data/XAUUSDm_H1.csv  (16 MB)
+# Tải về từ Dukascopy: https://www.dukascopy.com/swiss/english/marketwatch/historical/
+# Hoặc copy từ máy cũ: scp user@old-machine:"path/XAUUSDm_*.csv" src/xauusd_ai/real_data/
+if ($RunWF) {
     Log "--- [5/7] Walk-forward verify (30 folds, ~20 phút) ---"
     Log "Đang chạy WF PROFIT (ACC1, sc=0.85)..."
     $t0 = Get-Date
@@ -172,7 +183,20 @@ print(f'  {sys.argv[1]}: PF={sim.get(\"avg_profit_factor\",\"?\"):.3f} | DD={sim
         }
     }
 } else {
-    Log "--- [5/7] Bỏ qua WF verify (--SkipWF flag) ---"
+    Log "--- [5/7] Bỏ qua WF (mặc định — dùng benchmark đã verify từ git) ---"
+    # Đọc benchmark từ JSON đã có
+    foreach ($rp in @("outputs/walkforward_report_acc1_v14pp_profit.json","outputs/walkforward_report_acc1_v14pp_composite.json")) {
+        $rpFull = Join-Path $PROJ $rp
+        if (Test-Path $rpFull) {
+            python -c "
+import json
+d = json.load(open(r'$($rpFull -replace '\\','/')'))
+sim = d.get('concurrent_sim', d.get('aggregate',{}).get('concurrent_sim',{}))
+name = '$rp'.split('/')[-1].replace('.json','')
+print(f'  Benchmark {name}: PF={sim.get(\"avg_profit_factor\",\"?\"):.3f} | DD={sim.get(\"avg_max_drawdown_pct\",\"?\"):.1f}% | PosFolds={sim.get(\"positive_folds\",\"?\")}/{sim.get(\"n_folds\",\"?\")}  [verified 17/04/2026]')
+" 2>&1 | ForEach-Object { Log $_ }
+        }
+    }
 }
 
 # ── 6. BUILD + KHỞI ĐỘNG BOT ─────────────────────────────────────────────────
@@ -284,7 +308,17 @@ $report += @"
 ──────────────────
   Xem chi tiết: $LOGFILE
 
-6. HƯỚNG DẪN TIẾP THEO
+6. DATA CSV (không có trong git — ~1.2 GB)
+──────────────────────────────────────
+  File cần có tại: src\xauusd_ai\real_data\XAUUSDm_*.csv
+  Cách lấy:
+    a) Copy từ máy cũ: scp / robocopy / USB
+    b) Dukascopy: https://www.dukascopy.com/swiss/english/marketwatch/historical/
+    c) Chạy lại script fetch nếu có: python scripts/fetch_data.py
+  Lưu ý: Bắt buộc phải có nếu dùng -RetrainModels hoặc -RunWF
+          Không cần thiết để chạy live bot (bot dùng MT5 live data)
+
+7. HƯỚNG DẪN TIẾP THEO
 ───────────────────────
   Kiểm tra bot đang chạy:
     docker logs trade-indicator-live-acc1-1 --tail 20
@@ -294,9 +328,12 @@ $report += @"
     docker restart trade-indicator-live-acc1-1
     docker restart trade-indicator-live-1
 
-  Retrain model (hàng tuần):
+  Retrain model (hàng tuần — cần data CSV):
     python scripts/retrain_live_model.py configs/live_acc1.yaml
     python scripts/retrain_live_model.py configs/live_acc2.yaml
+
+  Chạy WF verify lại (cần data CSV):
+    .\deploy_v14pp.ps1 -RunWF -SkipBotStart
 
   Thresholds hiện tại:
     ACC1 decision_threshold = 0.44
