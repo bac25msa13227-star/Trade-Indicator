@@ -4,7 +4,12 @@ __pycache__/
 *.pyc
 *.pyo
 .env
-outputs/
+
+# outputs — ignore bulk data/logs, keep model artifacts (pkl via LFS, json meta)
+outputs/*.csv
+outputs/*.txt
+outputs/*.jsonl
+outputs/news_cache/
 
 # Cloudflare tunnel binary (large, OS-specific)
 cloudflared.exe
