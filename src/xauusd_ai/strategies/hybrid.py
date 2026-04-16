@@ -185,7 +185,9 @@ class HybridStrategy:
         if effective_prob < min_conf:
             return False, f"confidence_below_floor ({effective_prob:.3f} < {min_conf:.3f})"
         if self.settings.strategy.require_trend_alignment and trend_alignment != 1:
-            return False, "trend_misaligned"
+            bypass_conf = self.settings.strategy.trend_bypass_confidence
+            if bypass_conf is None or effective_prob < bypass_conf:
+                return False, "trend_misaligned"
         if strategy_score < self.required_strategy_score(volatility_regime):
             return False, "strategy_score_too_weak"
 

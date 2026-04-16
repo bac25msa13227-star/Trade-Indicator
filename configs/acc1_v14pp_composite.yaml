@@ -1,0 +1,175 @@
+# ─────────────────────────────────────────────────────────────────
+# V14++ COMPOSITE — Best balanced score from regime-aware sweep v2
+# sideway_min_confidence=0.88, risk=0.04, cd=12, dlim=0.12, amf=0.7
+# SWEEP: $90,925 | 58% +days | PF=2.23 | DD=-22.9% | $643/d
+# ─────────────────────────────────────────────────────────────────
+app:
+  poll_seconds: 60
+  model_path:          outputs/acc1_v14pp_model.pkl
+  scaler_path:         outputs/acc1_v14pp_scaler.pkl
+  model_meta_path:     outputs/acc1_v14pp_model_meta.json
+  training_report_path: outputs/training_report_acc1.json
+  training_plot_path:  outputs/training_metrics_acc1.png
+  backtest_report_path: outputs/backtest_report_acc1.json
+  backtest_trades_path: outputs/backtest_trades_acc1.csv
+  backtest_equity_plot_path: outputs/backtest_equity_acc1.png
+  backtest_trades_plot_path: outputs/backtest_trades_plot_acc1.png
+  walkforward_report_path: outputs/walkforward_report_acc1_v14pp_composite.json
+  walkforward_trades_path: outputs/walkforward_trades_acc1_v14pp_composite.csv
+  paper_trade_log_path: outputs/paper_trade_signals_acc1.csv
+  live_learning_log_path: outputs/live_learning_log_acc1.jsonl
+  live_closed_trades_path: outputs/live_closed_trades_acc1.csv
+  log_level: INFO
+
+market:
+  symbol: XAUUSDm
+  training_symbol: GC=F
+  training_data_source: csv_folder
+  live_data_source: mt5
+  csv_folder_path: src/xauusd_ai/real_data
+  csv_timeframe: M15
+  higher_timeframe: D1
+  mid_timeframe: H1
+  structure_timeframe: H4
+  execution_timeframe: M5
+  bars:
+    D1: 100
+    H1: 500
+    H4: 200
+    M30: 300
+    M15: 300
+    M5: 500
+    M1: 200
+  timezone: UTC
+  enforce_market_open_gate: true
+  market_tick_stale_seconds: 300
+  market_preopen_alert_minutes: 30
+  market_preclose_alert_minutes: 30
+  market_preopen_alert_minutes_list: [1440, 30]
+  market_preclose_alert_minutes_list: [1440, 30]
+
+strategy:
+  rsi_period: 14
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  liquidity_lookback: 15
+  swing_lookback: 20
+  volatility_window: 20
+  signal_threshold: 0.60
+  sideways_volatility_threshold: 0.003
+  strong_volatility_threshold: 0.016
+  news_block_minutes: 0
+  rsi_long_threshold: 50
+  rsi_short_threshold: 50
+  ict_weight: 0.40
+  wyckoff_weight: 0.35
+  momentum_weight: 0.25
+  min_strategy_score: 0.05
+  sideway_min_strategy_score: 0.10
+  strong_volatility_min_strategy_score: 0.35
+  require_trend_alignment: true
+  force_trade: false
+  blocked_hours_utc: [3, 15, 17, 22, 23]
+  blocked_weekdays_utc: []
+  blocked_weekday_hours_utc: {}
+  regime_shutdown_rules:
+    - name: monday_early_sell_flow_conflict
+      weekdays_utc: [Monday]
+      hours_utc: [1, 2]
+      sides: [sell]
+      volatility_regimes: [1]
+      trend_alignment_values: [0]
+      trend_strength_max: -0.24
+      execution_quality_min: 0.0
+    - name: thursday_pm_sell_flow_conflict
+      weekdays_utc: [Thursday]
+      hours_utc: [16, 17, 18]
+      sides: [sell]
+      volatility_regimes: [1]
+      execution_quality_min: 0.0
+    - name: wed_thu_early_buy_trap
+      weekdays_utc: [Wednesday, Thursday]
+      hours_utc: [3, 4, 5]
+      sides: [buy]
+      trend_strength_max: -0.4
+      execution_quality_max: 0.3
+  silver_bullet_enabled: true
+  silver_bullet_windows_utc: [[3, 4], [10, 11], [14, 15]]
+  silver_bullet_confidence_boost: 0.05
+  adx_gate_enabled: true
+  adx_min_trend: 15.0
+  sideway_min_confidence: 0.88       # V14++: SWEEP BEST — balanced filter
+  volatile_min_confidence: 0.88      # V14++: matched to sideway
+
+risk:
+  mode: fixed_fractional
+  risk_per_trade: 0.04              # V14++: SWEEP BEST — lower risk, more stable
+  risk_tier_floor: 0.02
+  max_open_positions: 3
+  stop_loss_atr_multiple: 1.5
+  take_profit_rr: 3.5
+  entry_slippage_atr_frac: 0.07
+  volatile_take_profit_rr: 5.0
+  sideway_take_profit_rr: 2.5
+  min_confidence: 0.88              # V14++: matched to sideway_min_confidence
+  fixed_lot: 0.01
+  max_risk_fraction: 0.08
+  sideway_risk_multiplier: 1.0
+  normal_risk_multiplier: 1.0
+  strong_volatility_risk_multiplier: 0.70
+  kill_switch_enabled: true
+  daily_loss_limit_pct: 0.12        # V14++: SWEEP BEST
+  max_drawdown_kill_pct: 0.20
+  consecutive_loss_pause_count: 3
+  consecutive_loss_cooldown_bars: 12 # V14++: SWEEP BEST — 1h cooldown
+  anti_martingale_factor: 0.7       # V14++: SWEEP BEST
+  anti_martingale_max_reductions: 2
+  max_total_exposure_pct: 0.30
+  reentry_guard_enabled: true
+  reentry_cooldown_bars_after_sl: 5
+  reentry_min_distance_atr: 0.35
+  partial_tp_enabled: true           # SYNC with live
+  partial_tp_rr: 1.2
+  partial_tp_pct: 0.5
+  compound_cap: 500
+  risk_throttle_rules:
+    - name: monday_0207_all_heavy_throttle
+      risk_multiplier: 0.20
+      weekdays_utc: [Monday]
+      hours_utc: [2, 3, 4, 5, 6, 7]
+    - name: monday_1721_all_heavy_throttle
+      risk_multiplier: 0.25
+      weekdays_utc: [Monday]
+      hours_utc: [17, 18, 19, 20, 21]
+    - name: tue_wed_thu_0207_all_throttle
+      risk_multiplier: 0.35
+      weekdays_utc: [Tuesday, Wednesday, Thursday]
+      hours_utc: [2, 3, 4, 5, 6, 7]
+    - name: tue_wed_thu_1721_all_throttle
+      risk_multiplier: 0.40
+      weekdays_utc: [Tuesday, Wednesday, Thursday]
+      hours_utc: [17, 18, 19, 20, 21]
+
+execution:
+  auto_trade: true
+  deviation: 20
+  magic_number: 20260416
+  comment: xauusd-ai-live-acc1-v14pp-composite
+  paper_trade_max_loops: 0
+  paper_data_source: mt5
+  close_opposite_on_signal: true     # SYNC with live
+  trailing_sl:
+    enabled: true                    # SYNC with live
+    breakeven_at_rr: 0.5
+    activation_rr: 1.0
+    trail_atr_multiple: 1.0
+
+training:
+  use_ensemble: true
+  feature_selection_drop_pct: 30
+  retrain_on_startup: true
+  live_learning_enabled: true
+  live_learning_interval_minutes: 30
+  max_train_bars: 30000
+  backtest_initial_balance: 200.0

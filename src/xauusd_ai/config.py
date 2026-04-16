@@ -134,6 +134,7 @@ class StrategySettings(StrictSettingsModel):
     sideway_min_strategy_score: float = 0.25
     strong_volatility_min_strategy_score: float = 0.2
     require_trend_alignment: bool = True
+    trend_bypass_confidence: float | None = None  # If set, signals above this confidence bypass trend filter
     force_trade: bool = False  # Bypass ALL filters, trade every signal (for testing)
     blocked_hours_utc: list[int] = Field(default_factory=list)
     blocked_weekdays_utc: list[str] = Field(default_factory=list)
@@ -183,6 +184,10 @@ class RiskSettings(StrictSettingsModel):
     spread_cost_rr: float = 0.10
     # slippage_rr:  slippage as fraction of 1R (entry+exit combined)
     slippage_rr: float = 0.05
+    # entry_slippage_atr_frac: shift SL/TP price LEVELS by ATR×frac against trade direction
+    # Models MT5 tick fill differing from bar.close (live rebases preserving $ distances).
+    # 0.07 ≈ $0.14 slippage for M5 XAUUSD ATR~$2. Reduces win rate ~1-3%.  0.0 = disabled.
+    entry_slippage_atr_frac: float = 0.0
     # commission_rr:  broker commission as fraction of 1R per trade
     commission_rr: float = 0.02
     # compound_cap:  max balance multiplier per fold for sim (0=unlimited)
@@ -381,6 +386,10 @@ class TrainingSettings(StrictSettingsModel):
     # Limit bars per timeframe used for training (0 = no limit).
     # Use e.g. 30000 M5 bars (~104 days) to avoid OOM during live startup training.
     max_train_bars: int = 0
+    # Use WF-identical ensemble (HGB+RF+ET) instead of single HGB.
+    use_ensemble: bool = False
+    # Feature selection: drop bottom N% by RF importance. 0 = disabled.
+    feature_selection_drop_pct: int = 0
 
 
 class NotificationSettings(StrictSettingsModel):

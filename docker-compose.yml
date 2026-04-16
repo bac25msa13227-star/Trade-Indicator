@@ -427,30 +427,6 @@ services:
     restart: unless-stopped
     command: tunnel --no-autoupdate --protocol http2 --url http://nginx:80
 
-  # ── FRONTEND: Streamlit Dashboard ────────────────────────────────────────
-  # Lệnh: docker compose up frontend --build -d
-  frontend:
-    build:
-      context: .
-      dockerfile: Dockerfile.frontend
-    image: xauusd-frontend:latest
-    depends_on:
-      - api
-      - postgres
-    env_file: .env
-    environment:
-      FASTAPI_URL: http://api:8000
-      POSTGRES_HOST: postgres
-      POSTGRES_USER: ${POSTGRES_USER:-trader}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trader_secret}
-      POSTGRES_DB: ${POSTGRES_DB:-tradedb}
-    volumes:
-      - ./configs:/app/configs
-      - ./outputs:/app/outputs
-      - ./src:/app/src
-    ports:
-      - "8501:8501"
-    restart: unless-stopped
 
   # ── Healthwatch: monitors live bots and sends Telegram alerts ─────────────
   # Lệnh: docker compose up healthwatch -d

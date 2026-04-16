@@ -148,12 +148,120 @@ def simulate_prediction_backtest(
     return SimulationResult(report=report, trades=trades_df)
 
 
+# ── M1 bar-by-bar trailing SL path simulator (for LOSING trades only) ────────
+def _simulate_trade_m1_trailing(
+    entry_time: "pd.Timestamp",
+    entry_price: float,
+    direction: int,       # +1=buy, -1=sell
+    atr: float,
+    bars_held: int,       # M5 bars
+    sl_mult: float,       # stop_loss_atr_multiple (e.g. 1.5)
+    m1_df: "pd.DataFrame",
+    m1_sorted_index: "pd.DatetimeIndex",
+    trailing_cfg,
+    friction_rr: float,
+) -> "float | None":
+    """
+    For LOSING TRADES ONLY: simulate M1 price path bar-by-bar to determine
+    whether trailing SL would have improved exit before the M5-confirmed SL hit.
+
+    The M5 dataset determines win/loss (realized_rr). This function only
+    improves the trailing SL EXIT PRICE for losing trades — it does NOT
+    override whether a trade was a win or loss (no re-running SL/TP race).
+
+    Returns improved net_rr if trailing SL triggered above original SL,
+    or None if no improvement (caller keeps M5 heuristic result).
+    """
+    sl_distance = atr * sl_mult
+    if sl_distance <= 0 or entry_time is None:
+        return None
+
+    # Trailing SL config
+    if not trailing_cfg:
+        return None
+    trail_enabled = bool(getattr(trailing_cfg, "enabled", False))
+    if not trail_enabled:
+        return None
+    trail_be_rr  = float(getattr(trailing_cfg, "breakeven_at_rr", 0.5))
+    trail_act_rr = float(getattr(trailing_cfg, "activation_rr", 1.0))
+    trail_mult   = float(getattr(trailing_cfg, "trail_atr_multiple", 1.0))
+
+    original_sl = entry_price - direction * sl_distance
+    be_price        = entry_price + direction * sl_distance * trail_be_rr
+    trail_act_price = entry_price + direction * sl_distance * trail_act_rr
+
+    # Locate M1 bars in the hold window using pre-sorted index
+    end_time  = entry_time + pd.Timedelta(minutes=(bars_held + 1) * 5)
+    start_pos = m1_sorted_index.searchsorted(entry_time, side="right")
+    end_pos   = m1_sorted_index.searchsorted(end_time,   side="left")
+
+    if start_pos >= end_pos:
+        return None  # no M1 data for this window
+
+    m1_highs = m1_df["high"].values
+    m1_lows  = m1_df["low"].values
+
+    current_sl     = original_sl
+    best_favorable = entry_price  # track peak price seen so far
+
+    for k in range(start_pos, end_pos):
+        h = m1_highs[k]
+        l = m1_lows[k]
+        favorable = h if direction > 0 else l
+        adverse   = l if direction > 0 else h
+
+        # Update best favorable price seen so far
+        if direction > 0:
+            best_favorable = max(best_favorable, favorable)
+        else:
+            best_favorable = min(best_favorable, favorable)
+
+        # Update trailing SL based on best price reached so far
+        act_cond = (direction > 0 and best_favorable >= trail_act_price) or \
+                   (direction < 0 and best_favorable <= trail_act_price)
+        be_cond  = (direction > 0 and best_favorable >= be_price) or \
+                   (direction < 0 and best_favorable <= be_price)
+
+        if act_cond:
+            # Full trailing: SL trails trail_mult×1R behind best price
+            if direction > 0:
+                current_sl = max(current_sl, best_favorable - trail_mult * sl_distance)
+            else:
+                current_sl = min(current_sl, best_favorable + trail_mult * sl_distance)
+        elif be_cond:
+            # Breakeven only
+            if direction > 0:
+                current_sl = max(current_sl, entry_price)
+            else:
+                current_sl = min(current_sl, entry_price)
+
+        # SL hit check — always stop as soon as current_sl is hit
+        if (direction > 0 and adverse <= current_sl) or \
+           (direction < 0 and adverse >= current_sl):
+            # Trade exits here
+            exit_rr = (current_sl - entry_price) / sl_distance * direction
+            improved = (direction > 0 and current_sl > original_sl) or \
+                       (direction < 0 and current_sl < original_sl)
+            return (exit_rr - friction_rr) if improved else None
+
+    # Reached end of window without SL hit — this shouldn't happen for a losing
+    # M5 trade (original SL should fire within bars_held bars), but handle anyway.
+    # If current_sl was never improved beyond original, no change needed.
+    improved = (direction > 0 and current_sl > original_sl) or \
+               (direction < 0 and current_sl < original_sl)
+    if not improved:
+        return None
+    exit_rr = (current_sl - entry_price) / sl_distance * direction
+    return exit_rr - friction_rr
+
+
 def simulate_dynamic_concurrent_backtest(
     predictions: pd.DataFrame,
     settings: Settings,
     risk_manager: RiskManager,
     label: str = "test",
     compound: bool = True,
+    m1_df: "pd.DataFrame | None" = None,
 ) -> SimulationResult:
     """
     Concurrent position simulation with dynamic slot scaling and realistic friction.
@@ -210,6 +318,55 @@ def simulate_dynamic_concurrent_backtest(
     _pause_count = int(getattr(settings.risk, "consecutive_loss_pause_count", 3))
     _cooldown_bars = int(getattr(settings.risk, "consecutive_loss_cooldown_bars", 8))
     _daily_limit = float(getattr(settings.risk, "daily_loss_limit_pct", 0.0))
+    _max_dd_kill = float(getattr(settings.risk, "max_drawdown_kill_pct", 0.0))
+
+    # G10: Regime & score multipliers (matching live risk_fraction path)
+    _sideway_mult = float(getattr(settings.risk, 'sideway_risk_multiplier', 1.0))
+    _normal_mult  = float(getattr(settings.risk, 'normal_risk_multiplier', 1.0))
+    _volatile_mult = float(getattr(settings.risk, 'strong_volatility_risk_multiplier', 1.0))
+
+    # G11: Trailing SL config
+    _trailing_cfg = getattr(settings.execution, 'trailing_sl', None)
+    _trail_enabled = bool(getattr(_trailing_cfg, 'enabled', False)) if _trailing_cfg else False
+    _trail_be_rr   = float(getattr(_trailing_cfg, 'breakeven_at_rr', 0.5)) if _trailing_cfg else 0.5
+    _trail_act_rr  = float(getattr(_trailing_cfg, 'activation_rr', 1.0)) if _trailing_cfg else 1.0
+    _trail_atr_mult = float(getattr(_trailing_cfg, 'trail_atr_multiple', 1.0)) if _trailing_cfg else 1.0
+
+    # G12: Partial TP config
+    _partial_tp_enabled = bool(getattr(settings.risk, 'partial_tp_enabled', False))
+    _partial_tp_rr  = float(getattr(settings.risk, 'partial_tp_rr', 1.2))
+    _partial_tp_pct = float(getattr(settings.risk, 'partial_tp_pct', 0.5))
+
+    # M1 simulation setup — pre-extract config values and sort M1 index once
+    _sl_mult = float(getattr(settings.risk, 'stop_loss_atr_multiple', 1.5))
+    _entry_slip_frac = float(getattr(settings.risk, 'entry_slippage_atr_frac', 0.0))
+    _m1_sorted_index: "pd.DatetimeIndex | None" = None
+    if m1_df is not None and not m1_df.empty:
+        # Ensure UTC-aware index for consistent comparison with predictions timestamps
+        if m1_df.index.tz is None:
+            _m1_idx = m1_df.index.tz_localize("UTC")
+        else:
+            _m1_idx = m1_df.index.tz_convert("UTC")
+        _m1_df_utc = m1_df.copy()
+        _m1_df_utc.index = _m1_idx
+        _m1_sorted_index = _m1_df_utc.index
+    else:
+        _m1_df_utc = None
+
+    # G13: Close opposite on signal
+    _close_opposite = bool(getattr(settings.execution, 'close_opposite_on_signal', False))
+
+    # G15: Market gate — skip bars during closed hours (Sat, Sun, Fri 22:00+ UTC)
+    _market_gate = bool(getattr(settings.market, 'enforce_market_open_gate', False))
+    skipped_market_closed = 0
+
+    # G15b: Re-entry guard — block same-side entry for N bars after SL hit
+    _reentry_enabled = bool(getattr(settings.risk, 'reentry_guard_enabled', True))
+    _reentry_cooldown = int(getattr(settings.risk, 'reentry_cooldown_bars_after_sl', 1))
+    _reentry_min_atr = float(getattr(settings.risk, 'reentry_min_distance_atr', 0.35))
+    # Track per-side: {"buy": (bar_idx_of_last_sl, close_price_at_sl), "sell": ...}
+    _reentry_last_sl: dict[str, tuple[int, float]] = {}
+    skipped_reentry_guard = 0
 
     for i, row in enumerate(test_rows.itertuples(index=False)):
         # ── close matured positions ────────────────────────────────────────
@@ -233,6 +390,11 @@ def simulate_dynamic_concurrent_backtest(
                     losses += 1
                     _consecutive_losses += 1
                     _daily_loss += abs(pnl)
+                    # G15b: Record SL hit for reentry guard
+                    if _reentry_enabled:
+                        _sl_side = entry["meta"].get("side", "")
+                        _sl_price = float(entry["meta"].get("entry_price", 0.0))
+                        _reentry_last_sl[_sl_side] = (i, _sl_price)
                     # Trigger cooldown after N consecutive losses
                     if _pause_count > 0 and _consecutive_losses >= _pause_count:
                         _cooldown_remaining = _cooldown_bars
@@ -254,6 +416,18 @@ def simulate_dynamic_concurrent_backtest(
             balance_history.append(balance)
             continue
 
+        # ── G15: Market gate — skip if market closed ──────────────────────
+        if _market_gate:
+            _t = getattr(row, 'time', None)
+            if _t is not None and hasattr(_t, 'weekday'):
+                _wd = _t.weekday()  # Mon=0 .. Sun=6
+                _hr = _t.hour
+                # Skip: Saturday all day, Sunday before 22:00 UTC, Friday after 22:00 UTC
+                if _wd == 5 or _wd == 6 or (_wd == 4 and _hr >= 22):
+                    skipped_market_closed += 1
+                    balance_history.append(balance)
+                    continue
+
         # ── circuit breaker gates ──────────────────────────────────────────
         if _cooldown_remaining > 0:
             skipped_circuit_breaker += 1
@@ -263,6 +437,12 @@ def simulate_dynamic_concurrent_backtest(
             skipped_circuit_breaker += 1
             balance_history.append(balance)
             continue
+        if _max_dd_kill > 0 and peak_balance > 0:
+            _cur_dd = (peak_balance - balance) / peak_balance
+            if _cur_dd >= _max_dd_kill:
+                skipped_circuit_breaker += 1
+                balance_history.append(balance)
+                continue
 
         # ── strategy filter gate ───────────────────────────────────────────
         allowed, reason = strategy.should_allow_row(row, float(row.probability))
@@ -270,6 +450,48 @@ def simulate_dynamic_concurrent_backtest(
             skipped_by_filters += 1
             balance_history.append(balance)
             continue
+
+        # ── G15b: Re-entry guard — block same-side if too soon after SL ───
+        if _reentry_enabled:
+            _cur_side = str(getattr(row, 'trade_side', ''))
+            if _cur_side in _reentry_last_sl:
+                _sl_bar, _sl_price = _reentry_last_sl[_cur_side]
+                _bars_since_sl = i - _sl_bar
+                if _bars_since_sl < _reentry_cooldown:
+                    skipped_reentry_guard += 1
+                    balance_history.append(balance)
+                    continue
+                # Also check ATR distance from SL entry price
+                _cur_close = float(getattr(row, 'close', 0.0))
+                _cur_atr = float(getattr(row, 'atr', 0.0))
+                if _cur_atr > 0 and abs(_cur_close - _sl_price) < _reentry_min_atr * _cur_atr:
+                    skipped_reentry_guard += 1
+                    balance_history.append(balance)
+                    continue
+
+        # ── G13: Close opposite on signal ───────────────────────────────
+        if _close_opposite:
+            _cur_side = str(getattr(row, 'trade_side', ''))
+            _new_pending: list[dict] = []
+            for entry in pending:
+                _e_side = entry["meta"].get("side", "")
+                _e_pnl  = entry["absolute_pnl"]
+                # Close profitable opposite-side position
+                if _e_side != _cur_side and _e_pnl > 0:
+                    balance += _e_pnl
+                    peak_balance = max(peak_balance, balance)
+                    dd = (peak_balance - balance) / peak_balance if peak_balance > 0 else 0.0
+                    entry["meta"]["balance_after"] = round(balance, 4)
+                    entry["meta"]["drawdown"] = round(-dd, 4)
+                    entry["meta"]["is_win"] = True
+                    entry["meta"]["is_loss"] = False
+                    entry["meta"]["is_draw"] = False
+                    trades.append(entry["meta"])
+                    wins += 1
+                    _consecutive_losses = 0
+                else:
+                    _new_pending.append(entry)
+            pending = _new_pending
 
         # ── dynamic slot check ─────────────────────────────────────────────
         regime = int(getattr(row, "volatility_regime", 1))
@@ -281,7 +503,6 @@ def simulate_dynamic_concurrent_backtest(
 
         # ── open new position ──────────────────────────────────────────────
         # Dynamic risk tier: scale between floor and ceiling based on drawdown from peak.
-        # risk_tier_floor = 3% = minimum during drawdown; risk_per_trade = 5% = max at peak.
         rf_base  = float(settings.risk.risk_per_trade)
         rf_floor = float(getattr(settings.risk, 'risk_tier_floor', 0.0))
         if rf_floor > 0 and peak_balance > start_bal:
@@ -295,6 +516,23 @@ def simulate_dynamic_concurrent_backtest(
                 rf = rf_base            # < 3% drawdown: full risk
         else:
             rf = rf_base
+
+        # G10: Apply regime multiplier (matching live risk_fraction path)
+        if regime == 0:
+            rf *= _sideway_mult
+        elif regime == 2:
+            rf *= _volatile_mult
+        else:
+            rf *= _normal_mult
+
+        # G10: Apply score multiplier
+        _strat_score = float(getattr(row, 'strategy_score', 0.5))
+        _abs_score = abs(_strat_score)
+        if _abs_score >= 0.5:
+            _score_mult = 1.0
+        else:
+            _score_mult = 0.7 + 0.6 * _abs_score
+        rf *= _score_mult
 
         # Anti-martingale: reduce risk after consecutive losses
         if _anti_mart_factor < 1.0 and _consecutive_losses > 0:
@@ -310,6 +548,73 @@ def simulate_dynamic_concurrent_backtest(
         _row_friction = _spread_rr * _sess_mult + _slippage_rr + _commission_rr
         raw_rr = float(row.realized_rr)
         net_rr = raw_rr - _row_friction
+
+        # G12+G11: M1 bar-by-bar simulation (when M1 data available) OR
+        #          fall back to peak_rr heuristic for trailing SL + partial TP.
+        if _m1_df_utc is not None and _m1_sorted_index is not None:
+            _direction = 1 if str(getattr(row, 'trade_side', 'buy')) == 'buy' else -1
+            _entry_atr = float(getattr(row, 'atr', 0.0))
+            _entry_time = getattr(row, 'time', None)
+            # Normalize to UTC for M1 index lookup
+            if _entry_time is not None and hasattr(_entry_time, 'tz_localize'):
+                _entry_time_utc = _entry_time.tz_localize("UTC") if _entry_time.tzinfo is None else _entry_time.tz_convert("UTC")
+            else:
+                _entry_time_utc = _entry_time
+            _entry_price_slipped = float(row.close) + _direction * _entry_atr * _entry_slip_frac
+            _bars = int(getattr(row, 'bars_held', label_horizon))
+
+            # G12: Partial TP for winning trades — same heuristic (M5 is sufficient)
+            if _partial_tp_enabled and raw_rr > 0 and raw_rr >= _partial_tp_rr:
+                _pt_rr  = _partial_tp_rr - _row_friction
+                _full_rr = net_rr
+                net_rr = _partial_tp_pct * _pt_rr + (1.0 - _partial_tp_pct) * _full_rr
+
+            # G11: For LOSING trades — use M1 path to find accurate trailing SL exit
+            if raw_rr < 0 and _trail_enabled:
+                _m1_net_rr = _simulate_trade_m1_trailing(
+                    entry_time=_entry_time_utc,
+                    entry_price=_entry_price_slipped,
+                    direction=_direction,
+                    atr=_entry_atr,
+                    bars_held=_bars,
+                    sl_mult=_sl_mult,
+                    m1_df=_m1_df_utc,
+                    m1_sorted_index=_m1_sorted_index,
+                    trailing_cfg=_trailing_cfg,
+                    friction_rr=_row_friction,
+                )
+                if _m1_net_rr is not None:
+                    net_rr = _m1_net_rr
+                else:
+                    # M1 data unavailable for window — fall back to peak_rr heuristic
+                    _peak_rr = float(getattr(row, 'peak_rr', 0.0))
+                    if _peak_rr >= _trail_act_rr:
+                        net_rr = max(_trail_act_rr - _trail_atr_mult, 0.0) - _row_friction
+                    elif _peak_rr >= _trail_be_rr:
+                        net_rr = -_row_friction
+        else:
+            # G12: Partial TP — if realized_rr >= threshold, simulate closing
+            #      partial_tp_pct at partial_tp_rr and the rest at full TP.
+            if _partial_tp_enabled and raw_rr > 0 and raw_rr >= _partial_tp_rr:
+                # Part 1: closed at partial_tp_rr (e.g. 50% at 1.2R)
+                _pt_rr = _partial_tp_rr - _row_friction
+                # Part 2: remaining runs to full TP (e.g. 50% at 3.5R)
+                _full_rr = net_rr
+                net_rr = _partial_tp_pct * _pt_rr + (1.0 - _partial_tp_pct) * _full_rr
+
+            # G11: Trailing SL — adjust net_rr for trades that would have been
+            #      saved by breakeven or trailing stop.
+            if _trail_enabled and raw_rr < 0:
+                _peak_rr = float(getattr(row, 'peak_rr', 0.0))
+                if _peak_rr >= _trail_act_rr:
+                    # Price reached trailing activation → trail would hold at
+                    # activation_rr - trail_atr_mult * 1R, minimum = breakeven
+                    _trailed_rr = max(_trail_act_rr - _trail_atr_mult, 0.0)
+                    net_rr = _trailed_rr - _row_friction
+                elif _peak_rr >= _trail_be_rr:
+                    # Price reached breakeven but not trailing activation → BE stop
+                    net_rr = -_row_friction  # breakeven minus friction
+
         rf, throttle_mult, throttle_reason = risk_manager.apply_risk_throttle(
             rf,
             row,
@@ -434,6 +739,8 @@ def simulate_dynamic_concurrent_backtest(
         "signals_filtered_out": skipped_by_filters,
         "signals_no_slot": skipped_no_slot,
         "signals_circuit_breaker": skipped_circuit_breaker,
+        "signals_reentry_guard": skipped_reentry_guard,
+        "signals_market_closed": skipped_market_closed,
         "max_concurrent_positions": max_concurrent_seen,
         "avg_concurrent_positions": round(avg_concurrent, 2),
         "position_tier_breakdown": tier_breakdown,

@@ -2988,6 +2988,9 @@ def run_live_loop(settings: Settings) -> None:
                         4,
                     ),
                     "model_mtime_utc": _model_mtime_utc,
+                    # Dashboard control fields
+                    "auto_trade_enabled": bool(settings.execution.auto_trade),
+                    "blocked_hours_utc": list(settings.strategy.blocked_hours_utc),
                 }
                 try:
                     _status_path.write_text(json.dumps(_status_payload, ensure_ascii=False), encoding="utf-8")

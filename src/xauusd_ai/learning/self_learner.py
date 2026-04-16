@@ -330,7 +330,8 @@ class SelfLearner:
     # Internal helpers
     # ------------------------------------------------------------------
     # Maximum bars to keep per timeframe to prevent unbounded memory growth
-    _MAX_CACHE_BARS = {"M1": 5_000, "M5": 12_000, "M15": 10_000, "H1": 5_000, "H4": 3_000, "D1": 2_000}
+    # M5=35K matches WF train window (30K train + buffer for features)
+    _MAX_CACHE_BARS = {"M1": 10_000, "M5": 35_000, "M15": 20_000, "H1": 8_000, "H4": 5_000, "D1": 3_000}
 
     def _merge_with_cache(self, frames: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
         """
@@ -410,8 +411,8 @@ class SelfLearner:
                 if "time" not in df.columns and df.index.name:
                     df = df.rename_axis("time").reset_index()
                 df["time"] = pd.to_datetime(df["time"], utc=True)
-                # Chỉ lấy 8000 hàng gần nhất để cân bằng data đủ/retrain vừa phải
-                df = df.sort_values("time").tail(8000).reset_index(drop=True)
+                # Lấy 35000 hàng gần nhất — match WF 30K train window
+                df = df.sort_values("time").tail(35_000).reset_index(drop=True)
                 if "tick_volume_delta" not in df.columns:
                     tv = df["tick_volume"] if "tick_volume" in df.columns else pd.Series(0, index=df.index)
                     df["tick_volume_delta"] = tv.diff().fillna(0)

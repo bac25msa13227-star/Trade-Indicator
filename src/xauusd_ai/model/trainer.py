@@ -8,8 +8,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import (
+    ExtraTreesClassifier,
     HistGradientBoostingClassifier,
     RandomForestClassifier,
+    VotingClassifier,
 )
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.inspection import permutation_importance
@@ -30,19 +32,47 @@ class ModelTrainer:
     def __init__(self, settings: Settings, mlflow_tracker=None) -> None:
         self.settings = settings
         self._mlflow: MLflowTracker | None = mlflow_tracker  # type: ignore[name-defined]
-        # Single HGB model — memory-efficient, good calibration, supports sample_weight directly
-        self.model = HistGradientBoostingClassifier(
+        self._use_ensemble = bool(getattr(settings.training, 'use_ensemble', False))
+        self._feat_sel_drop = int(getattr(settings.training, 'feature_selection_drop_pct', 0))
+        self.model = self._build_model()
+        self._feature_mask = None
+        self._calibrator = None
+        self.scaler = StandardScaler()
+        self.decision_threshold = settings.strategy.signal_threshold
+        self.feature_columns: list[str] = list(FEATURE_COLUMNS)  # updated by load_artifacts for backward compat
+
+    def _build_model(self):
+        """Build model: WF-identical ensemble or single HGB."""
+        if self._use_ensemble:
+            _hgb = HistGradientBoostingClassifier(
+                max_iter=1000, learning_rate=0.01, max_depth=7,
+                min_samples_leaf=20, l2_regularization=1.0,
+                max_bins=128, class_weight=None,
+                early_stopping=True, validation_fraction=0.1,
+                n_iter_no_change=40, random_state=42,
+            )
+            _rf = RandomForestClassifier(
+                n_estimators=200, max_depth=12, min_samples_leaf=15,
+                max_features="sqrt", class_weight="balanced",
+                n_jobs=-1, random_state=42,
+            )
+            _et = ExtraTreesClassifier(
+                n_estimators=200, max_depth=14, min_samples_leaf=10,
+                max_features="sqrt", class_weight="balanced",
+                n_jobs=-1, random_state=42,
+            )
+            return VotingClassifier(
+                estimators=[("hgb", _hgb), ("rf", _rf), ("et", _et)],
+                voting="soft",
+                weights=[3, 2, 1],
+            )
+        return HistGradientBoostingClassifier(
             max_iter=300, learning_rate=0.05, max_depth=5,
             min_samples_leaf=20, l2_regularization=1.0,
             max_bins=63, class_weight=None,
             early_stopping=True, validation_fraction=0.1,
             n_iter_no_change=20, random_state=42,
         )
-        self._feature_mask = None
-        self._calibrator = None
-        self.scaler = StandardScaler()
-        self.decision_threshold = settings.strategy.signal_threshold
-        self.feature_columns: list[str] = list(FEATURE_COLUMNS)  # updated by load_artifacts for backward compat
 
     def _aligned_feature_frame(self, frame: pd.DataFrame) -> pd.DataFrame:
         """Align any dataframe/row to model feature schema.
@@ -94,11 +124,24 @@ class ModelTrainer:
         else:
             sw = None
 
-        # No feature selection mask — use all features
-        self._feature_mask = None
-        x_train_sel = x_train
-        x_test_sel = x_test
+        # Feature selection: RF-based drop bottom N% (matches WF pipeline)
+        if self._feat_sel_drop > 0:
+            _scout = RandomForestClassifier(
+                n_estimators=80, max_depth=8, min_samples_leaf=20,
+                class_weight="balanced", n_jobs=-1, random_state=42,
+            )
+            _scout.fit(x_train, y_train, sample_weight=sw)
+            _imp = _scout.feature_importances_
+            _imp_thr = np.percentile(_imp, self._feat_sel_drop)
+            self._feature_mask = _imp >= _imp_thr
+            if self._feature_mask.sum() < 10:
+                self._feature_mask = None
+        else:
+            self._feature_mask = None
+        x_train_sel = self._apply_feature_mask(x_train)
+        x_test_sel = self._apply_feature_mask(x_test)
 
+        self.model = self._build_model()  # fresh model each train
         self.model.fit(x_train_sel, y_train, sample_weight=sw)
 
         # Probability calibration via isotonic regression on validation holdout
@@ -243,13 +286,16 @@ class ModelTrainer:
         _run_name = f"train_{_dt.datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
         try:
             with self._mlflow.start_run(run_name=_run_name, tags={"source": "live_runner"}):
-                params = {
-                    "max_iter": self.model.max_iter,
-                    "learning_rate": self.model.learning_rate,
-                    "max_depth": self.model.max_depth,
+                params: dict = {
                     "signal_threshold": self.decision_threshold,
                     "feature_count": len(self.feature_columns),
+                    "use_ensemble": self._use_ensemble,
+                    "feature_selection_drop_pct": self._feat_sel_drop,
                 }
+                if hasattr(self.model, "max_iter"):
+                    params["max_iter"] = self.model.max_iter
+                    params["learning_rate"] = self.model.learning_rate
+                    params["max_depth"] = self.model.max_depth
                 self._mlflow.log_params(params)
                 self._mlflow.log_metrics({k: v for k, v in metrics.items() if isinstance(v, float)})
                 # Upload artifacts to MinIO via MLflow
@@ -437,12 +483,25 @@ class ModelTrainer:
         x_test = self.scaler.transform(test_df[self.feature_columns])
         y_test = test_df["target"]
 
-        # No feature selection — use all features
-        self._feature_mask = None
-        x_train_sel = x_train
-        x_test_sel = x_test
+        # Feature selection: RF-based drop bottom N% (matches WF pipeline)
+        if self._feat_sel_drop > 0:
+            _scout = RandomForestClassifier(
+                n_estimators=80, max_depth=8, min_samples_leaf=20,
+                class_weight="balanced", n_jobs=-1, random_state=42,
+            )
+            _scout.fit(x_train, y_train, sample_weight=weights)
+            _imp = _scout.feature_importances_
+            _imp_thr = np.percentile(_imp, self._feat_sel_drop)
+            self._feature_mask = _imp >= _imp_thr
+            if self._feature_mask.sum() < 10:
+                self._feature_mask = None
+        else:
+            self._feature_mask = None
+        x_train_sel = self._apply_feature_mask(x_train)
+        x_test_sel = self._apply_feature_mask(x_test)
 
         # Fit with sample_weight
+        self.model = self._build_model()
         self.model.fit(x_train_sel, y_train, sample_weight=weights)
 
         probabilities = self.model.predict_proba(x_test_sel)[:, 1]
