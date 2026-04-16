@@ -301,6 +301,7 @@ def _apply_live_config_overrides() -> None:
                 "data_health_spread_spike_abs_points": float(settings.admin.data_health.spread_spike_abs_points),
                 "data_health_spread_lookback_bars": int(settings.admin.data_health.spread_lookback_bars),
                 "data_health_bridge_feed_divergence_points": float(settings.admin.data_health.bridge_feed_divergence_points),
+                "auto_trade_enabled": bool(settings.execution.auto_trade),
             }
         except Exception as exc:
             logger.warning("Could not apply live config override for %s from %s: %s", acct, cfg_path, exc)
@@ -1549,6 +1550,7 @@ def _build_dashboard_payload_uncached() -> dict:
             "profile_active": profile_active,
             "runtime": runtime_cfg,
             "benchmark": benchmarks.get(acct, {}),
+            "auto_trade_enabled": runtime_cfg.get("auto_trade_enabled"),
         }
 
     return {
@@ -1859,6 +1861,148 @@ async def apply_runtime_profile(req: ApplyProfileRequest) -> dict[str, Any]:
         "telegram_sent": telegram_sent,
         "requested_at_utc": now_utc,
     }
+
+
+@app.post("/api/v1/reset-kill-switch/{acct_tag}", tags=["dashboard"])
+async def reset_kill_switch(acct_tag: str) -> dict[str, Any]:
+    """Manually reset the daily kill switch / circuit breaker for an account."""
+    acct = acct_tag.strip().lower()
+    if acct not in _ACCOUNT_CFG:
+        raise HTTPException(status_code=404, detail=f"Unknown account: {acct}")
+    cfg = _ACCOUNT_CFG[acct]
+    state_path = _OUTPUTS / cfg.get("daily", f"risk_daily_state_{acct}.json")
+
+    current_state: dict[str, Any] = {}
+    try:
+        if state_path.exists():
+            current_state = _json.loads(state_path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+
+    current_state["killed"] = False
+    current_state["consecutive_losses"] = 0
+    current_state["cooldown_bars"] = 0
+    current_state["daily_loss"] = 0.0
+    current_state["reset_by"] = "dashboard_manual"
+    now_utc = datetime.now(timezone.utc).isoformat()
+    current_state["reset_at_utc"] = now_utc
+
+    try:
+        _safe_write_json(state_path, current_state)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Cannot write kill switch state: {exc}") from exc
+
+    global _dashboard_cache_ts
+    _dashboard_cache_ts = 0.0
+
+    tg_msg = (
+        f"🔓 <b>Kill Switch Reset</b>\n"
+        f"Account: <b>{acct.upper()}</b>\n"
+        f"Action: Manual reset via dashboard\n"
+        f"Time (UTC): {now_utc}\n"
+        f"Consecutive losses → 0, Cooldown → 0"
+    )
+    telegram_sent = _tg_send_account(acct, tg_msg)
+
+    return {
+        "status": "reset",
+        "account": acct,
+        "telegram_sent": telegram_sent,
+        "reset_at_utc": now_utc,
+    }
+
+
+@app.post("/api/v1/auto-trade/{acct_tag}", tags=["dashboard"])
+async def set_auto_trade(acct_tag: str, enabled: bool = Query(...)) -> dict[str, Any]:
+    """Toggle auto_trade on/off for an account by patching the live YAML config."""
+    import re as _re
+    acct = acct_tag.strip().lower()
+    if acct not in _LIVE_CFG_MAP:
+        raise HTTPException(status_code=404, detail=f"Unknown account: {acct}")
+    cfg_path = _LIVE_CFG_MAP[acct]
+    if not cfg_path.exists():
+        raise HTTPException(status_code=404, detail=f"Config not found: {cfg_path}")
+
+    try:
+        text = cfg_path.read_text(encoding="utf-8")
+        new_val = "true" if enabled else "false"
+        # Use multiline anchor so commented-out lines (starting with #) are skipped
+        new_text, n = _re.subn(r'(?m)^([ \t]*auto_trade\s*:)\s*\S+', lambda m: m.group(1) + f" {new_val}", text)
+        if n == 0:
+            raise HTTPException(status_code=422, detail="auto_trade key not found in config YAML")
+        cfg_path.write_text(new_text, encoding="utf-8")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Cannot update config: {exc}") from exc
+
+    global _dashboard_cache_ts
+    _dashboard_cache_ts = 0.0
+    _apply_live_config_overrides()  # Refresh runtime config to pick up YAML change
+
+    now_utc = datetime.now(timezone.utc).isoformat()
+    tg_msg = (
+        f"{'🟢' if enabled else '🔴'} <b>Auto Trade {'Enabled' if enabled else 'Disabled'}</b>\n"
+        f"Account: <b>{acct.upper()}</b>\n"
+        f"Changed via: dashboard UI\n"
+        f"Time (UTC): {now_utc}"
+    )
+    telegram_sent = _tg_send_account(acct, tg_msg)
+
+    return {
+        "status": "updated",
+        "account": acct,
+        "auto_trade": enabled,
+        "telegram_sent": telegram_sent,
+        "updated_at_utc": now_utc,
+    }
+
+
+@app.get("/api/v1/tunnel-url", tags=["dashboard"])
+async def get_tunnel_url() -> dict[str, Any]:
+    """Return the current Cloudflare tunnel URL if available."""
+    import re as _re
+    candidates = [
+        _OUTPUTS / "tunnel_err.txt",
+        _OUTPUTS / "cloudflared.log",
+        _OUTPUTS / "tunnel.log",
+    ]
+    pattern = _re.compile(r'https://[a-z0-9\-]+\.trycloudflare\.com')
+    for f in candidates:
+        try:
+            if f.exists():
+                text = f.read_text(encoding="utf-8", errors="ignore")
+                m = pattern.search(text)
+                if m:
+                    return {"url": m.group(0), "source": f.name}
+        except Exception:
+            continue
+    return {"url": None, "source": None}
+
+
+class SendTelegramRequest(BaseModel):
+    text: str
+    account: str | None = None
+
+
+@app.post("/api/v1/send-telegram", tags=["dashboard"])
+async def send_telegram(req: SendTelegramRequest) -> dict[str, Any]:
+    """Send a Telegram message to one or all configured accounts."""
+    text = req.text.strip()[:4000]
+    if not text:
+        raise HTTPException(status_code=422, detail="text is empty")
+    if req.account:
+        acct = req.account.strip().lower()
+        if acct not in _LIVE_CFG_MAP:
+            raise HTTPException(status_code=404, detail=f"Unknown account: {acct}")
+        sent = _tg_send_account(acct, text)
+        return {"sent": sent, "accounts": [acct]}
+    else:
+        sent_list = []
+        for acct in _LIVE_CFG_MAP:
+            if _tg_send_account(acct, text):
+                sent_list.append(acct)
+        return {"sent": bool(sent_list), "accounts": sent_list}
 
 
 # ── WebSocket dashboard endpoint ─────────────────────────────────────────────

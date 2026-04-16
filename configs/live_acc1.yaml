@@ -1,21 +1,21 @@
 # ─────────────────────────────────────────────────────────────────
-# LIVE TRADING CONFIG — Account 1 (ACC1 breakthrough profile)
-# Model:  outputs/acc1_breakthrough_net66590_dd3953_model.pkl
-# Symbol: XAUUSDm  |  WF: Net $66,590.56 | DD 39.53% | PF 1.4809
+# LIVE TRADING CONFIG — Account 1 (ACC1) — V14++ PROFIT (sc=0.85)
+# Model:  outputs/acc1_v14pp_model.pkl
+# WF: +47.96%/fold | PF=3.931 | DD=-8.63% | WR=57.4% | 83% pos folds
 # ─────────────────────────────────────────────────────────────────
 app:
   poll_seconds: 60
-  model_path:          outputs/acc1_breakthrough_net66590_dd3953_model.pkl
-  scaler_path:         outputs/acc1_breakthrough_net66590_dd3953_scaler.pkl
-  model_meta_path:     outputs/acc1_breakthrough_net66590_dd3953_model_meta.json
+  model_path:          outputs/acc1_v14pp_model.pkl
+  scaler_path:         outputs/acc1_v14pp_scaler.pkl
+  model_meta_path:     outputs/acc1_v14pp_model_meta.json
   training_report_path: outputs/training_report_acc1.json
   training_plot_path:  outputs/training_metrics_acc1.png
   backtest_report_path: outputs/backtest_report_acc1.json
   backtest_trades_path: outputs/backtest_trades_acc1.csv
   backtest_equity_plot_path: outputs/backtest_equity_acc1.png
   backtest_trades_plot_path: outputs/backtest_trades_plot_acc1.png
-  walkforward_report_path: outputs/walkforward_report_acc1.json
-  walkforward_trades_path: outputs/walkforward_trades_acc1.csv
+  walkforward_report_path: outputs/walkforward_report_acc1_v14pp_profit.json
+  walkforward_trades_path: outputs/walkforward_trades_acc1_v14pp_profit.csv
   paper_trade_log_path: outputs/paper_trade_signals_acc1.csv
   live_learning_log_path: outputs/live_learning_log_acc1.jsonl
   live_closed_trades_path: outputs/live_closed_trades_acc1.csv
@@ -56,7 +56,7 @@ strategy:
   liquidity_lookback: 15
   swing_lookback: 20
   volatility_window: 20
-  signal_threshold: 0.62             # Breakthrough candidate (WF net ~$66.6k, DD~39.5%)
+  signal_threshold: 0.60             # V14++ PROFIT — regime-aware sweep best
   sideways_volatility_threshold: 0.003
   strong_volatility_threshold: 0.016
   news_block_minutes: 0              # Tắt blackout ML feature (dùng news override thay thế)
@@ -98,37 +98,37 @@ strategy:
   silver_bullet_enabled: true
   silver_bullet_windows_utc: [[3, 4], [10, 11], [14, 15]]
   silver_bullet_confidence_boost: 0.05  # Slightly higher boost than acc2 (0.03)
-  # ADX trend gate — relaxed so we enter more often
+  # ADX trend gate
   adx_gate_enabled: true
-  adx_min_trend: 17.0
-  # Regime-specific confidence thresholds — all lower than acc2
-  sideway_min_confidence: 0.80
-  volatile_min_confidence: 0.72
+  adx_min_trend: 15.0              # V14++: relaxed entry gate
+  # Regime-specific confidence thresholds
+  sideway_min_confidence: 0.85    # V14++: stricter sideway filter
+  volatile_min_confidence: 0.85   # V14++: matched to sideway
 
 risk:
   mode: fixed_fractional
-  risk_per_trade: 0.056
-  risk_tier_floor: 0.026
+  risk_per_trade: 0.04             # V14++: lower risk, more stable
+  risk_tier_floor: 0.02
   max_open_positions: 3
   stop_loss_atr_multiple: 1.5
   take_profit_rr: 3.5
+  entry_slippage_atr_frac: 0.07    # Shift SL/TP levels by 7% ATR to simulate MT5 fill vs bar.close (G4 fix)
   volatile_take_profit_rr: 5.0     # ACC2 logic: Volatile regime RR 1:5
   sideway_take_profit_rr: 2.5      # Sideways regime RR 1:2.5
-  min_confidence: 0.70
+  min_confidence: 0.85             # V14++: matched to sideway_min_confidence
   fixed_lot: 0.01
-  max_risk_fraction: 0.10
+  max_risk_fraction: 0.08           # V14++
   sideway_risk_multiplier: 1.0
   normal_risk_multiplier: 1.0
   strong_volatility_risk_multiplier: 0.70
-  # Circuit breaker — ENABLED for capital preservation
   kill_switch_enabled: true
-  daily_loss_limit_pct: 0.0
-  max_drawdown_kill_pct: 0.12
-  consecutive_loss_pause_count: 4
-  consecutive_loss_cooldown_bars: 16
-  anti_martingale_factor: 0.2
-  anti_martingale_max_reductions: 3
-  max_total_exposure_pct: 0.08
+  daily_loss_limit_pct: 0.12        # V14++: daily loss limit enabled
+  max_drawdown_kill_pct: 0.20
+  consecutive_loss_pause_count: 3
+  consecutive_loss_cooldown_bars: 12 # V14++: 1h cooldown
+  anti_martingale_factor: 0.7       # V14++: sweep best
+  anti_martingale_max_reductions: 2
+  max_total_exposure_pct: 0.30
   reentry_guard_enabled: true
   reentry_cooldown_bars_after_sl: 3
   reentry_min_distance_atr: 0.35
@@ -158,7 +158,7 @@ execution:
   auto_trade: true
   deviation: 20
   magic_number: 20260325            # Unique for acc1
-  comment: xauusd-ai-live-acc1-freeze
+  comment: xauusd-ai-live-acc1-v14pp-profit
   paper_trade_max_loops: 0          # 0 = run continuously until manually stopped
   paper_data_source: mt5             # Paper test should follow live feed, not static CSV
   close_opposite_on_signal: true

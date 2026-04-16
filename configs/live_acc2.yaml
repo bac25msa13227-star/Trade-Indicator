@@ -1,16 +1,16 @@
 app:
   poll_seconds: 60
-  model_path: outputs/acc2_breakthrough_net21k_dd2333_model.pkl
-  scaler_path: outputs/acc2_breakthrough_net21k_dd2333_scaler.pkl
-  model_meta_path: outputs/acc2_breakthrough_net21k_dd2333_model_meta.json
-  training_report_path: outputs/exp_acc2_2003_training_report.json
-  training_plot_path: outputs/exp_acc2_2003_training_metrics.png
-  backtest_report_path: outputs/exp_acc2_2003_backtest_report.json
-  backtest_trades_path: outputs/exp_acc2_2003_backtest_trades.csv
-  backtest_equity_plot_path: outputs/exp_acc2_2003_backtest_equity.png
-  backtest_trades_plot_path: outputs/exp_acc2_2003_backtest_trades_plot.png
-  walkforward_report_path: outputs/exp_acc2_2003_walkforward_report.json
-  walkforward_trades_path: outputs/exp_acc2_2003_walkforward_trades.csv
+  model_path: outputs/acc2_v14pp_model.pkl
+  scaler_path: outputs/acc2_v14pp_scaler.pkl
+  model_meta_path: outputs/acc2_v14pp_model_meta.json
+  training_report_path: outputs/training_report_acc2.json
+  training_plot_path: outputs/training_metrics_acc2.png
+  backtest_report_path: outputs/backtest_report_acc2.json
+  backtest_trades_path: outputs/backtest_trades_acc2.csv
+  backtest_equity_plot_path: outputs/backtest_equity_acc2.png
+  backtest_trades_plot_path: outputs/backtest_trades_plot_acc2.png
+  walkforward_report_path: outputs/walkforward_report_acc1_v14pp_composite.json
+  walkforward_trades_path: outputs/walkforward_trades_acc1_v14pp_composite.csv
   paper_trade_log_path: outputs/paper_trade_signals_acc2.csv
   live_learning_log_path: outputs/live_learning_log_acc2.jsonl
   live_closed_trades_path: outputs/live_closed_trades_acc2.csv
@@ -51,17 +51,17 @@ strategy:
   liquidity_lookback: 15
   swing_lookback: 20
   volatility_window: 20
-  signal_threshold: 0.76
+  signal_threshold: 0.60             # V14++ COMPOSITE — regime-aware sweep best
   sideways_volatility_threshold: 0.003
   strong_volatility_threshold: 0.016
   news_block_minutes: 0
-  rsi_long_threshold: 52
-  rsi_short_threshold: 48
+  rsi_long_threshold: 50
+  rsi_short_threshold: 50
   ict_weight: 0.4
   wyckoff_weight: 0.35
   momentum_weight: 0.25
-  min_strategy_score: 0.4
-  sideway_min_strategy_score: 0.15
+  min_strategy_score: 0.05
+  sideway_min_strategy_score: 0.10
   strong_volatility_min_strategy_score: 0.35
   require_trend_alignment: true
   force_trade: false
@@ -192,36 +192,37 @@ strategy:
     - 15
   silver_bullet_confidence_boost: 0.03
   adx_gate_enabled: true
-  adx_min_trend: 18.0
-  sideway_min_confidence: 0.8
-  volatile_min_confidence: 0.55
+  adx_min_trend: 15.0
+  sideway_min_confidence: 0.88    # V14++ COMPOSITE
+  volatile_min_confidence: 0.88   # V14++ COMPOSITE
 risk:
   mode: fixed_fractional
-  risk_per_trade: 0.036
-  risk_tier_floor: 0.03
+  risk_per_trade: 0.04             # V14++ COMPOSITE
+  risk_tier_floor: 0.02
   max_open_positions: 3
   stop_loss_atr_multiple: 1.5
   take_profit_rr: 3.5
+  entry_slippage_atr_frac: 0.07    # Shift SL/TP levels by 7% ATR to simulate MT5 fill vs bar.close (G4 fix)
   volatile_take_profit_rr: 5.0
   sideway_take_profit_rr: 2.5
-  min_confidence: 0.7
+  min_confidence: 0.88             # V14++ COMPOSITE
   fixed_lot: 0.01
-  max_risk_fraction: 0.065
+  max_risk_fraction: 0.08
   sideway_risk_multiplier: 0.6
   normal_risk_multiplier: 1.0
   strong_volatility_risk_multiplier: 0.8
-  daily_loss_limit_pct: 0.05
+  daily_loss_limit_pct: 0.12        # V14++ COMPOSITE
   max_drawdown_kill_pct: 0.15
   consecutive_loss_pause_count: 3
   consecutive_loss_cooldown_bars: 12
-  anti_martingale_factor: 0.5
-  anti_martingale_max_reductions: 3
-  max_total_exposure_pct: 0.2
+  anti_martingale_factor: 0.7
+  anti_martingale_max_reductions: 2
+  max_total_exposure_pct: 0.30
   reentry_guard_enabled: true
   reentry_cooldown_bars_after_sl: 1
   reentry_min_distance_atr: 0.35
   partial_tp_enabled: true
-  partial_tp_rr: 1.5
+  partial_tp_rr: 1.2                # V14++: sync with ACC1
   partial_tp_pct: 0.5
   risk_throttle_rules:
   - name: friday_1200_buy_regime1_misaligned
@@ -350,7 +351,7 @@ risk:
     - 1
     adx_max: 22.0
 execution:
-  auto_trade: true
+  auto_trade: false
   deviation: 20
   magic_number: 20260316
   comment: xauusd-ai-live-acc2-freeze

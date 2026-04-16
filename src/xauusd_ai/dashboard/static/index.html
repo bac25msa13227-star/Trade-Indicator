@@ -941,8 +941,8 @@ body::after{
           <p class="sunny-blurb" id="sunny-blurb">Waiting for the first live packet before the engine maps account state, model confidence, and risk posture for ACC1 and ACC2.</p>
           <div class="sunny-mini-grid">
             <div class="sunny-mini">
-              <span>Viewport</span>
-              <strong id="sunny-focus">ACC1 / Overview</strong>
+              <span>Regime</span>
+              <strong id="sunny-regime-display">Stand by</strong>
             </div>
             <div class="sunny-mini">
               <span>Signal Edge</span>
@@ -971,31 +971,30 @@ body::after{
 
       <div class="sunny-tools">
         <div class="tools-grid">
+
           <div class="tool-card">
             <div class="tool-subttl">
-              <span>Theme Matrix</span>
-              <span id="mood-label">Matrix Green</span>
+              <span>Auto Trade</span>
+              <span id="auto-trade-status" class="dim">Loading…</span>
             </div>
-            <div class="mood-row">
-              <button class="mood-chip active" data-mood="matrix">Matrix Green</button>
-              <button class="mood-chip" data-mood="ice">Ice Link</button>
-              <button class="mood-chip" data-mood="amber">Amber Alert</button>
+            <div class="quick-grid">
+              <button class="quick-btn" id="btn-at-acc1-on"  onclick="setAutoTrade('acc1',true)">ACC1 ON</button>
+              <button class="quick-btn" id="btn-at-acc1-off" onclick="setAutoTrade('acc1',false)">ACC1 OFF</button>
+              <button class="quick-btn" id="btn-at-acc2-on"  onclick="setAutoTrade('acc2',true)">ACC2 ON</button>
+              <button class="quick-btn" id="btn-at-acc2-off" onclick="setAutoTrade('acc2',false)">ACC2 OFF</button>
             </div>
           </div>
 
           <div class="tool-card">
             <div class="tool-subttl">
-              <span>Ops Shortcuts</span>
-              <span id="quick-focus-label">Jump sections</span>
+              <span>Kill Switch</span>
+              <span id="ks-status" class="dim">Normal</span>
             </div>
             <div class="quick-grid">
-              <button class="quick-btn active" data-jump="overview">Overview</button>
-              <button class="quick-btn" data-jump="trading">Live</button>
-              <button class="quick-btn" data-jump="pnl">P&amp;L</button>
-              <button class="quick-btn" data-jump="news">News</button>
-              <button class="quick-btn" data-action="compact">Compact</button>
-              <button class="quick-btn" data-action="spotlight">Pulse</button>
+              <button class="quick-btn" id="btn-ks-acc1" onclick="resetKillSwitch('acc1')">Reset ACC1</button>
+              <button class="quick-btn" id="btn-ks-acc2" onclick="resetKillSwitch('acc2')">Reset ACC2</button>
             </div>
+            <div style="font-size:.64rem;color:var(--text3);margin-top:6px">Resets consecutive losses, cooldown, and kill flag</div>
           </div>
 
           <div class="tool-card">
@@ -1004,10 +1003,15 @@ body::after{
               <span id="signal-limit-text">10 rows</span>
             </div>
             <div class="signal-slider-wrap">
-              <input class="signal-slider" id="signal-limit" type="range" min="4" max="20" step="1" value="10"/>
+              <input class="signal-slider" id="signal-limit" type="range" min="10" max="500" step="10" value="10"/>
               <span class="slider-bubble" id="signal-limit-bubble">10 rows</span>
             </div>
+            <div style="margin-top:10px">
+              <button class="quick-btn" id="btn-tg-url" onclick="sendTunnelUrl()" style="width:100%">&#128225; Send tunnel URL → Telegram</button>
+            </div>
+            <div id="tg-url-result" style="font-size:.64rem;color:var(--text3);margin-top:5px;display:none"></div>
           </div>
+
         </div>
       </div>
     </section>
@@ -1298,9 +1302,6 @@ function assistantNarrative(acct,d){
   return {summary,detail};
 }
 function refreshQuickButtons(){
-  document.querySelectorAll('.quick-btn[data-jump]').forEach(btn=>{
-    btn.classList.toggle('active',btn.dataset.jump===State.sec[State.acct]);
-  });
   document.querySelectorAll('.quick-btn[data-action="compact"]').forEach(btn=>{
     btn.classList.toggle('active',!!State.compact);
   });
@@ -1321,7 +1322,11 @@ function renderSunnyDeck(){
   const secLabel=(State.sec[acct]||'overview').replace('walkforward','walk forward');
   el('sunny-title').textContent = `${liveLabel(acct)} is ${s.should_trade?'armed':'watching'} the tape.`;
   el('sunny-blurb').textContent = q(s.reason||'Waiting for the next live bar so the console can decode model state, regime posture, and execution gates.');
-  el('sunny-focus').textContent = `${acct.toUpperCase()} / ${secLabel}`;
+  const vrNames4=['Low','Normal','High','Extreme'];
+  const vr4=s.volatility_regime!=null?+s.volatility_regime:-1;
+  const regimeTxt=vr4===0?'Sideways / Low':vr4===1?'Normal / Trending':vr4===2?'Volatile / High ATR':vr4>=3?'EXTREME':'Stand by';
+  const regimeEl=el('sunny-regime-display');
+  if(regimeEl){regimeEl.textContent=regimeTxt;regimeEl.className=vr4===0?'loss':vr4===1?'win':vr4===2?'muted loss':'loss';}
   el('sunny-signal-pulse').textContent = signalPulse;
   el('sunny-risk-mood').textContent = riskMood;
   el('sunny-live-pnl').innerHTML = `<span class="${(d.total_pnl||0)>=0?'win':'loss'}">${dol(d.total_pnl)}</span>`;
@@ -1329,6 +1334,34 @@ function renderSunnyDeck(){
   el('assistant-detail').textContent = note.detail;
   el('sunny-live-status').textContent = live ? 'WebSocket uplink hot' : 'HTTP fallback';
   el('sunny-live-updated').textContent = data?.ts ? `Synced ${String(data.ts).replace('T',' ').slice(5,16)} UTC` : 'Realtime ops console';
+
+  // Update auto-trade + kill switch buttons for both accounts
+  ['acc1','acc2'].forEach(a=>{
+    const ad=data?.accounts?.[a];
+    const autoOn=ad?.auto_trade_enabled ?? ad?.status?.auto_trade_enabled ?? ad?.runtime?.auto_trade_enabled ?? null;
+    const killed=ad?.daily?.killed;
+    const cooldown=ad?.daily?.cooldown_bars>0;
+    const btnOn=el(`btn-at-${a}-on`);
+    const btnOff=el(`btn-at-${a}-off`);
+    if(btnOn){btnOn.classList.toggle('active',autoOn===true);}
+    if(btnOff){btnOff.classList.toggle('active',autoOn===false);}
+    const btnKs=el(`btn-ks-${a}`);
+    if(btnKs){
+      btnKs.classList.toggle('active',killed||cooldown);
+      btnKs.style.color=killed?'var(--red)':cooldown?'var(--yellow)':'';
+    }
+  });
+  const at1=data?.accounts?.acc1?.status?.auto_trade_enabled;
+  const at2=data?.accounts?.acc2?.status?.auto_trade_enabled;
+  const ksEl=el('ks-status');
+  const k1=data?.accounts?.acc1?.daily?.killed;
+  const k2=data?.accounts?.acc2?.daily?.killed;
+  if(ksEl){
+    if(k1||k2){ksEl.textContent=`${k1?'ACC1 KILLED':''}${k1&&k2?' · ':''}${k2?'ACC2 KILLED':''}`;ksEl.style.color='var(--red)';}
+    else{ksEl.textContent='Normal';ksEl.style.color='';}
+  }
+  const atEl=el('auto-trade-status');
+  if(atEl) atEl.textContent=`ACC1:${at1===true?'ON':at1===false?'OFF':'?'} ACC2:${at2===true?'ON':at2===false?'OFF':'?'}`;
   const dot=el('sunny-live-dot');
   if(dot) dot.classList.toggle('live',live);
   const assistantCard=el('assistant-card');
@@ -1338,8 +1371,6 @@ function renderSunnyDeck(){
     assistantCard.classList.add('pulse-card');
   }
   State.assistantKey=note.summary;
-  const focusLabel=el('quick-focus-label');
-  if(focusLabel) focusLabel.textContent = `Viewport ${secLabel}`;
   refreshQuickButtons();
 }
 function spotlightActiveSection(){
@@ -2460,11 +2491,6 @@ document.addEventListener('keydown',e=>{
 });
 
 document.addEventListener('click',e=>{
-  const moodBtn=e.target.closest('[data-mood]');
-  if(moodBtn){
-    applyMood(moodBtn.dataset.mood);
-    return;
-  }
   const profileBtn=e.target.closest('[data-profile]');
   if(profileBtn){
     const mode=profileBtn.dataset.profile;
@@ -2650,6 +2676,86 @@ refreshQuickButtons();
 document.body.classList.toggle('compact',State.compact);
 if(el('signal-limit-text')) el('signal-limit-text').textContent=`${State.signalLimit} rows`;
 if(el('signal-limit-bubble')) el('signal-limit-bubble').textContent=`${State.signalLimit} rows`;
+
+/* ═══ AUTO-TRADE TOGGLE ═══ */
+async function setAutoTrade(acct, enabled){
+  const btnOn=el(`btn-at-${acct}-on`);
+  const btnOff=el(`btn-at-${acct}-off`);
+  if(btnOn) btnOn.disabled=true;
+  if(btnOff) btnOff.disabled=true;
+  try{
+    const r=await fetch(`/api/v1/auto-trade/${acct}?enabled=${enabled}`,{method:'POST'});
+    const d=await r.json();
+    if(!r.ok) throw new Error(d.detail||`HTTP ${r.status}`);
+    showAlert('info',`Auto Trade ${enabled?'ON':'OFF'} [${acct.toUpperCase()}]`,`Updated. Telegram: ${d.telegram_sent?'✓ sent':'not sent'}`,5000);
+    if(btnOn) btnOn.classList.toggle('active',enabled===true);
+    if(btnOff) btnOff.classList.toggle('active',enabled===false);
+    const atEl=el('auto-trade-status');
+    if(atEl){
+      const prev=atEl.textContent;
+      const re=new RegExp(acct.toUpperCase()+':\\S+');
+      atEl.textContent=prev.replace(re,`${acct.toUpperCase()}:${enabled?'ON':'OFF'}`);
+    }
+  }catch(err){
+    showAlert('danger',`Auto Trade Failed [${acct.toUpperCase()}]`,String(err?.message||err),7000);
+  }finally{
+    if(btnOn) btnOn.disabled=false;
+    if(btnOff) btnOff.disabled=false;
+  }
+}
+
+/* ═══ KILL SWITCH RESET ═══ */
+async function resetKillSwitch(acct){
+  const btn=el(`btn-ks-${acct}`);
+  if(btn) btn.disabled=true;
+  try{
+    const r=await fetch(`/api/v1/reset-kill-switch/${acct}`,{method:'POST'});
+    const d=await r.json();
+    if(!r.ok) throw new Error(d.detail||`HTTP ${r.status}`);
+    showAlert('info',`Kill Switch Reset [${acct.toUpperCase()}]`,`Consecutive losses → 0, Cooldown → 0. Telegram: ${d.telegram_sent?'✓ sent':'not sent'}`,6000);
+    if(btn){btn.classList.remove('active');btn.style.color='';}
+    const ksEl=el('ks-status');
+    if(ksEl){ksEl.textContent='Normal';ksEl.style.color='';}
+    await _fetchDashboardNow();
+  }catch(err){
+    showAlert('danger',`Kill Switch Reset Failed [${acct.toUpperCase()}]`,String(err?.message||err),7000);
+  }finally{
+    if(btn) btn.disabled=false;
+  }
+}
+
+/* ═══ TUNNEL URL → TELEGRAM ═══ */
+async function sendTunnelUrl(){
+  const btn=el('btn-tg-url');
+  const resultEl=el('tg-url-result');
+  if(btn) btn.disabled=true;
+  if(resultEl){resultEl.style.display='block';resultEl.textContent='Detecting tunnel URL…';}
+  try{
+    const r=await fetch('/api/v1/tunnel-url');
+    const d=await r.json();
+    if(!d.url){
+      if(resultEl){resultEl.textContent='No tunnel URL found in logs.';resultEl.style.color='var(--text3)';}
+      showAlert('warn','Tunnel URL','No trycloudflare.com URL found in outputs/.',4000);
+      return;
+    }
+    const dashUrl=`${d.url}/dashboard`;
+    if(resultEl){resultEl.textContent=`URL: ${dashUrl}`;resultEl.style.color='var(--green)';}
+    const msg=`📡 <b>Dashboard URL</b>\n${dashUrl}`;
+    const sr=await fetch('/api/v1/send-telegram',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({text:msg}),
+    });
+    const sd=await sr.json();
+    showAlert('info','Tunnel URL Detected',`${dashUrl} · ${sd.sent?`Sent to Telegram (${(sd.accounts||[]).join(', ')})`:'URL found, Telegram not configured'}`,9000);
+  }catch(err){
+    if(resultEl){resultEl.textContent='Error: '+String(err?.message||err);}
+    showAlert('danger','Tunnel URL Error',String(err?.message||err),6000);
+  }finally{
+    if(btn) btn.disabled=false;
+    setTimeout(()=>{if(resultEl)resultEl.style.display='none';},20000);
+  }
+}
 
 /* ═══ DATA TRANSPORT: WebSocket with HTTP polling fallback ═══ */
 let _pollTimer=null;
