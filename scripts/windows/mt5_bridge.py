@@ -47,7 +47,11 @@ except ImportError:
     print("Run:  pip install MetaTrader5")
     sys.exit(1)
 
-PORT = int(os.getenv("MT5_BRIDGE_PORT", "5600"))
+import argparse as _argparse
+_ap = _argparse.ArgumentParser(description="MT5 HTTP bridge")
+_ap.add_argument("--port", type=int, default=int(os.getenv("MT5_BRIDGE_PORT", "5600")))
+_args, _unknown = _ap.parse_known_args()
+PORT = _args.port
 
 # ── MT5 lifecycle ──────────────────────────────────────────────────────────────
 
@@ -283,6 +287,44 @@ def op_get_tick(symbol: str) -> dict:
     }
 
 
+def op_get_rates(symbol: str, timeframe: str, bars: int) -> list:
+    """Return OHLCV bars for symbol/timeframe directly from MT5 (realtime)."""
+    _ensure()
+    tf_map = {
+        "M1":  mt5.TIMEFRAME_M1,
+        "M5":  mt5.TIMEFRAME_M5,
+        "M15": mt5.TIMEFRAME_M15,
+        "M30": mt5.TIMEFRAME_M30,
+        "H1":  mt5.TIMEFRAME_H1,
+        "H4":  mt5.TIMEFRAME_H4,
+        "D1":  mt5.TIMEFRAME_D1,
+    }
+    if timeframe not in tf_map:
+        raise ValueError(f"Unknown timeframe: {timeframe}. Valid: {list(tf_map)}")
+    mt5.symbol_select(symbol, True)
+    import time as _time
+    rates = None
+    for _attempt in range(6):
+        rates = mt5.copy_rates_from_pos(symbol, tf_map[timeframe], 0, bars)
+        if rates is not None and len(rates) > 0:
+            break
+        _time.sleep(min(2 * (1.5 ** _attempt), 10))
+    if rates is None or len(rates) == 0:
+        raise RuntimeError(f"No rates returned for {symbol} {timeframe}: {mt5.last_error()}")
+    result = []
+    for r in rates:
+        result.append({
+            "time":        int(r["time"]),
+            "open":        float(r["open"]),
+            "high":        float(r["high"]),
+            "low":         float(r["low"]),
+            "close":       float(r["close"]),
+            "tick_volume": int(r["tick_volume"]),
+            "spread":      int(r["spread"]),
+        })
+    return result
+
+
 def _collect_session_windows(symbol: str, now_utc: _dt.datetime, days_ahead: int = 8) -> list[tuple[_dt.datetime, _dt.datetime]]:
     """Collect MT5 trade sessions as UTC windows [open, close)."""
     fn = getattr(mt5, "symbol_info_session_trade", None)
@@ -488,6 +530,11 @@ class _Handler(BaseHTTPRequestHandler):
             elif path == "/tick":
                 symbol = qs.get("symbol", ["XAUUSD"])[0]
                 self._send_json(200, op_get_tick(symbol))
+            elif path == "/rates":
+                symbol    = qs.get("symbol",    ["XAUUSD"])[0]
+                timeframe = qs.get("timeframe", ["M15"])[0]
+                bars      = int(qs.get("bars",  ["300"])[0])
+                self._send_json(200, op_get_rates(symbol, timeframe, bars))
             elif path == "/market/state":
                 symbol = qs.get("symbol", ["XAUUSD"])[0]
                 stale_seconds = int(qs.get("stale_seconds", ["300"])[0])

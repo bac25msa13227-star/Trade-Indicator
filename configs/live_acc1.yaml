@@ -25,7 +25,7 @@ market:
   symbol: XAUUSDm
   training_symbol: GC=F
   training_data_source: csv_folder
-  live_data_source: mt5
+  live_data_source: bridge
   csv_folder_path: src/xauusd_ai/real_data
   csv_timeframe: M15
   higher_timeframe: D1
@@ -158,7 +158,7 @@ execution:
   auto_trade: true
   deviation: 20
   magic_number: 20260325            # Unique for acc1
-  comment: xauusd-ai-live-acc1-v14pp-profit
+  comment: xauusd-ai-live-acc1-profit
   paper_trade_max_loops: 0          # 0 = run continuously until manually stopped
   paper_data_source: mt5             # Paper test should follow live feed, not static CSV
   close_opposite_on_signal: true

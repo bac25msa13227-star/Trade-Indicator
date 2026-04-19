@@ -92,20 +92,20 @@ Các biến BẮT BUỘC:
 
 ```env
 # ── MT5 Bridge ACC1 (Exness account 1) ──────────────
-MT5_LOGIN_ACC1=<your_acc1_login>
-MT5_PASSWORD_ACC1=<your_acc1_password>
-MT5_SERVER_ACC1=Exness-MT5Real8
+MT5_LOGIN_ACC1=270832477
+MT5_PASSWORD_ACC1=07032001bB@
+MT5_SERVER_ACC1=Exness-MT5Trial17
 
 # ── MT5 Bridge ACC2 (Exness account 2) ──────────────
-MT5_LOGIN_ACC2=<your_acc2_login>
-MT5_PASSWORD_ACC2=<your_acc2_password>
-MT5_SERVER_ACC2=Exness-MT5Real8
+MT5_LOGIN_ACC2=433326057
+MT5_PASSWORD_ACC2=07032001bB@
+MT5_SERVER_ACC2=Exness-MT5Trial7
 
 # ── Telegram notifications ──────────────────────────
-TELEGRAM_BOT_TOKEN_ACC1=<bot_token_acc1>
-TELEGRAM_CHAT_ID_ACC1=<chat_id_acc1>
-TELEGRAM_BOT_TOKEN_ACC2=<bot_token_acc2>
-TELEGRAM_CHAT_ID_ACC2=<chat_id_acc2>
+TELEGRAM_BOT_TOKEN_ACC1=8553044560:AAEkhj8yQAYI8WRBZF7kzdUo3WZrhEQ24mI
+TELEGRAM_CHAT_ID_ACC1=1638555472
+TELEGRAM_BOT_TOKEN_ACC2=8591115022:AAEhZNq96Cw3mZmEsAADd1Mc7QfKOqXSMtw
+TELEGRAM_CHAT_ID_ACC2=1638555472
 
 # ── Optional ────────────────────────────────────────
 FINNHUB_API_KEY=<your_finnhub_key>

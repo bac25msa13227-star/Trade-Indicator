@@ -364,21 +364,37 @@ class ModelTrainer:
         model_path = Path(self.settings.app.model_path)
         scaler_path = Path(self.settings.app.scaler_path)
         meta_path = Path(self.settings.app.model_meta_path)
-        if not model_path.exists() or not scaler_path.exists():
+        if not model_path.exists():
             return False
         try:
             with open(str(model_path), "rb") as file_handle:
                 self.model = pickle.load(file_handle)
-            with open(str(scaler_path), "rb") as file_handle:
-                self.scaler = pickle.load(file_handle)
         except (AttributeError, ModuleNotFoundError, ImportError, Exception) as _pkl_err:
-            import logging as _logging
-            _logging.getLogger(__name__).warning(
-                "load_artifacts: failed to unpickle model/scaler (%s). "
+            logging.getLogger(__name__).warning(
+                "load_artifacts: failed to unpickle model (%s). "
                 "Likely sklearn version mismatch — will retrain.",
                 _pkl_err,
             )
             return False
+        # Load scaler — failure here is non-fatal: tree-based models don't require scaling.
+        # An empty/corrupt scaler file (e.g. 0-byte placeholder from git) will not trigger retrain.
+        if scaler_path.exists():
+            try:
+                with open(str(scaler_path), "rb") as file_handle:
+                    _loaded_scaler = pickle.load(file_handle)
+                # Verify the scaler was actually fitted (has mean_ attribute)
+                if hasattr(_loaded_scaler, "mean_") or hasattr(_loaded_scaler, "func"):
+                    self.scaler = _loaded_scaler
+                else:
+                    raise ValueError("scaler not fitted")
+            except Exception as _scaler_err:
+                from sklearn.preprocessing import FunctionTransformer
+                self.scaler = FunctionTransformer()  # identity — tree models don't need scaling
+                logging.getLogger(__name__).warning(
+                    "load_artifacts: scaler invalid/empty (%s). "
+                    "Using identity transform (OK for tree-based models).",
+                    _scaler_err,
+                )
         # Load calibrator if available
         _cal_path = model_path.with_suffix(".cal.pkl")
         if _cal_path.exists():

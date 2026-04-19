@@ -21,7 +21,7 @@ market:
   symbol: XAUUSDm
   training_symbol: GC=F
   training_data_source: csv_folder
-  live_data_source: mt5
+  live_data_source: bridge
   csv_folder_path: src/xauusd_ai/real_data
   csv_timeframe: M15
   higher_timeframe: D1
@@ -351,10 +351,10 @@ risk:
     - 1
     adx_max: 22.0
 execution:
-  auto_trade: false
+  auto_trade: true
   deviation: 20
   magic_number: 20260316
-  comment: xauusd-ai-live-acc2-freeze
+  comment: xauusd-ai-live-acc2
   paper_trade_max_loops: 0
   paper_data_source: mt5
   close_opposite_on_signal: true

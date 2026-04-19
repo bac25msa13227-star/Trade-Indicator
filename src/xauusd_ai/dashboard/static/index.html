@@ -873,14 +873,14 @@ body::after{
           <span class="acct-d"></span>
           <span>
             <div style="font-weight:700;font-size:.77rem">ACC1</div>
-            <div style="font-size:.6rem;color:var(--text3)">ICT + Wyckoff</div>
+            <div style="font-size:.6rem;color:var(--text3)">PROFIT · sc=0.85</div>
           </span>
         </button>
         <button class="acct-btn" data-acct="acc2">
           <span class="acct-d"></span>
           <span>
             <div style="font-weight:700;font-size:.77rem">ACC2</div>
-            <div style="font-size:.6rem;color:var(--text3)">Live Profile</div>
+            <div style="font-size:.6rem;color:var(--text3)">COMPOSITE · sc=0.88</div>
           </span>
         </button>
       </div>
@@ -923,8 +923,8 @@ body::after{
 
     <!-- MOBILE ACCOUNT CHIPS -->
     <div class="mob-acct-bar" id="mob-acct-bar">
-      <button class="mac active" data-acct="acc1">ACC1 &middot; ICT+Wyckoff</button>
-      <button class="mac" data-acct="acc2">ACC2 &middot; Live Profile</button>
+      <button class="mac active" data-acct="acc1">ACC1 &middot; PROFIT</button>
+      <button class="mac" data-acct="acc2">ACC2 &middot; COMPOSITE</button>
     </div>
 
     <section class="sunny-deck" id="sunny-deck">
@@ -1263,7 +1263,7 @@ function syncChartTheme(){
   Chart.defaults.color = chartVar('--text3','#aa8a95');
 }
 function liveLabel(acct){
-  return acct==='acc2' ? 'ACC2 / guard engine' : 'ACC1 / ict stack';
+  return acct==='acc2' ? 'ACC2 / composite' : 'ACC1 / profit';
 }
 function sentenceSide(side){
   if(!side) return 'hold';
@@ -1428,6 +1428,9 @@ function renderOverview(acct,d){
   const wfSim=wfAgg.concurrent_sim||{};
   const bench=d.benchmark||{};
   const runtime=d.runtime||{};
+  const cfg=acct==='acc2'
+    ? {mode:'COMPOSITE',minConf:0.88,decThr:0.46,silvBoost:0.03,consecPause:3,riskPct:0.04,tpRR:3.5,sideTpRR:2.5,volTpRR:5.0,dailyLoss:0.12,maxDDKill:0.15,sideRiskMul:0.60,volRiskMul:0.80}
+    : {mode:'PROFIT',   minConf:0.85,decThr:0.44,silvBoost:0.05,consecPause:3,riskPct:0.04,tpRR:3.5,sideTpRR:2.5,volTpRR:5.0,dailyLoss:0.12,maxDDKill:0.20,sideRiskMul:1.00,volRiskMul:0.70};
   const trades=d.recent_trades||[];const sig=(d.recent_signals||[]).slice(-1)[0]||{};
   const cbActive=day.killed||day.cooldown_bars>0;
   const cbTxt=day.killed?'KILL SWITCH':day.cooldown_bars>0?`Cooldown ${day.cooldown_bars}b`:'NORMAL';
@@ -1537,6 +1540,26 @@ function renderOverview(acct,d){
       <div class="slbl">Bridge vs Feed</div>
       <div class="sval-sm ${(bridgeDiv!=null&&bridgeDiv>1.5)?'loss':''}">${bridgeDiv!=null?fmt(bridgeDiv,3):'—'}</div>
       <div class="ssub">Divergence points</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-ttl">&#9881; Strategy Config &mdash; ${acct.toUpperCase()} / <span class="${cfg.mode==='PROFIT'?'win':'muted'}">${cfg.mode}</span></div>
+    <div class="g6">
+      ${statBox('Min Confidence','<b style="color:var(--yellow);font-family:var(--m)">'+(cfg.minConf*100).toFixed(0)+'%</b>','','Risk gate threshold')}
+      ${statBox('Decision Thr','<b style="font-family:var(--m)">'+cfg.decThr.toFixed(2)+'</b>','','Model output gate')}
+      ${statBox('Risk / Trade',(cfg.riskPct*100).toFixed(0)+'%','','Fixed fractional')}
+      ${statBox('Consec Pause',cfg.consecPause+' losses','','Then cooldown 12 bars')}
+      ${statBox('Silver Bullet','+'+cfg.silvBoost.toFixed(2),'win','Conf boost on window')}
+      ${statBox('Partial TP','1.2R &rarr; 50%','','Close half at 1.2R')}
+    </div>
+    <div class="g6" style="margin-top:8px">
+      ${statBox('TP RR',cfg.tpRR+'R &middot; '+cfg.sideTpRR+'R &middot; '+cfg.volTpRR+'R','','Normal / Sideway / Vol')}
+      ${statBox('Daily Loss Limit',(cfg.dailyLoss*100).toFixed(0)+'%','loss','Kill if exceeded')}
+      ${statBox('Max DD Kill',(cfg.maxDDKill*100).toFixed(0)+'%','loss','Hard kill switch')}
+      ${statBox('Sideway Risk',cfg.sideRiskMul.toFixed(2)+'&times;',cfg.sideRiskMul<1?'loss':'','Risk multiplier')}
+      ${statBox('Vol Risk',cfg.volRiskMul.toFixed(2)+'&times;',cfg.volRiskMul<1?'loss':'','Risk multiplier')}
+      ${statBox('Strategy Weights','ICT 40% &middot; WYC 35% &middot; MOM 25%','dim','')}
     </div>
   </div>
 

@@ -191,7 +191,36 @@ class MarketDataService:
         ).fillna(0)
         return frame
 
+    def _fetch_rates_bridge(self, timeframe_name: str, bars: int) -> pd.DataFrame:
+        bridge_url = os.getenv("MT5_BRIDGE_URL", "").rstrip("/")
+        if not bridge_url:
+            raise RuntimeError("MT5_BRIDGE_URL env var not set — cannot use bridge data source")
+        import requests
+        resp = requests.get(
+            f"{bridge_url}/rates",
+            params={"symbol": self.settings.market.symbol, "timeframe": timeframe_name, "bars": bars},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if not data:
+            raise RuntimeError(f"Bridge returned empty rates for {timeframe_name}")
+        frame = pd.DataFrame(data)
+        frame["time"] = pd.to_datetime(frame["time"], unit="s", utc=True)
+        frame = frame.rename(columns={"tick_volume": "tick_volume", "spread": "spread_points"})
+        if "spread_points" not in frame.columns:
+            frame["spread_points"] = 0.0
+        if "tick_volume" not in frame.columns:
+            frame["tick_volume"] = 0
+        frame["tick_volume_delta"] = frame["tick_volume"].diff().fillna(0)
+        frame["volume_imbalance"] = (
+            (frame["close"] - frame["open"]).abs() / (frame["high"] - frame["low"]).replace(0, pd.NA)
+        ).fillna(0)
+        return frame.tail(bars).reset_index(drop=True)
+
     def _fetch_rates(self, timeframe_name: str, bars: int, source: str) -> pd.DataFrame:
+        if source == "bridge":
+            return self._fetch_rates_bridge(timeframe_name, bars)
         if source == "yfinance":
             return self._fetch_rates_yfinance(timeframe_name, bars)
         if source == "csv_folder":

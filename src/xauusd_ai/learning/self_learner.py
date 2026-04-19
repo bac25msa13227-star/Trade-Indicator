@@ -396,12 +396,42 @@ class SelfLearner:
             "H4": "XAUUSDm_H4.csv",
             "D1": "XAUUSDm_D1.csv",
         }
+        _MAX_CSV_BYTES = 100 * 1024 * 1024  # Skip files >100 MB — too slow on startup
+        _BYTES_PER_ROW_ESTIMATE = 200       # Safe overestimate for MT5 CSV rows
+        _N_ROWS = 35_000
+
+        def _tail_read_csv(fp: Path) -> pd.DataFrame:
+            """Read only the last _N_ROWS from a large CSV via binary seek + StringIO."""
+            from io import StringIO as _SIO
+            seek_size = _N_ROWS * _BYTES_PER_ROW_ESTIMATE
+            fsize = fp.stat().st_size
+            with open(fp, "rb") as _f:
+                header_bytes = _f.readline()
+                header_start = len(header_bytes)
+                tail_start = max(header_start, fsize - seek_size)
+                _f.seek(tail_start)
+                tail_bytes = _f.read()
+            # Drop partial first line when we seeked into the middle of the file
+            if tail_start > header_start:
+                nl_pos = tail_bytes.find(b"\n")
+                if nl_pos >= 0:
+                    tail_bytes = tail_bytes[nl_pos + 1:]
+            combined = header_bytes + tail_bytes
+            return pd.read_csv(_SIO(combined.decode("utf-8", errors="replace")))
+
         for tf, fname in tf_file_map.items():
             fpath = csv_path / fname
             if not fpath.exists():
                 continue
             try:
-                df = pd.read_csv(fpath)
+                file_size = fpath.stat().st_size
+                if file_size > _MAX_CSV_BYTES:
+                    LOGGER.info(
+                        "SelfLearner preload: %s is %.0f MB, skipping (fetched live when needed)",
+                        fname, file_size / 1_048_576,
+                    )
+                    continue
+                df = _tail_read_csv(fpath)
                 # Normalize column names (MT5 CSVs use Title case: Open/High/Low/Close)
                 df.rename(columns={
                     "Open": "open", "High": "high", "Low": "low", "Close": "close",
