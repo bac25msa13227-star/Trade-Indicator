@@ -57,8 +57,8 @@ strategy:
   swing_lookback: 20
   volatility_window: 20
   signal_threshold: 0.60             # V14++ PROFIT — regime-aware sweep best
-  sideways_volatility_threshold: 0.003
-  strong_volatility_threshold: 0.016
+  sideways_volatility_threshold: 0.0020
+  strong_volatility_threshold: 0.0055
   news_block_minutes: 0              # Tắt blackout ML feature (dùng news override thay thế)
   rsi_long_threshold: 50             # Less strict than acc2 (52)
   rsi_short_threshold: 50            # Less strict than acc2 (48)
@@ -68,7 +68,7 @@ strategy:
   min_strategy_score: 0.05
   sideway_min_strategy_score: 0.10
   strong_volatility_min_strategy_score: 0.35
-  require_trend_alignment: true
+  require_trend_alignment: false    # no_align+sc=0.78: +$68/wk, 86% pos weeks
   force_trade: false
   blocked_hours_utc: [3, 15, 17, 22, 23]
   blocked_weekdays_utc: []
@@ -102,20 +102,20 @@ strategy:
   adx_gate_enabled: true
   adx_min_trend: 15.0              # V14++: relaxed entry gate
   # Regime-specific confidence thresholds
-  sideway_min_confidence: 0.85    # V14++: stricter sideway filter
-  volatile_min_confidence: 0.85   # V14++: matched to sideway
+  sideway_min_confidence: 0.78    # no_align sweep: optimal sc=0.78
+  volatile_min_confidence: 0.78   # matched to sideway
 
 risk:
   mode: fixed_fractional
-  risk_per_trade: 0.04             # V14++: lower risk, more stable
+  risk_per_trade: 0.05             # no_align sweep: 5% risk
   risk_tier_floor: 0.02
-  max_open_positions: 3
+  max_open_positions: 2
   stop_loss_atr_multiple: 1.5
   take_profit_rr: 3.5
   entry_slippage_atr_frac: 0.07    # Shift SL/TP levels by 7% ATR to simulate MT5 fill vs bar.close (G4 fix)
   volatile_take_profit_rr: 5.0     # ACC2 logic: Volatile regime RR 1:5
   sideway_take_profit_rr: 2.5      # Sideways regime RR 1:2.5
-  min_confidence: 0.85             # V14++: matched to sideway_min_confidence
+  min_confidence: 0.78             # no_align sweep: sc=0.78
   fixed_lot: 0.01
   max_risk_fraction: 0.08           # V14++
   sideway_risk_multiplier: 1.0

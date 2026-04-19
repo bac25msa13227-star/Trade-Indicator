@@ -28,3 +28,29 @@ src/*.egg-info/
 # Local market-data cache (keep on machine, never push)
 .dukascopy-cache/
 src/xauusd_ai/real_data/XAUUSDm_*.csv
+
+# WF cache (large binary, local only)
+outputs/.wf_cache/
+
+# Experiment sweep outputs (local only)
+outputs/wf_dailyreset_*.json
+outputs/wf_daily60_*.json
+outputs/wf_lgbm_*.json
+outputs/wf_sweep_*.json
+outputs/wf_weekly_*.json
+outputs/walkforward_report_acc1_v14pp_r*.json
+outputs/snapshots/
+
+# LGBM experimental models (not deployed)
+outputs/acc1_lgbm_*.pkl
+outputs/acc1_lgbm_*.json
+outputs/acc2_lgbm_*.pkl
+outputs/acc2_lgbm_*.json
+
+# Experimental configs (sweep variants)
+configs/acc1_r147tight.yaml
+configs/acc1_r200_mlm05.yaml
+configs/acc1_v14pp_r12p1.yaml
+configs/acc1_v14pp_r15p1.yaml
+configs/acc1_v14pp_r20p1.yaml
+configs/acc1_v14pp_v3.yaml

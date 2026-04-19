@@ -122,8 +122,8 @@ class StrategySettings(StrictSettingsModel):
     swing_lookback: int = 10
     volatility_window: int = 20
     signal_threshold: float = 0.58
-    sideways_volatility_threshold: float = 0.004
-    strong_volatility_threshold: float = 0.012
+    sideways_volatility_threshold: float = 0.0020
+    strong_volatility_threshold: float = 0.0055
     news_block_minutes: int = 30
     rsi_long_threshold: float = 55.0
     rsi_short_threshold: float = 45.0
@@ -219,6 +219,8 @@ class RiskSettings(StrictSettingsModel):
     partial_tp_enabled: bool = False
     partial_tp_rr: float = 1.0             # Close partial_tp_pct at 1R profit
     partial_tp_pct: float = 0.5            # Close 50% of position at partial_tp_rr
+    # Score multiplier: when False, all trades use full risk_per_trade (score_mult=1.0)
+    score_multiplier_enabled: bool = True
     risk_throttle_rules: list[RiskThrottleRuleSettings] = Field(default_factory=list)
 
 

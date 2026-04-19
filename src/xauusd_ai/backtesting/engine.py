@@ -528,10 +528,13 @@ def simulate_dynamic_concurrent_backtest(
         # G10: Apply score multiplier
         _strat_score = float(getattr(row, 'strategy_score', 0.5))
         _abs_score = abs(_strat_score)
-        if _abs_score >= 0.5:
-            _score_mult = 1.0
+        if bool(getattr(settings.risk, 'score_multiplier_enabled', True)):
+            if _abs_score >= 0.5:
+                _score_mult = 1.0
+            else:
+                _score_mult = 0.7 + 0.6 * _abs_score
         else:
-            _score_mult = 0.7 + 0.6 * _abs_score
+            _score_mult = 1.0  # score_multiplier_enabled=False → always full size
         rf *= _score_mult
 
         # Anti-martingale: reduce risk after consecutive losses
