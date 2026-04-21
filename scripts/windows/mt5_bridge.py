@@ -25,6 +25,7 @@ import logging
 import os
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from socketserver import ThreadingMixIn
 from urllib.parse import urlparse, parse_qs
 
 logging.basicConfig(
@@ -95,8 +96,19 @@ def _init_mt5() -> bool:
 
 
 def _ensure() -> None:
-    """Re-initialize if connection was dropped."""
-    if mt5.terminal_info() is None:
+    """Re-initialize if connection was dropped or account switched mid-session."""
+    terminal_gone = mt5.terminal_info() is None
+    if not terminal_gone:
+        expected_login = int(os.getenv("MT5_LOGIN", "0"))
+        if expected_login:
+            info = mt5.account_info()
+            account_wrong = info is not None and info.login != expected_login
+            if account_wrong:
+                log.warning("Account switched mid-session! expected=%s got=%s. Re-initializing...",
+                            expected_login, info.login)
+                mt5.shutdown()
+                terminal_gone = True
+    if terminal_gone:
         if not _init_mt5():
             raise RuntimeError(f"MT5 not connected: {mt5.last_error()}")
 
@@ -585,11 +597,16 @@ class _Handler(BaseHTTPRequestHandler):
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 
+class _ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+    """Handle each HTTP request in a separate thread so one blocked MT5 call
+    (e.g. copy_rates_from_pos retry loop) cannot freeze the entire server."""
+    daemon_threads = True
+
 if __name__ == "__main__":
     print(f"MT5 Bridge starting on port {PORT} ...")
     if not _init_mt5():
         print("WARNING: MT5 init failed at startup — will retry on first request.")
-    server = HTTPServer(("0.0.0.0", PORT), _Handler)
+    server = _ThreadedHTTPServer(("0.0.0.0", PORT), _Handler)
     print(f"MT5 Bridge ready -> http://localhost:{PORT}/health")
     print("Keep this window open while live bots are running.")
     try:
