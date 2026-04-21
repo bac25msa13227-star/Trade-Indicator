@@ -78,6 +78,19 @@ def _init_mt5() -> bool:
              info.login if info else "?",
              info.server if info else "?",
              info.balance if info else "?")
+
+    # Verify the connected account matches the expected login
+    expected_login = int(login) if login else None
+    if expected_login and info and info.login != expected_login:
+        log.error(
+            "MT5 connected to WRONG account! expected=%s but got=%s (%s). "
+            "Open the MT5 terminal manually and log in to the correct account, "
+            "then restart this bridge.",
+            expected_login, info.login, info.server
+        )
+        mt5.shutdown()
+        return False
+
     return True
 
 
