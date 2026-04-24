@@ -20,13 +20,25 @@ Or with explicit credentials (overrides env vars):
 from __future__ import annotations
 
 import datetime as _dt
+import ipaddress
 import json
 import logging
 import os
 import sys
+import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 from urllib.parse import urlparse, parse_qs
+
+# IPs allowed to call the bridge (localhost + Docker private subnets).
+# External internet traffic is rejected with 403.
+_ALLOWED_NETWORKS = [
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+]
 
 logging.basicConfig(
     level=logging.INFO,
@@ -462,6 +474,205 @@ def op_market_state(symbol: str, stale_seconds: int = 300) -> dict:
     }
 
 
+# ── News cache (ForexFactory schedule + TradingView actuals via Windows PowerShell) ──
+import threading as _threading
+_news_ff_cache: list = []
+_news_ff_cache_ts: float = 0.0
+_news_ff_fetch_lock = _threading.Lock()
+_tv_actuals_cache: list = []          # last successful TradingView actuals (preserved on TV failure)
+_tv_actuals_cache_ts: float = 0.0
+_TV_ACTUALS_MAX_AGE = 7200.0          # reuse TV actuals up to 2 hours old when TV is unavailable
+# ForexFactory JSON — event names, forecast, previous, impact (no actual values — schedule-only feed)
+_NEWS_FF_URLS = [
+    "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+    "https://nfs.faireconomy.media/ff_calendar_thismonth.json",
+]
+# TradingView economic calendar — has real-time actual values after release
+_TV_CAL_URL = "https://economic-calendar.tradingview.com/events"
+_TV_CURRENCIES = ["US", "EU", "GB", "JP", "AU", "NZ", "CA", "CH", "CN"]
+# category keywords for matching FF events to TV events (by currency + time + category)
+_TV_MATCH_KW = [
+    "manufacturing", "services", "composite", "cpi", "ppi", "gdp", "nfp",
+    "payroll", "employment", "unemployment", "jobless", "retail", "trade",
+    "confidence", "sentiment", "michigan", "ism", "housing", "building",
+    "durable", "current account", "interest rate", "fomc", "fed", "ecb", "boe",
+    "rba", "rbnz", "boc", "snb", "boj", "inflation", "balance",
+]
+_NEWS_FF_CACHE_TTL = 120.0  # 2 min — aggressive refresh so actuals appear quickly after release
+
+
+def _fetch_ps_get(url: str) -> object | None:
+    """GET a URL via PowerShell (Windows Schannel TLS — bypasses Cloudflare fingerprinting)."""
+    import subprocess as _sp, json as _json
+    ps_script = (
+        "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;"
+        f"$h=@{{'User-Agent'='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';"
+        f"'Accept'='application/json, */*';'Referer'='https://www.forexfactory.com/';'Accept-Language'='en-US,en;q=0.9'}};"
+        f"$r=Invoke-WebRequest '{url}' -Headers $h -UseBasicParsing -TimeoutSec 12;"
+        f"Write-Output $r.Content"
+    )
+    try:
+        result = _sp.run(
+            ["powershell", "-NonInteractive", "-NoProfile", "-Command", ps_script],
+            capture_output=True, timeout=20, encoding="utf-8", errors="replace",
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            log.debug("PS GET %s failed (rc=%s): %s", url, result.returncode, result.stderr[:200])
+            return None
+        return _json.loads(result.stdout.strip())
+    except Exception as exc:
+        log.debug("PS GET %s error: %s", url, exc)
+        return None
+
+
+def _fetch_tv_actuals() -> list:
+    """Fetch TradingView economic calendar (POST) — returns events with actual values.
+    TV importance: 1=High, 0=Medium, -1=Low/None
+    """
+    import subprocess as _sp, json as _json, datetime as _dt
+    now_utc = _dt.datetime.utcnow()
+    from_s  = (now_utc - _dt.timedelta(days=3)).strftime("%Y-%m-%dT00:00:00.000Z")
+    to_s    = (now_utc + _dt.timedelta(days=5)).strftime("%Y-%m-%dT23:59:59.000Z")
+    countries = _json.dumps(_TV_CURRENCIES)
+    body_json = f'{{"from":"{from_s}","to":"{to_s}","countries":{countries}}}'
+    ps_script = (
+        "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;"
+        f"$b=[System.Text.Encoding]::UTF8.GetBytes('{body_json}');"
+        f"$r=Invoke-WebRequest '{_TV_CAL_URL}' -Method POST -Body $b"
+        f" -ContentType 'application/json'"
+        f" -Headers @{{'Origin'='https://www.tradingview.com';'Referer'='https://www.tradingview.com/'}}"
+        f" -UseBasicParsing -TimeoutSec 12;"
+        f"Write-Output $r.Content"
+    )
+    try:
+        result = _sp.run(
+            ["powershell", "-NonInteractive", "-NoProfile", "-Command", ps_script],
+            capture_output=True, timeout=22, encoding="utf-8", errors="replace",
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            log.debug("TV actuals fetch failed (rc=%s): %s", result.returncode, result.stderr[:200])
+            return []
+        data = _json.loads(result.stdout.strip())
+        return data.get("result", []) if isinstance(data, dict) else []
+    except Exception as exc:
+        log.debug("TV actuals fetch error: %s", exc)
+        return []
+
+
+def _merge_tv_actuals(ff_events: list, tv_events: list) -> None:
+    """Inject TradingView actual values into ForexFactory events in-place.
+    Matches by: same currency + event time within ±5 min + shared category keyword.
+    """
+    import datetime as _dt, re as _re
+
+    def _parse_utc(s: str) -> "_dt.datetime | None":
+        if not s:
+            return None
+        try:
+            ts = _dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
+            return ts.astimezone(_dt.timezone.utc)
+        except Exception:
+            return None
+
+    # Build TV lookup: (currency_upper, 5-min-bucket) → list of (title_lower, actual_str)
+    tv_lookup: dict = {}
+    for ev in tv_events:
+        actual_raw = ev.get("actual")
+        if actual_raw is None:
+            continue
+        actual_str = str(actual_raw).strip()
+        if not actual_str:
+            continue
+        ccy = str(ev.get("currency") or "").upper()
+        dt  = _parse_utc(str(ev.get("date") or ""))
+        if not ccy or dt is None:
+            continue
+        # 5-min bucket: key = (currency, doy_min // 5) where doy_min = total minutes from day start
+        bucket = (ccy, (dt.hour * 60 + dt.minute) // 5)  # 5-min slot
+        tv_lookup.setdefault(bucket, []).append((str(ev.get("title") or "").lower(), actual_str))
+
+    for ff_ev in ff_events:
+        if ff_ev.get("actual"):
+            continue  # already has actual
+        ccy = str(ff_ev.get("country") or ff_ev.get("currency") or "").upper()
+        dt  = _parse_utc(str(ff_ev.get("date") or ""))
+        if not ccy or dt is None:
+            continue
+        ff_title_lower = str(ff_ev.get("title") or "").lower()
+        # Check ±5 min buckets (one 5-min window on each side)
+        center_bucket = dt.hour * 60 + dt.minute
+        for offset in (0, -5, 5):
+            b = (ccy, (center_bucket + offset) // 5)
+            candidates = tv_lookup.get(b, [])
+            for tv_title_lower, actual_str in candidates:
+                # both must share at least one category keyword
+                if any(kw in ff_title_lower and kw in tv_title_lower for kw in _TV_MATCH_KW):
+                    ff_ev["actual"] = actual_str
+                    break
+            if ff_ev.get("actual"):
+                break
+
+
+def op_fetch_news() -> dict:
+    """Fetch economic calendar: ForexFactory JSON (schedule/forecast) + TradingView (actuals).
+    ForexFactory provides event names familiar to traders.
+    TradingView fills in real-time actual values after each event releases.
+    Returns: {"events": [...], "source": str, "cached": bool, "ts": float}
+    """
+    global _news_ff_cache, _news_ff_cache_ts
+    now = time.time()
+    if _news_ff_cache and now - _news_ff_cache_ts < _NEWS_FF_CACHE_TTL:
+        return {"events": _news_ff_cache, "source": "cached", "cached": True, "ts": now}
+
+    with _news_ff_fetch_lock:
+        now = time.time()
+        if _news_ff_cache and now - _news_ff_cache_ts < _NEWS_FF_CACHE_TTL:
+            return {"events": _news_ff_cache, "source": "cached", "cached": True, "ts": now}
+
+        # Step 1: Fetch ForexFactory schedule (event names, forecast, previous, impact)
+        ff_events: list = []
+        for ff_url in _NEWS_FF_URLS:
+            raw = _fetch_ps_get(ff_url)
+            if isinstance(raw, list) and raw:
+                for ev in raw:
+                    ev.setdefault("actual", "")
+                ff_events = raw
+                log.info("ForexFactory schedule fetched: %d events from %s", len(raw), ff_url)
+                break
+
+        if not ff_events:
+            # FF completely unavailable — return stale or empty
+            if _news_ff_cache:
+                log.warning("ForexFactory unavailable — returning stale cache (%d events)", len(_news_ff_cache))
+                return {"events": _news_ff_cache, "source": "stale", "cached": True, "ts": _news_ff_cache_ts}
+            log.error("ForexFactory fetch failed and no cache available")
+            return {"events": [], "source": "error", "cached": False, "ts": now}
+
+        # Step 2: Fetch TradingView actuals (use stale TV cache if TV temporarily unavailable)
+        global _tv_actuals_cache, _tv_actuals_cache_ts
+        tv_events = _fetch_tv_actuals()
+        if tv_events:
+            _tv_actuals_cache = tv_events
+            _tv_actuals_cache_ts = now
+            log.debug("TV actuals fetched: %d events", len(tv_events))
+        elif _tv_actuals_cache and now - _tv_actuals_cache_ts < _TV_ACTUALS_MAX_AGE:
+            tv_events = _tv_actuals_cache
+            log.info("TradingView unavailable — reusing cached TV actuals (%d events, age %.0fs)",
+                     len(tv_events), now - _tv_actuals_cache_ts)
+        else:
+            log.warning("TradingView actuals unavailable — FF events have no actual values this cycle")
+
+        if tv_events:
+            _merge_tv_actuals(ff_events, tv_events)
+            n_actual = sum(1 for e in ff_events if e.get("actual"))
+            log.info("TradingView actuals merged: %d/%d FF events now have actual", n_actual, len(ff_events))
+
+        _news_ff_cache = ff_events
+        _news_ff_cache_ts = now
+        return {"events": ff_events, "source": "forexfactory+tv", "cached": False, "ts": now}
+
+
+
 def op_get_history_deals(symbol: str, since_epoch: float, magic: int | None = None) -> list:
     """Return all OUT deals for symbol since since_epoch (Unix timestamp)."""
     import datetime as _dt
@@ -518,6 +729,14 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):  # silence default access log
         pass
 
+    def _is_allowed(self) -> bool:
+        """Return True if the client IP is on an allowed (private/local) network."""
+        try:
+            addr = ipaddress.ip_address(self.client_address[0])
+            return any(addr in net for net in _ALLOWED_NETWORKS)
+        except ValueError:
+            return False
+
     def _send_json(self, code: int, obj) -> None:
         data = json.dumps(obj, default=str).encode("utf-8")
         self.send_response(code)
@@ -527,10 +746,21 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _body(self) -> dict:
+        """Read and parse JSON body; return empty dict on missing/invalid body."""
         length = int(self.headers.get("Content-Length", 0))
-        return json.loads(self.rfile.read(length)) if length else {}
+        if not length:
+            return {}
+        raw = self.rfile.read(length)
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise ValueError(f"Invalid JSON body: {exc}") from exc
 
     def do_GET(self):
+        if not self._is_allowed():
+            log.warning("Blocked request from external IP: %s", self.client_address[0])
+            self._send_json(403, {"error": "forbidden"})
+            return
         parsed = urlparse(self.path)
         qs = parse_qs(parsed.query)
         path = parsed.path
@@ -564,6 +794,9 @@ class _Handler(BaseHTTPRequestHandler):
                 symbol = qs.get("symbol", ["XAUUSD"])[0]
                 stale_seconds = int(qs.get("stale_seconds", ["300"])[0])
                 self._send_json(200, op_market_state(symbol, stale_seconds))
+            elif path == "/news":
+                # Proxy ForexFactory JSON via Windows host IP (avoids Docker NAT rate-limit)
+                self._send_json(200, op_fetch_news())
             else:
                 self._send_json(404, {"error": "not found"})
         except Exception as exc:
@@ -571,10 +804,14 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(500, {"error": str(exc)})
 
     def do_POST(self):
+        if not self._is_allowed():
+            log.warning("Blocked request from external IP: %s", self.client_address[0])
+            self._send_json(403, {"error": "forbidden"})
+            return
         parsed = urlparse(self.path)
         path   = parsed.path
-        body   = self._body()
         try:
+            body = self._body()  # moved inside try so JSONDecodeError is caught
             if path == "/order":
                 self._send_json(200, op_place_order(body))
             elif "/positions/" in path and path.endswith("/close"):
@@ -602,10 +839,45 @@ class _ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     (e.g. copy_rates_from_pos retry loop) cannot freeze the entire server."""
     daemon_threads = True
 
+
+def _watchdog(interval: int = 60) -> None:
+    """Background thread: reconnects MT5 if the terminal disconnects.
+    Runs every `interval` seconds. Does not stop the bridge if reconnect fails;
+    the next operator request will surface the error via _ensure()."""
+    while True:
+        time.sleep(interval)
+        try:
+            if mt5.terminal_info() is None:
+                log.warning("Watchdog: MT5 terminal_info() is None — attempting reconnect...")
+                if _init_mt5():
+                    log.info("Watchdog: MT5 reconnected OK")
+                else:
+                    log.error("Watchdog: MT5 reconnect FAILED — will retry next cycle")
+            else:
+                # Also check that connected account matches expected
+                expected = int(os.getenv("MT5_LOGIN", "0"))
+                if expected:
+                    info = mt5.account_info()
+                    if info and info.login != expected:
+                        log.warning(
+                            "Watchdog: account mismatch expected=%s got=%s — reconnecting",
+                            expected, info.login
+                        )
+                        mt5.shutdown()
+                        _init_mt5()
+        except Exception as exc:
+            log.error("Watchdog error: %s", exc)
+
+
 if __name__ == "__main__":
     print(f"MT5 Bridge starting on port {PORT} ...")
     if not _init_mt5():
         print("WARNING: MT5 init failed at startup — will retry on first request.")
+    # Start background MT5 watchdog
+    _wt = threading.Thread(target=_watchdog, kwargs={"interval": 60}, daemon=True, name="mt5-watchdog")
+    _wt.start()
+    # Bind to all interfaces so Docker containers on host.docker.internal can reach us.
+    # External traffic is blocked by the _is_allowed() IP-allowlist in the handler.
     server = _ThreadedHTTPServer(("0.0.0.0", PORT), _Handler)
     print(f"MT5 Bridge ready -> http://localhost:{PORT}/health")
     print("Keep this window open while live bots are running.")

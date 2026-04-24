@@ -1118,11 +1118,21 @@ _DASHBOARD_CACHE_TTL = 30.0  # seconds — longer than build time to avoid thras
 
 # ── News constants & helpers ──────────────────────────────────────────────────
 
-_FF_NEWS_WEEK_URL  = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
-_FF_NEWS_MONTH_URL = "https://nfs.faireconomy.media/ff_calendar_thismonth.json"
-_NEWS_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; XAUBot/1.0)"}
-_NEWS_CACHE_TTL = 300.0   # 5 min default — short enough to catch actuals, avoids FF 429
-_NEWS_CACHE_TTL_POST_EVENT = 60.0  # reduce to 1 min for 10 min after an event fires
+_FF_NEWS_URLS = [
+    "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+    "https://cdn-nfs.faireconomy.media/ff_calendar_thisweek.json",
+    "https://nfs.faireconomy.media/ff_calendar_thismonth.json",
+    "https://cdn-nfs.faireconomy.media/ff_calendar_thismonth.json",
+]
+_NEWS_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.forexfactory.com/",
+    "Cache-Control": "no-cache",
+}
+_NEWS_CACHE_TTL = 300.0          # 5 min default
+_NEWS_CACHE_TTL_POST_EVENT = 90.0  # 90s after event fires (was 60s — less aggressive avoids 429)
 
 _NEWS_GOLD_DIR: dict[str, int] = {
     "Non-Farm Payroll": -1, "Nonfarm Payrolls": -1, "NF Payrolls": -1,
@@ -1268,28 +1278,43 @@ def _build_news_payload() -> dict[str, Any]:
         return _news_cache
 
 
-def _fetch_news_uncached() -> dict[str, Any]:
-    """Directly fetch ForexFactory JSON and process events."""
+# Bridge URLs for news proxy (Docker containers cannot reach ForexFactory directly — Cloudflare rate-limits Docker NAT IPs)
+_BRIDGE_NEWS_URLS = [
+    "http://host.docker.internal:5600/news",
+    "http://host.docker.internal:5601/news",
+]
+
+
+def _fetch_news_via_bridge() -> list | None:
+    """Fetch ForexFactory events via the Windows MT5 bridge (which has a clean host IP).
+    Falls back to second bridge if first is unavailable.
+    Returns list of raw events, or None on failure.
+    """
     import requests as _req
+    for url in _BRIDGE_NEWS_URLS:
+        try:
+            r = _req.get(url, timeout=65)
+            if r.status_code == 200:
+                payload = r.json()
+                events = payload.get("events", [])
+                if events:
+                    logger.debug("News via bridge %s: %d events (cached=%s)", url, len(events), payload.get("cached"))
+                    return events
+        except Exception as exc:
+            logger.debug("Bridge news %s failed: %s", url, exc)
+    return None
+
+
+def _fetch_news_uncached() -> dict[str, Any]:
+    """Fetch ForexFactory news via Windows bridge proxy (avoids Docker NAT Cloudflare rate-limit)."""
     from datetime import datetime as _dt, timezone as _tz
 
     now_utc = _dt.now(_tz.utc)
     today_date = now_utc.date()
 
-    raw_events: list[dict] = []
-    for url in [_FF_NEWS_WEEK_URL, _FF_NEWS_MONTH_URL]:
-        try:
-            r = _req.get(url, headers=_NEWS_HEADERS, timeout=15)
-            if r.status_code == 429:
-                logger.warning("ForexFactory rate-limited (429) — keeping stale cache")
-                break  # don't try fallback URL, just keep existing cache
-            r.raise_for_status()
-            data = r.json()
-            if isinstance(data, list) and data:
-                raw_events = data
-                break
-        except Exception as exc:
-            logger.debug("News fetch from %s failed: %s", url, exc)
+    raw_events: list[dict] = _fetch_news_via_bridge() or []
+    if not raw_events:
+        logger.warning("All ForexFactory URLs failed — keeping stale cache")
 
     # Currencies that directly influence gold (skip exotic/irrelevant ones)
     _GOLD_CURRENCIES = {
@@ -2140,6 +2165,7 @@ async def _news_alert_loop() -> None:
                             f"⬅️ Trước: <b>{previous}</b>  🎯 Dự báo: <b>{forecast}</b>  ✅ Thực tế: <b>{actual}</b>\n"
                             f"🏅 Vàng: {label}"
                         )
+                        logger.info("News alert RELEASED: %s %s actual=%s", ev['currency'], ev['event'], actual)
                         await loop.run_in_executor(None, _tg_news_send, msg)
 
                 # ── Just passed — fire immediately even without actual ────────

@@ -78,12 +78,13 @@ def _send_telegram(token: str, chat_id: str, text: str) -> bool:
 def _build_message(url: str, custom_prefix: str = "") -> str:
     import datetime as dt
     now_str = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    dashboard_url = url.rstrip("/") + "/dashboard"
     lines = []
     if custom_prefix:
         lines.append(custom_prefix)
     lines += [
         "🚀 <b>XAUUSD AI Dashboard — New Tunnel URL</b>",
-        f"🌐 <a href='{url}'>{url}</a>",
+        f"🌐 <a href='{dashboard_url}'>{dashboard_url}</a>",
         f"⏰ {now_str}",
         "",
         "<i>URL này sẽ thay đổi mỗi lần khởi động lại cloudflared.</i>",
