@@ -5,11 +5,53 @@ __pycache__/
 *.pyo
 .env
 
-# outputs — ignore bulk data/logs, keep model artifacts (pkl via LFS, json meta)
+# outputs — ignore bulk data/logs, keep model artifacts and runtime state
 outputs/*.csv
 outputs/*.txt
 outputs/*.jsonl
+outputs/*.log
+outputs/*.png
+outputs/*.tmp
 outputs/news_cache/
+outputs/archive/
+outputs/models/
+
+# Temp/debug scripts dropped in outputs/
+outputs/*.py
+outputs/test_write.pkl
+
+# Old unversioned models (use acc*_v14pp_* instead)
+outputs/model.pkl
+outputs/model_acc1.pkl
+outputs/model_meta.json
+outputs/model_meta_acc1.json
+outputs/scaler.pkl
+outputs/scaler_acc1.pkl
+
+# One-off experiment/benchmark JSONs
+outputs/exp_*.json
+outputs/verify_benchmark_*.json
+outputs/wf_ab_test_*.json
+outputs/wf_exact_recovery_*.json
+outputs/walkforward_progress.json
+outputs/walkforward_log_*.txt
+outputs/training_report*.json
+outputs/live_deploy_report_*.md
+
+# Runtime bot state (generated locally, changes every run)
+outputs/live_status_*.json
+outputs/entry_rsi_tracker_*.json
+outputs/entry_snapshot_tracker_*.json
+outputs/reentry_guard_*.json
+outputs/risk_peak_balance_acc*.json
+outputs/risk_daily_state.json
+outputs/fxstreet_cache.json
+outputs/news_events.json
+
+# Cloudflare / tunnel (changes on every restart)
+outputs/tunnel_url.txt
+outputs/tunnel_err.txt
+outputs/tunnel_out.txt
 
 # Cloudflare tunnel binary (large, OS-specific)
 cloudflared.exe
