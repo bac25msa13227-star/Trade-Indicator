@@ -404,6 +404,9 @@ class TrainingSettings(StrictSettingsModel):
     use_ensemble: bool = False
     # Feature selection: drop bottom N% by RF importance. 0 = disabled.
     feature_selection_drop_pct: int = 0
+    # Offset applied to the optimized ML threshold at inference time.
+    # Negative = accept more signals (lower threshold), positive = stricter.
+    ml_threshold_offset: float = 0.0
 
 
 class NotificationSettings(StrictSettingsModel):

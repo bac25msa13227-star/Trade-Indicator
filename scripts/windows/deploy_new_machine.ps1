@@ -80,12 +80,12 @@ LogOk "Dependencies installed"
 # ── Verify model artifacts ────────────────────────────────────────────────────
 LogStep "STEP 4/9 — Verify model artifacts"
 $artifacts = @(
-    "outputs\acc1_v14pp_model.pkl",
-    "outputs\acc1_v14pp_scaler.pkl",
-    "outputs\acc1_v14pp_model_meta.json",
-    "outputs\acc2_v14pp_model.pkl",
-    "outputs\acc2_v14pp_scaler.pkl",
-    "outputs\acc2_v14pp_model_meta.json"
+    "outputs\acc1_combo133_202604_model.pkl",
+    "outputs\acc1_combo133_202604_scaler.pkl",
+    "outputs\acc1_combo133_202604_meta.json",
+    "outputs\acc2_v14pp_202604_model.pkl",
+    "outputs\acc2_v14pp_202604_scaler.pkl",
+    "outputs\acc2_v14pp_202604_meta.json"
 )
 $missingArtifacts = 0
 foreach ($f in $artifacts) {
@@ -110,8 +110,8 @@ from pathlib import Path
 from xauusd_ai.config import load_settings
 errors = 0
 for cfg, expected_model in [
-    ('configs/live_acc1.yaml', 'outputs/acc1_v14pp_model.pkl'),
-    ('configs/live_acc2.yaml', 'outputs/acc2_v14pp_model.pkl'),
+    ('configs/live_acc1.yaml', 'outputs/acc1_combo133_202604_model.pkl'),
+    ('configs/live_acc2.yaml', 'outputs/acc2_v14pp_202604_model.pkl'),
 ]:
     s = load_settings(Path(cfg))
     model_ok = str(s.app.model_path) == expected_model

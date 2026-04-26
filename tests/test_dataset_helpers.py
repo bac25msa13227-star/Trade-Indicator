@@ -57,6 +57,7 @@ class DatasetHelperTests(unittest.TestCase):
 
         dataset = pd.DataFrame(
             {
+                "open": [100.0, 100.4, 100.1, 99.4],
                 "close": [100.0, 100.5, 100.2, 99.5],
                 "high": [100.2, 102.2, 101.0, 100.0],
                 "low": [99.8, 100.0, 98.8, 98.9],
@@ -76,6 +77,7 @@ class DatasetHelperTests(unittest.TestCase):
 
         dataset = pd.DataFrame(
             {
+                "open": [100.0, 100.4, 100.1, 99.4],
                 "close": [100.0, 100.5, 100.2, 99.5],
                 "high": [100.2, 102.2, 101.0, 100.0],
                 "low": [99.8, 100.0, 98.8, 98.9],
@@ -83,7 +85,7 @@ class DatasetHelperTests(unittest.TestCase):
                 "expected_direction": [1, -1, 1, 1],
             }
         )
-        rr, bars = _compute_sltp_realized_rr(dataset, settings)
+        rr, bars, peak_rr = _compute_sltp_realized_rr(dataset, settings)
         self.assertEqual(len(rr), len(dataset))
         self.assertEqual(len(bars), len(dataset))
         self.assertGreaterEqual(float(rr.iloc[0]), 1.0)

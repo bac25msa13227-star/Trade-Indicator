@@ -1,8 +1,9 @@
+# Model: outputs/acc2_v14pp_202604_model.pkl  [frozen 2026-04, V14++ strategy]
 app:
   poll_seconds: 60
-  model_path: outputs/acc2_v14pp_model.pkl
-  scaler_path: outputs/acc2_v14pp_scaler.pkl
-  model_meta_path: outputs/acc2_v14pp_model_meta.json
+  model_path: outputs/acc2_v14pp_202604_model.pkl
+  scaler_path: outputs/acc2_v14pp_202604_scaler.pkl
+  model_meta_path: outputs/acc2_v14pp_202604_meta.json
   training_report_path: outputs/training_report_acc2.json
   training_plot_path: outputs/training_metrics_acc2.png
   backtest_report_path: outputs/backtest_report_acc2.json

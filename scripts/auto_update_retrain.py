@@ -24,7 +24,7 @@ Cron (macOS / Linux) — run every day at 06:00 UTC:
 Notes:
   * yfinance M5 data is only available for the last ~60 days.  Running at least
     once a month keeps the CSV fully up to date.
-  * The model artifacts saved here (acc1_v14pp_model.pkl etc.) are identical in
+  * The model artifacts saved here (acc1_combo133_202604_model.pkl etc.) are identical in
     format to the trainer.py pipeline — live bots reload them automatically.
   * A new model is saved ONLY when the validation fold shows net P&L > 0 (safety
     gate).  The previous model is kept as *.bak if a new one is accepted.
@@ -78,9 +78,9 @@ OUTPUTS_DIR       = ROOT / "outputs"
 STATE_FILE        = OUTPUTS_DIR / "combo133_retrain_state.json"
 RETRAIN_LOG       = OUTPUTS_DIR / "combo133_retrain_log.jsonl"
 
-MODEL_PATH        = OUTPUTS_DIR / "acc1_v14pp_model.pkl"
-SCALER_PATH       = OUTPUTS_DIR / "acc1_v14pp_scaler.pkl"
-META_PATH         = OUTPUTS_DIR / "acc1_v14pp_model_meta.json"
+MODEL_PATH        = OUTPUTS_DIR / "acc1_combo133_202604_model.pkl"
+SCALER_PATH       = OUTPUTS_DIR / "acc1_combo133_202604_scaler.pkl"
+META_PATH         = OUTPUTS_DIR / "acc1_combo133_202604_meta.json"
 
 # GC=F → XAUUSDm price conversion ratio
 GCF_RATIO         = 0.9952
