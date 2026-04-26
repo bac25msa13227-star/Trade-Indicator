@@ -978,10 +978,10 @@ body::after{
               <span id="auto-trade-status" class="dim">Loading…</span>
             </div>
             <div class="quick-grid">
-              <button class="quick-btn" id="btn-at-acc1-on"  onclick="setAutoTrade('acc1',true)">ACC1 ON</button>
-              <button class="quick-btn" id="btn-at-acc1-off" onclick="setAutoTrade('acc1',false)">ACC1 OFF</button>
-              <button class="quick-btn" id="btn-at-acc2-on"  onclick="setAutoTrade('acc2',true)">ACC2 ON</button>
-              <button class="quick-btn" id="btn-at-acc2-off" onclick="setAutoTrade('acc2',false)">ACC2 OFF</button>
+              <button class="quick-btn" id="btn-at-acc1-on"  title="Bật auto trade cho ACC1 — bot sẽ tự động đặt lệnh theo tín hiệu" onclick="setAutoTrade('acc1',true)">ACC1 ON</button>
+              <button class="quick-btn" id="btn-at-acc1-off" title="Tắt auto trade cho ACC1 — bot dừng đặt lệnh mới (lệnh đang mở không bị ảnh hưởng)" onclick="setAutoTrade('acc1',false)">ACC1 OFF</button>
+              <button class="quick-btn" id="btn-at-acc2-on"  title="Bật auto trade cho ACC2 — bot sẽ tự động đặt lệnh theo tín hiệu" onclick="setAutoTrade('acc2',true)">ACC2 ON</button>
+              <button class="quick-btn" id="btn-at-acc2-off" title="Tắt auto trade cho ACC2 — bot dừng đặt lệnh mới (lệnh đang mở không bị ảnh hưởng)" onclick="setAutoTrade('acc2',false)">ACC2 OFF</button>
             </div>
           </div>
 
@@ -1205,8 +1205,9 @@ function confBar(conf,thresh){
   </div>`;
 }
 
-function statBox(lbl,val,cls='',sub=''){
-  return `<div class="sb"><div class="slbl">${lbl}</div><div class="sval-sm ${cls}">${val}</div>${sub?`<div class="ssub">${sub}</div>`:''}</div>`;
+function statBox(lbl,val,cls='',sub='',tip=''){
+  const ta=tip?` title="${tip}"`:''; 
+  return `<div class="sb"${ta}><div class="slbl">${lbl}</div><div class="sval-sm ${cls}">${val}</div>${sub?`<div class="ssub">${sub}</div>`:''}</div>`;
 }
 
 function computeTradeQualityScore(input){
@@ -1497,32 +1498,32 @@ function renderOverview(acct,d){
 
   el(`sb-${acct}-overview`).innerHTML=`
   <div class="g6" style="margin-bottom:12px">
-    <div class="sb" style="border-left:3px solid ${(d.total_pnl||0)>=0?'var(--green)':'var(--red)'}">
+    <div class="sb" title="Số dư tài khoản MT5 real-time từ bridge. Peak = đỉnh balance lịch sử." style="border-left:3px solid ${(d.total_pnl||0)>=0?'var(--green)':'var(--red)'}">
       <div class="slbl">Balance</div>
       <div class="sval ${(d.total_pnl||0)>=0?'win':'loss'}">${dol(s.account_balance)}</div>
       <div class="ssub">Peak ${dol(d.peak_balance)}</div>
     </div>
-    <div class="sb" style="border-left:3px solid ${(d.total_pnl||0)>=0?'var(--green)':'var(--red)'}">
+    <div class="sb" title="Tổng P&L từ tất cả lệnh đã đóng trong live trading (không phải backtest/WF)." style="border-left:3px solid ${(d.total_pnl||0)>=0?'var(--green)':'var(--red)'}">
       <div class="slbl">Total Live PnL</div>
       <div class="sval ${(d.total_pnl||0)>=0?'win':'loss'}">${dol(d.total_pnl)}</div>
       <div class="ssub">${trades.length} closed trades</div>
     </div>
-    <div class="sb" style="border-left:3px solid var(--accent)">
+    <div class="sb" title="Win Rate từ live closed trades thực tế (không phải backtest). Cập nhật theo số lệnh đã đóng." style="border-left:3px solid var(--accent)">
       <div class="slbl">Win Rate</div>
       <div class="sval">${pct(d.win_rate)}</div>
       <div class="ssub">last ${trades.length} trades</div>
     </div>
-    <div class="sb" style="border-left:3px solid ${(d.drawdown_pct||0)>10?'var(--red)':(d.drawdown_pct||0)>5?'var(--yellow)':'var(--bdr)'}">
+    <div class="sb" title="% drawdown hiện tại từ peak balance. Cảnh báo vàng >5%, đỏ >10%. Bot có thể kích kill switch nếu vượt max_drawdown_kill_pct." style="border-left:3px solid ${(d.drawdown_pct||0)>10?'var(--red)':(d.drawdown_pct||0)>5?'var(--yellow)':'var(--bdr)'}">
       <div class="slbl">Drawdown</div>
       <div class="sval ${(d.drawdown_pct||0)>5?'loss':''}">${d.drawdown_pct!=null?d.drawdown_pct+'%':'&#8212;'}</div>
       <div class="ssub">from peak</div>
     </div>
-    <div class="sb" style="border-left:3px solid var(--purple)">
+    <div class="sb" title="Số lệnh đang mở / Tối đa cho phép đồng thời. Bot sẽ không mở lệnh mới nếu đã đạt max_positions." style="border-left:3px solid var(--purple)">
       <div class="slbl">Positions</div>
       <div class="sval">${s.open_positions??'0'}<span style="font-size:.75rem;font-weight:400;color:var(--text3)"> / ${s.max_positions??'&#8212;'}</span></div>
       <div class="ssub">Volatility: ${vrBadge}</div>
     </div>
-    <div class="sb" style="border-left:3px solid ${cbActive?'var(--red)':'var(--green)'}">
+    <div class="sb" title="Circuit breaker: NORMAL = hoạt động bình thường | Cooldown Xb = nghỉ X bar sau chuỗi thua liên tiếp | KILL SWITCH = dừng hoàn toàn do vượt daily_loss_limit hoặc max_drawdown_kill." style="border-left:3px solid ${cbActive?'var(--red)':'var(--green)'}">
       <div class="slbl">Circuit Breaker</div>
       <div class="sval-sm" style="padding-top:4px"><span class="${cbActive?'bdg bdg-warn':'bdg bdg-ok'}">${cbTxt}</span></div>
       <div class="ssub">${day.consecutive_losses||0} consec losses</div>
@@ -1530,22 +1531,22 @@ function renderOverview(acct,d){
   </div>
 
   <div class="g4" style="margin-bottom:12px">
-    <div class="sb" style="border-left:3px solid ${canaryEnabled?'var(--yellow)':'var(--bdr)'}">
+    <div class="sb" title="Canary Deploy: chạy bot với volume nhỏ hơn (canary_volume_fraction) để test model mới trước khi full deploy. ACTIVE = đang chạy mode thử nghiệm." style="border-left:3px solid ${canaryEnabled?'var(--yellow)':'var(--bdr)'}">
       <div class="slbl">Canary Deploy</div>
       <div class="sval-sm"><span class="${canaryEnabled?'bdg bdg-y':'bdg bdg-n'}">${canaryEnabled?'ACTIVE':'OFF'}</span></div>
       <div class="ssub">Volume ${canaryFraction!=null?fmt(canaryFraction,2):'1.00'}x</div>
     </div>
-    <div class="sb" style="border-left:3px solid ${rollbackEnabled?'var(--accent)':'var(--bdr)'}">
+    <div class="sb" title="Auto Rollback: tự động quay lại model/config cũ nếu performance xấu theo tiêu chí đã định. auto_rollback_count = số lần đã rollback." style="border-left:3px solid ${rollbackEnabled?'var(--accent)':'var(--bdr)'}">
       <div class="slbl">Auto Rollback</div>
       <div class="sval-sm"><span class="${rollbackEnabled?'bdg bdg-ok':'bdg bdg-n'}">${rollbackEnabled?'ENABLED':'OFF'}</span></div>
       <div class="ssub">Count ${rollbackCount} ${rollbackReason?`· ${q(rollbackReason).slice(0,44)}`:''}</div>
     </div>
-    <div class="sb" style="border-left:3px solid ${healthAlerts.length?'var(--red)':'var(--green)'}">
+    <div class="sb" title="Data Health: giám sát chất lượng data feed. ALERT = có vấn đề cần chú ý. tick age = giây từ tick cuối, spread = spread hiện tại." style="border-left:3px solid ${healthAlerts.length?'var(--red)':'var(--green)'}">
       <div class="slbl">Data Health</div>
       <div class="sval-sm ${healthStateCls}">${healthState}</div>
       <div class="ssub">tick ${tickAge!=null?fmt(tickAge,1)+'s':'—'} · spread ${spreadNow!=null?fmt(spreadNow,3):'—'}</div>
     </div>
-    <div class="sb" style="border-left:3px solid ${(bridgeDiv!=null&&bridgeDiv>1.5)?'var(--red)':'var(--bdr)'}">
+    <div class="sb" title="Bridge vs Feed: chênh lệch giá (points) giữa MT5 bridge và data feed thị trường. >1.5 = cảnh báo lệch feed có thể ảnh hưởng tín hiệu." style="border-left:3px solid ${(bridgeDiv!=null&&bridgeDiv>1.5)?'var(--red)':'var(--bdr)'}">
       <div class="slbl">Bridge vs Feed</div>
       <div class="sval-sm ${(bridgeDiv!=null&&bridgeDiv>1.5)?'loss':''}">${bridgeDiv!=null?fmt(bridgeDiv,3):'—'}</div>
       <div class="ssub">Divergence points</div>
@@ -1612,27 +1613,27 @@ function renderOverview(acct,d){
     <div class="card">
       <div class="card-ttl">&#128200; Model Performance</div>
       <div class="model-g">
-        <div class="model-c">
+        <div class="model-c" title="TP/(TP+FP) — % tín hiệu model đoán đúng hướng trên test set. Combo133 ≈ 46.4%">
           <div class="slbl">Precision</div>
           <div class="sval-sm ${mod.precision!=null&&+mod.precision>0.5?'win':'loss'}">${mod.precision!=null?(+mod.precision*100).toFixed(1)+'%':'&#8212;'}</div>
         </div>
-        <div class="model-c" style="border-color:rgba(245,158,11,.25)">
+        <div class="model-c" style="border-color:rgba(245,158,11,.25)" title="Decision threshold từ meta JSON. Xem dòng Thr(model/cfg/risk/effective) bên dưới để hiểu toàn bộ chain ngưỡng.">
           <div class="slbl">Threshold</div>
           <div class="sval-sm" style="color:var(--yellow)">${mod.threshold!=null?(+mod.threshold).toFixed(4):'&#8212;'}</div>
         </div>
-        <div class="model-c">
+        <div class="model-c" title="ROC-AUC: diện tích dưới đường ROC (0.5=random, 1.0=perfect). >0.55 là có edge cho signal. Combo133 ≈ 0.54 (signal-level, không phải trade-level).">
           <div class="slbl">ROC-AUC</div>
           <div class="sval-sm ${mod.roc_auc!=null&&+mod.roc_auc>0.5?'win':'loss'}">${mod.roc_auc!=null?(+mod.roc_auc).toFixed(4):'&#8212;'}</div>
         </div>
-        <div class="model-c">
+        <div class="model-c" title="TP/(TP+FN) — Tỷ lệ model bắt được các cơ hội thực sự trong dữ liệu test. Combo133 recall cao vì threshold thấp (0.49).">
           <div class="slbl">Recall</div>
           <div class="sval-sm">${mod.recall!=null?(+mod.recall*100).toFixed(1)+'%':'&#8212;'}</div>
         </div>
-        <div class="model-c">
+        <div class="model-c" title="Harmonic mean của Precision và Recall: 2*(P*R)/(P+R). Cân bằng giữa bắt nhiều tín hiệu (recall) và chất lượng (precision).">
           <div class="slbl">F1 Score</div>
           <div class="sval-sm">${mod.f1!=null?(+mod.f1).toFixed(3):'&#8212;'}</div>
         </div>
-        <div class="model-c">
+        <div class="model-c" title="% dự đoán đúng tổng thể. Ít ý nghĩa hơn AUC khi dữ liệu mất cân bằng (imbalanced). Ưu tiên xem Precision và ROC-AUC.">
           <div class="slbl">Accuracy</div>
           <div class="sval-sm">${mod.accuracy!=null?(+mod.accuracy*100).toFixed(1)+'%':'&#8212;'}</div>
         </div>
@@ -1648,17 +1649,17 @@ function renderOverview(acct,d){
       </div>
       <div class="dvd"><span>Backtest Summary</span></div>
       <div class="g4">
-        ${statBox('Return',pctR(bt.return_pct),(bt.return_pct||0)>=0?'win':'loss')}
-        ${statBox('Profit Factor',fmt(bt.profit_factor))}
-        ${statBox('Win Rate',pct(bt.win_rate))}
-        ${statBox('Max DD',pctR(bt.max_drawdown_pct),'loss')}
+        ${statBox('Return',pctR(bt.return_pct),(bt.return_pct||0)>=0?'win':'loss','','% lợi nhuận từ WF aggregate (avg 6 fold gần nhất). Concurrent sim, non-compound per fold.')}
+        ${statBox('Profit Factor',fmt(bt.profit_factor),'','','Gross profit / Gross loss qua toàn bộ WF. PF > 1.5 = tốt; PF > 2.0 = rất tốt.')}
+        ${statBox('Win Rate',pct(bt.win_rate),'','','% lệnh thắng trong toàn bộ WF concurrent sim. Combo133 ≈ 46-47%.')}
+        ${statBox('Max DD',pctR(bt.max_drawdown_pct),'loss','','Max Drawdown tệ nhất trong các fold WF. Fold 7 (Jul2024) là fold DD cao nhất.')}
       </div>
       <div class="dvd"><span>Walkforward Summary</span></div>
       <div class="g4">
-        ${statBox('Avg Precision',pct(wfAgg.avg_precision))}
-        ${statBox('Avg Win Rate',pct(wfSim.avg_win_rate ?? wfAgg.signal_win_rate),(toNum(wfSim.avg_win_rate ?? wfAgg.signal_win_rate)??0)>=0.5?'win':'loss')}
-        ${statBox('Avg PF',fmt(wfSim.avg_profit_factor))}
-        ${statBox('Avg Max DD',pctR(wfSim.avg_max_drawdown_pct),'loss')}
+        ${statBox('Avg Precision',pct(wfAgg.avg_precision),'','','Signal precision trung bình qua các fold: TP/(TP+FP) ≈ win rate. Combo133 ≈ 46.4%.')}
+        ${statBox('Avg Win Rate',pct(wfSim.avg_win_rate ?? wfAgg.signal_win_rate),(toNum(wfSim.avg_win_rate ?? wfAgg.signal_win_rate)??0)>=0.5?'win':'loss','','Win rate trung bình per-fold (27/28 folds profitable). Combo133 avg ≈ 45.3%.')}
+        ${statBox('Avg PF',fmt(wfSim.avg_profit_factor),'','','Profit factor trung bình per-fold. Combo133 avg ≈ 1.96.')}
+        ${statBox('Avg Max DD',pctR(wfSim.avg_max_drawdown_pct),'loss','','Max drawdown trung bình per-fold (mỗi fold reset $200). Combo133 avg ≈ 17.5%.')}
       </div>
       <div class="dvd"><span>Locked Benchmark</span></div>
       <div class="g4">
@@ -2717,8 +2718,51 @@ document.body.classList.toggle('compact',State.compact);
 if(el('signal-limit-text')) el('signal-limit-text').textContent=`${State.signalLimit} rows`;
 if(el('signal-limit-bubble')) el('signal-limit-bubble').textContent=`${State.signalLimit} rows`;
 
+/* ═══ AUTO-TRADE CONFIRM MODAL ═══ */
+let _atModalResolver=null;
+function _closeAtModal(ok){
+  const modal=el('at-modal');
+  if(!modal) return;
+  modal.classList.remove('show');
+  modal.setAttribute('aria-hidden','true');
+  document.body.classList.remove('modal-open');
+  const resolve=_atModalResolver;
+  _atModalResolver=null;
+  if(resolve) resolve(!!ok);
+}
+function showAutoTradeConfirmModal(acct,enabled){
+  const modal=el('at-modal');
+  if(!modal) return Promise.resolve(window.confirm(`${enabled?'BẬT':'TẮT'} Auto Trade cho ${acct.toUpperCase()}?`));
+  const titleEl=el('at-modal-title');
+  const descEl=el('at-modal-desc');
+  const acctEl=el('at-modal-acct');
+  const actionEl=el('at-modal-action');
+  if(titleEl) titleEl.textContent=`${enabled?'Bật':'Tắt'} Auto Trade — ${acct.toUpperCase()}?`;
+  if(descEl) descEl.textContent=enabled
+    ?'Bot sẽ tự động đặt lệnh khi có tín hiệu đủ điều kiện. Hành động này ảnh hưởng trực tiếp đến tài khoản thực.'
+    :'Bot sẽ DỪNG đặt lệnh mới. Các lệnh đang mở KHÔNG bị đóng.';
+  if(acctEl) acctEl.textContent=acct.toUpperCase();
+  if(actionEl){actionEl.textContent=enabled?'AUTO ON ✓':'AUTO OFF ✗';actionEl.style.color=enabled?'var(--green)':'var(--red)';}
+  modal.classList.add('show');
+  modal.setAttribute('aria-hidden','false');
+  document.body.classList.add('modal-open');
+  return new Promise(resolve=>{_atModalResolver=resolve;});
+}
+document.addEventListener('click',e=>{
+  if(e.target.closest('[data-at-modal-confirm]')){_closeAtModal(true);return;}
+  if(e.target.closest('[data-at-modal-close]')){_closeAtModal(false);return;}
+  if(e.target.id==='at-modal') _closeAtModal(false);
+});
+document.addEventListener('keydown',e=>{
+  if(e.key!=='Escape') return;
+  const modal=el('at-modal');
+  if(modal&&modal.classList.contains('show')) _closeAtModal(false);
+});
+
 /* ═══ AUTO-TRADE TOGGLE ═══ */
 async function setAutoTrade(acct, enabled){
+  const confirmed=await showAutoTradeConfirmModal(acct,enabled);
+  if(!confirmed) return;
   const btnOn=el(`btn-at-${acct}-on`);
   const btnOff=el(`btn-at-${acct}-off`);
   if(btnOn) btnOn.disabled=true;
@@ -2837,6 +2881,32 @@ function _stopPoll(){if(_pollTimer){clearInterval(_pollTimer);_pollTimer=null;}}
 _fetchNews();
 setInterval(_fetchNews, 5 * 60 * 1000);
 </script>
+<div id="at-modal" class="pm-backdrop" aria-hidden="true">
+  <div class="pm-card" role="dialog" aria-modal="true">
+    <div class="pm-head">
+      <div class="pm-kicker">⚠ Xác nhận thao tác</div>
+      <button class="pm-x" type="button" data-at-modal-close>&times;</button>
+    </div>
+    <div class="pm-body">
+      <div id="at-modal-title" class="pm-title">Thay đổi trạng thái Auto Trade?</div>
+      <div id="at-modal-desc" class="pm-desc">Hành động này ảnh hưởng trực tiếp đến tài khoản thực. Xác nhận trước khi tiếp tục.</div>
+      <div class="pm-grid">
+        <div class="pm-box">
+          <div class="pm-lbl">Tài khoản</div>
+          <div id="at-modal-acct" class="pm-val">ACC1</div>
+        </div>
+        <div class="pm-box">
+          <div class="pm-lbl">Trạng thái mới</div>
+          <div id="at-modal-action" class="pm-val" style="color:var(--green)">AUTO ON ✓</div>
+        </div>
+      </div>
+    </div>
+    <div class="pm-foot">
+      <button class="pm-btn" type="button" data-at-modal-close>Hủy bỏ</button>
+      <button class="pm-btn ok" type="button" data-at-modal-confirm>Xác nhận</button>
+    </div>
+  </div>
+</div>
 <div id="profile-modal" class="pm-backdrop" aria-hidden="true">
   <div class="pm-card" role="dialog" aria-modal="true" aria-labelledby="pm-title">
     <div class="pm-head">
