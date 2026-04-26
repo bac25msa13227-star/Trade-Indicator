@@ -873,14 +873,14 @@ body::after{
           <span class="acct-d"></span>
           <span>
             <div style="font-weight:700;font-size:.77rem">ACC1</div>
-            <div style="font-size:.6rem;color:var(--text3)">PROFIT · sc=0.85</div>
+            <div id="sb-acct-sub-acc1" style="font-size:.6rem;color:var(--text3)" title="sc = sideway_min_confidence: ngưỡng confidence tối thiểu khi thị trường sideway">COMBO133 · sc=0.70</div>
           </span>
         </button>
         <button class="acct-btn" data-acct="acc2">
           <span class="acct-d"></span>
           <span>
             <div style="font-weight:700;font-size:.77rem">ACC2</div>
-            <div style="font-size:.6rem;color:var(--text3)">COMPOSITE · sc=0.88</div>
+            <div id="sb-acct-sub-acc2" style="font-size:.6rem;color:var(--text3)" title="sc = sideway_min_confidence: ngưỡng confidence tối thiểu khi thị trường sideway">V14PP · sc=0.88</div>
           </span>
         </button>
       </div>
@@ -923,8 +923,8 @@ body::after{
 
     <!-- MOBILE ACCOUNT CHIPS -->
     <div class="mob-acct-bar" id="mob-acct-bar">
-      <button class="mac active" data-acct="acc1">ACC1 &middot; PROFIT</button>
-      <button class="mac" data-acct="acc2">ACC2 &middot; COMPOSITE</button>
+      <button class="mac active" data-acct="acc1" id="mob-mac-acc1">ACC1 &middot; COMBO133</button>
+      <button class="mac" data-acct="acc2" id="mob-mac-acc2">ACC2 &middot; V14PP</button>
     </div>
 
     <section class="sunny-deck" id="sunny-deck">
@@ -945,12 +945,12 @@ body::after{
               <strong id="sunny-regime-display">Stand by</strong>
             </div>
             <div class="sunny-mini">
-              <span>Signal Edge</span>
-              <strong id="sunny-signal-pulse">Stand by for live score</strong>
+              <span title="Signal Edge: hướng &amp; confidence live so với threshold. Ví dụ 'SELL / 0.512 vs 0.490' = model cho confidence 0.512 hướng SELL, ngưỡng là 0.490.">Signal Edge</span>
+              <strong id="sunny-signal-pulse" title="Định dạng: [BUY/SELL/hold] / [confidence] vs [threshold]">Stand by for live score</strong>
             </div>
             <div class="sunny-mini">
-              <span>Threat Level</span>
-              <strong id="sunny-risk-mood">Risk core idle</strong>
+              <span title="Threat Level: trạng thái rủi ro hiện tại. Armed=sẵn sàng giao dịch | Guarded=chưa đủ điều kiện | Cooldown Xb=nghỉ X bar sau chuỗi thua | Kill switch=đã kích hoạt ngắt lỗ tự động.">Threat Level</span>
+              <strong id="sunny-risk-mood" title="Armed=sẵn sàng | Guarded=chờ điều kiện | Cooldown=hạ nhiệt | Kill switch=dừng giao dịch">Risk core idle</strong>
             </div>
             <div class="sunny-mini">
               <span>Live PnL</span>
@@ -1428,9 +1428,18 @@ function renderOverview(acct,d){
   const wfSim=wfAgg.concurrent_sim||{};
   const bench=d.benchmark||{};
   const runtime=d.runtime||{};
-  const cfg=acct==='acc2'
-    ? {mode:'COMPOSITE',minConf:0.88,decThr:0.46,silvBoost:0.03,consecPause:3,riskPct:0.04,tpRR:3.5,sideTpRR:2.5,volTpRR:5.0,dailyLoss:0.12,maxDDKill:0.15,sideRiskMul:0.60,volRiskMul:0.80}
-    : {mode:'PROFIT',   minConf:0.85,decThr:0.44,silvBoost:0.05,consecPause:3,riskPct:0.04,tpRR:3.5,sideTpRR:2.5,volTpRR:5.0,dailyLoss:0.12,maxDDKill:0.20,sideRiskMul:1.00,volRiskMul:0.70};
+  const cfg=(() => {
+    const rtMinConf=toNum(runtime.risk_min_confidence);
+    const rtDecThr=toNum(runtime.threshold_config);
+    const rtConsecPause=toNum(runtime.consecutive_loss_pause_count);
+    const rtDailyLoss=toNum(runtime.daily_loss_limit_pct);
+    const rtMaxDDKill=toNum(runtime.max_drawdown_kill_pct);
+    const rtSideConf=toNum(runtime.sideway_min_confidence);
+    const rtVolConf=toNum(runtime.volatile_min_confidence);
+    return acct==='acc2'
+      ? {mode:'V14PP',    minConf:rtMinConf??0.88,  decThr:rtDecThr??0.46, sideConf:rtSideConf??0.88, volConf:rtVolConf??0.88, silvBoost:0.03,consecPause:rtConsecPause??3,riskPct:0.04,tpRR:3.5,sideTpRR:2.5,volTpRR:5.0,dailyLoss:rtDailyLoss??0.12,maxDDKill:rtMaxDDKill??0.15,sideRiskMul:0.60,volRiskMul:0.80}
+      : {mode:'COMBO133', minConf:rtMinConf??0.70, decThr:rtDecThr??0.60, sideConf:rtSideConf??0.70, volConf:rtVolConf??0.70, silvBoost:0.05,consecPause:rtConsecPause??3,riskPct:0.04,tpRR:3.5,sideTpRR:2.5,volTpRR:5.0,dailyLoss:rtDailyLoss??0.12,maxDDKill:rtMaxDDKill??0.20,sideRiskMul:1.00,volRiskMul:0.70};
+  })();
   const trades=d.recent_trades||[];const sig=(d.recent_signals||[]).slice(-1)[0]||{};
   const cbActive=day.killed||day.cooldown_bars>0;
   const cbTxt=day.killed?'KILL SWITCH':day.cooldown_bars>0?`Cooldown ${day.cooldown_bars}b`:'NORMAL';
@@ -1544,21 +1553,21 @@ function renderOverview(acct,d){
   </div>
 
   <div class="card" style="margin-bottom:12px">
-    <div class="card-ttl">&#9881; Strategy Config &mdash; ${acct.toUpperCase()} / <span class="${cfg.mode==='PROFIT'?'win':'muted'}">${cfg.mode}</span></div>
+    <div class="card-ttl">&#9881; Strategy Config &mdash; ${acct.toUpperCase()} / <span class="win">${cfg.mode}</span></div>
     <div class="g6">
-      ${statBox('Min Confidence','<b style="color:var(--yellow);font-family:var(--m)">'+(cfg.minConf*100).toFixed(0)+'%</b>','','Risk gate threshold')}
-      ${statBox('Decision Thr','<b style="font-family:var(--m)">'+cfg.decThr.toFixed(2)+'</b>','','Model output gate')}
-      ${statBox('Risk / Trade',(cfg.riskPct*100).toFixed(0)+'%','','Fixed fractional')}
-      ${statBox('Consec Pause',cfg.consecPause+' losses','','Then cooldown 12 bars')}
-      ${statBox('Silver Bullet','+'+cfg.silvBoost.toFixed(2),'win','Conf boost on window')}
-      ${statBox('Partial TP','1.2R &rarr; 50%','','Close half at 1.2R')}
+      ${statBox('Min Conf (Normal)','<b style="color:var(--yellow);font-family:var(--m)">'+(cfg.minConf*100).toFixed(0)+'%</b>','','risk.min_confidence — ngưỡng confidence cho chế độ Normal')}
+      ${statBox('Min Conf (Sideway)','<b style="color:var(--yellow);font-family:var(--m)">'+(cfg.sideConf*100).toFixed(0)+'%</b>','','sideway_min_confidence (sc=) — thị trường đi ngang')}
+      ${statBox('Min Conf (Volatile)','<b style="color:var(--yellow);font-family:var(--m)">'+(cfg.volConf*100).toFixed(0)+'%</b>','','volatile_min_confidence — thị trường biến động cao')}
+      ${statBox('Signal Thr (ML)','<b style="font-family:var(--m)">'+cfg.decThr.toFixed(2)+'</b>','','strategy.signal_threshold — ML model output gate')}
+      ${statBox('Consec Pause',cfg.consecPause+' losses','','Cooldown sau chuỗi thua liên tiếp')}
+      ${statBox('Partial TP','1.2R &rarr; 50%','','Đóng nửa lệnh tại 1.2R')}
     </div>
     <div class="g6" style="margin-top:8px">
       ${statBox('TP RR',cfg.tpRR+'R &middot; '+cfg.sideTpRR+'R &middot; '+cfg.volTpRR+'R','','Normal / Sideway / Vol')}
-      ${statBox('Daily Loss Limit',(cfg.dailyLoss*100).toFixed(0)+'%','loss','Kill if exceeded')}
-      ${statBox('Max DD Kill',(cfg.maxDDKill*100).toFixed(0)+'%','loss','Hard kill switch')}
-      ${statBox('Sideway Risk',cfg.sideRiskMul.toFixed(2)+'&times;',cfg.sideRiskMul<1?'loss':'','Risk multiplier')}
-      ${statBox('Vol Risk',cfg.volRiskMul.toFixed(2)+'&times;',cfg.volRiskMul<1?'loss':'','Risk multiplier')}
+      ${statBox('Daily Loss Limit',(cfg.dailyLoss*100).toFixed(0)+'%','loss','Kill nếu lỗ vượt giới hạn')}
+      ${statBox('Max DD Kill',(cfg.maxDDKill*100).toFixed(0)+'%','loss','Kill switch tự động')}
+      ${statBox('Sideway Risk',cfg.sideRiskMul.toFixed(2)+'&times;',cfg.sideRiskMul<1?'loss':'','Hệ số rủi ro Sideway')}
+      ${statBox('Vol Risk',cfg.volRiskMul.toFixed(2)+'&times;',cfg.volRiskMul<1?'loss':'','Hệ số rủi ro Volatile')}
       ${statBox('Strategy Weights','ICT 40% &middot; WYC 35% &middot; MOM 25%','dim','')}
     </div>
   </div>
@@ -1631,11 +1640,11 @@ function renderOverview(acct,d){
       <div style="font-size:.67rem;color:var(--text3);margin:3px 0 10px;text-align:right">
         Train ${mod.train_rows!=null?(+mod.train_rows).toLocaleString():''} rows &#183; WF ${mod.wf_n_folds??'?'} folds &#183; Avg prec ${mod.wf_precision_avg!=null?(+mod.wf_precision_avg*100).toFixed(1)+'%':'&#8212;'}
       </div>
-      <div style="font-size:.67rem;color:var(--text3);margin:-4px 0 10px;text-align:right">
+      <div style="font-size:.67rem;color:var(--text3);margin:-4px 0 10px;text-align:right" title="model=decision_threshold trong meta JSON | cfg=strategy.signal_threshold trong live config | risk=risk.min_confidence (execution guard) | effective=ngưỡng thực tế được dùng (= cfg)">
         Thr(model/cfg/risk/effective): ${fmt(thrModel,4)} / ${fmt(thrCfg,4)} / ${fmt(thrRisk,4)} / <b style="color:var(--yellow)">${fmt(thr,4)}</b>
       </div>
       <div style="font-size:.67rem;color:${bindingOk?'var(--green)':'var(--red)'};margin:-6px 0 8px;text-align:right">
-        Model binding: ${bindingOk?'OK':'MISMATCH'}${bindingMismatch.length?` (${bindingMismatch.join(', ')})`:''}
+        Model binding: ${bindingOk?'&#10003; OK':'&#9888; MISMATCH'}${!bindingOk&&bindingMismatch.length?`<br><span style="color:var(--text3)">Expected: ${(mod.binding_required?.model||'?').split('/').pop()}</span><br><span style="color:var(--text3)">Actual: ${(mod.binding_actual?.model||'?').split('/').pop()}</span>`:''}
       </div>
       <div class="dvd"><span>Backtest Summary</span></div>
       <div class="g4">
@@ -2334,6 +2343,14 @@ function updateUI(data){
   const ts=(data.ts||'').replace('T',' ').slice(0,19)+' UTC';
   ['pc-ts','mob-ts'].forEach(id=>{ const e=el(id); if(e) e.textContent=ts; });
   _checkAlerts(data);
+  // Update sidebar SC labels dynamically from runtime config
+  ['acc1','acc2'].forEach(a=>{
+    const rt=(data?.accounts?.[a]?.runtime)||{};
+    const sc=toNum(rt.sideway_min_confidence);
+    const modelName=a==='acc1'?'COMBO133':'V14PP';
+    const subEl=el(`sb-acct-sub-${a}`);
+    if(subEl&&sc!=null) subEl.textContent=`${modelName} · sc=${sc.toFixed(2)}`;
+  });
   ['acc1','acc2'].forEach(a=>{ if((data.accounts||{})[a]) switchSection(a,State.sec[a]); });
   renderSunnyDeck();
 }

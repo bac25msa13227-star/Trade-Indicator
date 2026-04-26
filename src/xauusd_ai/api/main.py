@@ -69,14 +69,14 @@ _LIVE_CFG_MAP: dict[str, Path] = {
 }
 _REQUIRED_MODEL_BINDINGS: dict[str, dict[str, str]] = {
     "acc1": {
-        "model": "outputs/acc1_breakthrough_net66590_dd3953_model.pkl",
-        "scaler": "outputs/acc1_breakthrough_net66590_dd3953_scaler.pkl",
-        "meta": "outputs/acc1_breakthrough_net66590_dd3953_model_meta.json",
+        "model": "outputs/acc1_combo133_202604_model.pkl",
+        "scaler": "outputs/acc1_combo133_202604_scaler.pkl",
+        "meta": "outputs/acc1_combo133_202604_meta.json",
     },
     "acc2": {
-        "model": "outputs/acc2_breakthrough_net21k_dd2333_model.pkl",
-        "scaler": "outputs/acc2_breakthrough_net21k_dd2333_scaler.pkl",
-        "meta": "outputs/acc2_breakthrough_net21k_dd2333_model_meta.json",
+        "model": "outputs/acc2_v14pp_202604_model.pkl",
+        "scaler": "outputs/acc2_v14pp_202604_scaler.pkl",
+        "meta": "outputs/acc2_v14pp_202604_meta.json",
     },
 }
 _BENCHMARK_VERIFY_FILE = Path(os.getenv("BENCHMARK_VERIFY_FILE", "outputs/wf_exact_recovery_verify_2016501.json"))
@@ -1254,11 +1254,16 @@ _news_cache_lock = _threading.Lock()
 # Track sent Telegram alerts: "{event_id}_{milestone}"
 _news_alerted: set[str] = set()
 _news_last_event_ts: float = 0.0  # monotonic time when last _past fired (shorter TTL window)
+# Intraday accumulation: keyed by event id, reset each calendar day
+_news_seen_today: dict[str, dict] = {}
+_news_seen_date: str = ""  # "YYYY-MM-DD" — reset when date changes
 
 
 def _build_news_payload() -> dict[str, Any]:
-    """Return news calendar with adaptive-TTL cache (shorter for 10 min after event fires)."""
-    global _news_cache, _news_cache_ts
+    """Return news calendar with adaptive-TTL cache (shorter for 10 min after event fires).
+    Accumulates today's events in-memory so past items are never lost on re-fetch.
+    """
+    global _news_cache, _news_cache_ts, _news_seen_today, _news_seen_date
     now = time.monotonic()
     # Use short TTL for 10 min after any event just-fired (_past branch)
     effective_ttl = (
@@ -1269,6 +1274,39 @@ def _build_news_payload() -> dict[str, Any]:
         if _news_cache and now - _news_cache_ts < effective_ttl:
             return _news_cache
         result = _fetch_news_uncached()
+        # Merge new events into the intraday accumulator so past events are not lost
+        from datetime import datetime as _dt2, timezone as _tz2
+        today_str = _dt2.now(_tz2.utc).strftime("%Y-%m-%d")
+        if _news_seen_date != today_str:
+            _news_seen_today = {}
+            _news_seen_date = today_str
+        for ev in result.get("week", []):
+            ev_id = ev.get("id")
+            if ev_id:
+                # Always overwrite with latest (captures actual values as they are released)
+                _news_seen_today[ev_id] = ev
+        # Rebuild today list from accumulated set, not just the fresh fetch
+        if _news_seen_today:
+            all_seen = sorted(_news_seen_today.values(), key=lambda e: e.get("datetime_iso", ""))
+            from datetime import datetime as _dt3, timezone as _tz3
+            now_utc3 = _dt3.now(_tz3.utc)
+            for ev in all_seen:
+                try:
+                    ev_dt = _dt3.fromisoformat(ev["datetime_iso"])
+                    if ev_dt.tzinfo is None:
+                        ev_dt = ev_dt.replace(tzinfo=_tz3.utc)
+                    ev["minutes_until"] = round((ev_dt - now_utc3).total_seconds() / 60, 1)
+                except Exception:
+                    pass
+            result_today = [e for e in all_seen if e.get("is_today")]
+            result["today"] = result_today
+            # Also include all seen events in week list (merged with fresh week)
+            fresh_ids = {e.get("id") for e in result.get("week", [])}
+            extra = [e for e in _news_seen_today.values() if e.get("id") not in fresh_ids]
+            if extra:
+                merged_week = list(result.get("week", [])) + extra
+                merged_week.sort(key=lambda e: e.get("datetime_iso", ""))
+                result["week"] = merged_week
         # Only replace cache if we got real data — don't overwrite with empty (FF rate-limit / timeout)
         if result.get("week"):
             _news_cache = result
