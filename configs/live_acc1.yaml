@@ -66,9 +66,9 @@ strategy:
   ict_weight: 0.40
   wyckoff_weight: 0.35
   momentum_weight: 0.25
-  min_strategy_score: 0.05
-  sideway_min_strategy_score: 0.10
-  strong_volatility_min_strategy_score: 0.35
+  min_strategy_score: 0.00
+  sideway_min_strategy_score: 0.00
+  strong_volatility_min_strategy_score: 0.00
   require_trend_alignment: false    # no_align+sc=0.78: +$68/wk, 86% pos weeks
   force_trade: false
   blocked_hours_utc: [3, 15, 17, 22, 23]
@@ -133,7 +133,7 @@ risk:
   volatility_risk_scaling_enabled: false  # COMBO #133: TẮT — model wins during ATR spikes
   max_total_exposure_pct: 0.30
   reentry_guard_enabled: true
-  reentry_cooldown_bars_after_sl: 3
+  reentry_cooldown_bars_after_sl: 5
   reentry_min_distance_atr: 0.35
   # Partial Take Profit — book at 1.5R (better quality exits than 1.0R)
   partial_tp_enabled: true
@@ -213,6 +213,11 @@ training:
   live_learning_min_rows: 500
   min_self_learning_roc_auc: 0.53
   optimize_threshold: false          # Giữ threshold 0.62 cố định theo benchmark ACC1
+  backtest_initial_balance: 200.0
+  threshold_min: 0.40
+  threshold_max: 0.78
+  threshold_step: 0.01
+  min_precision_floor: 0.45
 
 notifications:
   telegram_enabled: true

@@ -11,6 +11,7 @@ from xauusd_ai.features.dataset import (
     _compute_sltp_realized_rr,
     _expected_direction_from_context,
     _session_spread_multiplier,
+    get_label_lookahead_bars,
 )
 
 
@@ -90,6 +91,20 @@ class DatasetHelperTests(unittest.TestCase):
         self.assertEqual(len(bars), len(dataset))
         self.assertGreaterEqual(float(rr.iloc[0]), 1.0)
         self.assertGreaterEqual(int(bars.iloc[0]), 1)
+
+    def test_label_lookahead_prefers_sltp_horizon(self) -> None:
+        settings = Settings()
+        settings.training.label_horizon = 8
+        settings.training.use_sltp_label = True
+        settings.training.sltp_label_max_horizon = 32
+        self.assertEqual(get_label_lookahead_bars(settings), 32)
+
+    def test_label_lookahead_uses_label_horizon_when_no_sltp(self) -> None:
+        settings = Settings()
+        settings.training.label_horizon = 12
+        settings.training.use_sltp_label = False
+        settings.training.sltp_label_max_horizon = 64
+        self.assertEqual(get_label_lookahead_bars(settings), 12)
 
 
 if __name__ == "__main__":

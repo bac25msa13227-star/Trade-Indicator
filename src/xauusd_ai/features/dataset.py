@@ -122,6 +122,21 @@ def _build_date_mask(series: pd.Series, start: str | None, end: str | None) -> p
     return mask
 
 
+def get_label_lookahead_bars(settings: Settings) -> int:
+    """Return the maximum forward-look bars used by labeling logic.
+
+    Rows in the tail of a train split can leak into the test window when labels
+    require future bars (label_horizon / SLTP horizon). Callers should drop this
+    many rows from the end of train before fitting.
+    """
+    base_horizon = int(getattr(settings.training, "label_horizon", 1) or 1)
+    lookahead = max(base_horizon, 1)
+    if bool(getattr(settings.training, "use_sltp_label", True)):
+        sltp_horizon = int(getattr(settings.training, "sltp_label_max_horizon", lookahead) or lookahead)
+        lookahead = max(lookahead, sltp_horizon)
+    return max(lookahead, 1)
+
+
 def _enrich_execution_frame(settings: Settings, frame: pd.DataFrame) -> pd.DataFrame:
     enriched = frame.copy()
     enriched["returns"] = enriched["close"].pct_change().fillna(0)

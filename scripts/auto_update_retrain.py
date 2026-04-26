@@ -661,24 +661,16 @@ def _run_backtest_on_fold(
     )
 
     _apply_live_overrides(settings)
+    settings.training.backtest_initial_balance = starting_bal
     risk_mgr = RiskManager(settings)
 
-    try:
-        trades_df, _ = simulate_dynamic_concurrent_backtest(
-            fold_sim_df,
-            settings=settings,
-            risk_manager=risk_mgr,
-            starting_balance=starting_bal,
-            m1_df=None,
-        )
-    except TypeError:
-        # Older engine signature without m1_df
-        trades_df, _ = simulate_dynamic_concurrent_backtest(
-            fold_sim_df,
-            settings=settings,
-            risk_manager=risk_mgr,
-            starting_balance=starting_bal,
-        )
+    sim_result = simulate_dynamic_concurrent_backtest(
+        fold_sim_df,
+        settings=settings,
+        risk_manager=risk_mgr,
+        m1_df=None,
+    )
+    trades_df = sim_result.trades
 
     if trades_df is None or trades_df.empty:
         return 0.0, 0.0, 0

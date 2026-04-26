@@ -109,10 +109,10 @@ strategy:
   ict_weight: 0.40
   wyckoff_weight: 0.35
   momentum_weight: 0.25
-  min_strategy_score: 0.05
-  sideway_min_strategy_score: 0.10
-  strong_volatility_min_strategy_score: 0.35
-  require_trend_alignment: true
+  min_strategy_score: 0.00
+  sideway_min_strategy_score: 0.00
+  strong_volatility_min_strategy_score: 0.00
+  require_trend_alignment: false
   force_trade: false
   blocked_hours_utc: [3, 15, 17, 22, 23]    # COMBO #133: block giờ này
   blocked_weekdays_utc: []
@@ -143,8 +143,8 @@ strategy:
   silver_bullet_confidence_boost: 0.05
   adx_gate_enabled: true
   adx_min_trend: 15.0
-  sideway_min_confidence: 0.85
-  volatile_min_confidence: 0.85
+  sideway_min_confidence: 0.70
+  volatile_min_confidence: 0.70
   d1_trend_gate: false                       # COMBO #133: D1 gate TẮT (counter-productive, -87%)
 
 risk:
@@ -157,7 +157,7 @@ risk:
   entry_slippage_atr_frac: 0.07
   volatile_take_profit_rr: 5.0
   sideway_take_profit_rr: 2.5
-  min_confidence: 0.85
+  min_confidence: 0.70
   fixed_lot: 0.01
   max_risk_fraction: 0.08
   sideway_risk_multiplier: 1.0

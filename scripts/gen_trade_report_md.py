@@ -1,13 +1,9 @@
 #!/usr/bin/env python3
-"""
-Generate detailed Markdown trade report for Combo #133
-Includes: fold summary, monthly breakdown, all 11,668 trades table
-"""
+"""Generate detailed Markdown trade report for the current Combo #133 dataset."""
 from __future__ import annotations
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from datetime import timezone
 
 CSV_PATH = Path("outputs/combo133_trades.csv")
 OUT_PATH = Path("outputs/combo133_trade_report.md")
@@ -17,6 +13,8 @@ df = pd.read_csv(CSV_PATH)
 df["time"] = pd.to_datetime(df["time"], utc=True)
 df["date"] = df["time"].dt.date
 df["month"] = df["time"].dt.strftime("%Y-%m")
+period_start = df["time"].min().strftime("%Y-%m-%d")
+period_end = df["time"].max().strftime("%Y-%m-%d")
 
 # Outcome labels
 def outcome(row):
@@ -81,13 +79,14 @@ monthly["cum_pnl"] = monthly["tong_pnl"].cumsum()
 lines = []
 A = lines.append
 
-A("# Báo Cáo Giao Dịch — Combo #133 (XAUUSD AI)")
+A("# Báo Cáo Giao Dịch — Combo #133 Anti-Leak (XAUUSD AI)")
 A("")
 A("> **Cấu hình:** min_confidence=0.70 | require_trend=False | blocked_hours=[3,15,17,22,23]  ")
 A("> **Model:** VotingClassifier (HGB×1 + RF×1 + ET×1, weights 3:2:1)  ")
 A("> **RR mục tiêu:** 3.5:1 (Volatile: 5.0:1) | **Partial TP:** 1.2R (50%) | **Trail:** kích hoạt tại 1.0R  ")
 A("> **Vốn ban đầu mỗi fold:** $200 | **Dữ liệu:** XAUUSD M5 Dukascopy  ")
-A(f"> **Tổng lệnh:** {len(df):,} | **Kỳ:** Jan 2024 – Apr 2026  ")
+A(f"> **Tổng lệnh:** {len(df):,} | **Kỳ:** {period_start} – {period_end}  ")
+A("> **Nguồn:** outputs/combo133_trades.csv (đã regenerate từ pipeline anti-leak)  ")
 A("")
 
 # ─ Overall stats ─

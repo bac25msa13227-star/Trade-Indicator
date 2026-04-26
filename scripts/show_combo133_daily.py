@@ -18,7 +18,11 @@ from xauusd_ai.backtesting.engine import simulate_dynamic_concurrent_backtest
 from xauusd_ai.config import load_settings
 from xauusd_ai.data.market_data import MarketDataService
 from xauusd_ai.execution.risk import RiskManager
-from xauusd_ai.features.dataset import prepare_training_dataset, FEATURE_COLUMNS
+from xauusd_ai.features.dataset import (
+    FEATURE_COLUMNS,
+    get_label_lookahead_bars,
+    prepare_training_dataset,
+)
 from xauusd_ai.strategies.hybrid import HybridStrategy
 
 CONFIG        = Path("configs/acc1_v14pp_profit.yaml")
@@ -57,6 +61,8 @@ print("[2/3] Building dataset...")
 t0 = time.time()
 full_ds = prepare_training_dataset(settings_full, frames, _strategy)
 print(f"      {len(full_ds):,} rows  ({time.time()-t0:.1f}s)")
+LABEL_LOOKAHEAD_BARS = get_label_lookahead_bars(settings_full)
+print(f"      label lookahead purge: {LABEL_LOOKAHEAD_BARS} bars")
 
 _m1_path = Path("src/xauusd_ai/real_data/XAUUSDm_M1.csv")
 if _m1_path.exists():
@@ -96,6 +102,13 @@ while fold_start + TRAIN_BARS + TEST_BARS <= n_total:
     test_end   = train_end  + TEST_BARS
     fold_train = full_ds.iloc[fold_start:train_end]
     fold_test  = full_ds.iloc[train_end:test_end]
+
+    # Prevent boundary leakage: drop train tail whose labels need future bars.
+    if LABEL_LOOKAHEAD_BARS > 0:
+        if len(fold_train) <= LABEL_LOOKAHEAD_BARS + 100:
+            fold_start += STEP_BARS
+            continue
+        fold_train = fold_train.iloc[:-LABEL_LOOKAHEAD_BARS]
 
     if len(fold_train) < 500 or len(fold_test) < 100:
         fold_start += STEP_BARS
@@ -252,6 +265,8 @@ if (_remaining_train_end < n_total and
     fold_idx += 1
     fold_train = full_ds.iloc[fold_start:_remaining_train_end]
     fold_test  = full_ds.iloc[_remaining_train_end:_remaining_test_end]
+    if LABEL_LOOKAHEAD_BARS > 0 and len(fold_train) > LABEL_LOOKAHEAD_BARS + 100:
+        fold_train = fold_train.iloc[:-LABEL_LOOKAHEAD_BARS]
     if len(fold_train) >= 500 and len(fold_test) >= 50:
         y_tr = fold_train["target"].values
         y_te = fold_test["target"].values
@@ -434,6 +449,38 @@ if all_trades_df:
         print(f"  Avg day P&L       : +${daily['day_pnl'].mean():.2f}")
         print(f"  Max DD from peak  : {daily['dd_from_peak'].min():.2f}")
         print(f"  Total net P&L     : +${daily['day_pnl'].sum():.2f}")
+
+        # Save daily results as markdown for quick sharing/review.
+        md_path = Path("outputs/combo133_daily_report.md")
+        lines = [
+            "# Combo #133 Daily P&L Report",
+            "",
+            f"- Config: {CONFIG}",
+            f"- Label lookahead purge: {LABEL_LOOKAHEAD_BARS} bars",
+            f"- Train/Test bars: {TRAIN_BARS}/{TEST_BARS}",
+            f"- Step bars: {STEP_BARS}",
+            f"- Test start: {TEST_START}",
+            f"- Total trades: {grand_trades}",
+            f"- Total net P&L: {daily['day_pnl'].sum():+.2f}",
+            f"- Days traded: {len(daily)}",
+            f"- Profitable days: {(daily['day_pnl'] > 0).sum()}",
+            f"- Losing days: {(daily['day_pnl'] < 0).sum()}",
+            f"- Best day: {daily['day_pnl'].max():+.2f}",
+            f"- Worst day: {daily['day_pnl'].min():+.2f}",
+            f"- Avg day P&L: {daily['day_pnl'].mean():+.2f}",
+            f"- Max DD from peak: {daily['dd_from_peak'].min():.2f}",
+            "",
+            "## Daily Breakdown",
+            "",
+            "| Date | Trades | WR | Day P&L | Cum P&L | DD from Peak |",
+            "|---|---:|---:|---:|---:|---:|",
+        ]
+        for _, row in daily.iterrows():
+            lines.append(
+                f"| {row['_date']} | {int(row['trades'])} | {row['wr_day']:.0%} | {row['day_pnl']:+.2f} | {row['cum_pnl']:+.2f} | {row['dd_from_peak']:.2f} |"
+            )
+        md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        print(f"  [Daily markdown saved → {md_path}]")
     else:
         print(f"\n  [INFO] Trades collected but columns not found. Available: {list(trades_combined.columns)}")
         print(f"  Total trades collected: {len(trades_combined)}")

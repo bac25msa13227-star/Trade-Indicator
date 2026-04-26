@@ -20,7 +20,12 @@ from xauusd_ai.config import Settings, load_settings
 from xauusd_ai.data.market_data import MarketDataService
 from xauusd_ai.execution.mt5_executor import MT5Executor
 from xauusd_ai.execution.risk import RiskManager
-from xauusd_ai.features.dataset import build_live_feature_frame, prepare_training_dataset, build_merged_context
+from xauusd_ai.features.dataset import (
+    build_live_feature_frame,
+    build_merged_context,
+    get_label_lookahead_bars,
+    prepare_training_dataset,
+)
 from xauusd_ai.learning.self_learner import SelfLearner
 from xauusd_ai.model.trainer import ModelTrainer
 from xauusd_ai.notifications.telegram import TelegramNotifier
@@ -446,6 +451,7 @@ def run_walkforward(settings: Settings) -> None:
         candidate_settings.risk.min_confidence = min_confidence
         candidate_settings.training.label_horizon = label_horizon
         candidate_settings.training.min_return_threshold = return_threshold
+        label_lookahead = get_label_lookahead_bars(candidate_settings)
 
         trainer = ModelTrainer(candidate_settings)
         strategy = HybridStrategy(candidate_settings)
@@ -466,6 +472,13 @@ def run_walkforward(settings: Settings) -> None:
             test_end = train_end + test_size
             fold_train = dataset.iloc[fold_start:train_end].copy()
             fold_test = dataset.iloc[train_end:test_end].copy()
+
+            # Purge train tail to avoid train labels consuming bars from test range.
+            if label_lookahead > 0:
+                if len(fold_train) <= label_lookahead + 50:
+                    continue
+                fold_train = fold_train.iloc[:-label_lookahead].copy()
+
             if len(fold_train) < 200 or len(fold_test) < 50:
                 continue
 
