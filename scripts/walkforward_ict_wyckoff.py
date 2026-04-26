@@ -86,6 +86,8 @@ _parser.add_argument("--fast", action="store_true", help="Faster training with â
 _parser.add_argument("--cache", action="store_true", help="Cache full dataset to parquet for faster reruns")
 _parser.add_argument("--no-rr-sweep", action="store_true", help="Skip RR sweep (faster, only run concurrent sim)")
 _parser.add_argument("--no-compound", action="store_true", help="Reset balance to $200 each fold (no compounding)")
+_parser.add_argument("--test-bars", type=int, default=None, help="Override TEST_BARS (bars per fold test window)")
+_parser.add_argument("--step-bars", type=int, default=None, help="Override STEP_BARS (bars to slide per fold)")
 _known, _rest = _parser.parse_known_args()
 FAST_MODE = _known.fast
 NO_COMPOUND = _known.no_compound
@@ -107,8 +109,8 @@ settings = load_settings(CONFIG)
 
 # Walk-forward window parameters  (M15: 96 bars/day  ~252 trading days/year)
 TRAIN_BARS = 30_000   # ~312 trading days = ~13 months (v2: more data for stronger model)
-TEST_BARS  =  4_000   # ~42  trading days = ~1.5 months
-STEP_BARS  =  4_000   # slide ~1.5 months at a time
+TEST_BARS  = _known.test_bars if _known.test_bars is not None else  4_000   # ~42 trading days = ~1.5 months (override with --test-bars)
+STEP_BARS  = _known.step_bars if _known.step_bars is not None else  4_000   # slide ~1.5 months at a time (override with --step-bars)
 
 THRESHOLD_MIN   = settings.training.threshold_min        # 0.45
 THRESHOLD_MAX   = settings.training.threshold_max        # 0.80

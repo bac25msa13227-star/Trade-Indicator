@@ -89,6 +89,13 @@ outputs/acc1_lgbm_*.json
 outputs/acc2_lgbm_*.pkl
 outputs/acc2_lgbm_*.json
 
+# SB/JS experiment outputs (standalone Silver Bullet & combined WF experiments — disabled)
+outputs/grid_search_sb_*.json
+outputs/wf_combined_ml_sb_*.json
+outputs/wf_silver_bullet_*.json
+outputs/grid_search_combi_*.json
+outputs/walkforward_report_acc1_v14pp_profit_v2.json
+
 # Experimental configs (sweep variants)
 configs/acc1_r147tight.yaml
 configs/acc1_r200_mlm05.yaml
@@ -96,3 +103,4 @@ configs/acc1_v14pp_r12p1.yaml
 configs/acc1_v14pp_r15p1.yaml
 configs/acc1_v14pp_r20p1.yaml
 configs/acc1_v14pp_v3.yaml
+configs/acc1_v14pp_profit_v2_7kpermonth.yaml

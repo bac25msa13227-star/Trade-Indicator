@@ -1,7 +1,8 @@
 # ─────────────────────────────────────────────────────────────────
-# LIVE TRADING CONFIG — Account 1 (ACC1) — V14++ PROFIT (sc=0.85)
+# LIVE TRADING CONFIG — Account 1 (ACC1) — COMBO #133 SYNC
 # Model:  outputs/acc1_v14pp_model.pkl
-# WF: +47.96%/fold | PF=3.931 | DD=-8.63% | WR=57.4% | 83% pos folds
+# WF Combo #133: 28 folds Jan2024→Apr2026 | 27/28 profitable | +$78,204
+# Synced to WF config: min_conf=0.70, risk=4%, max_pos=3, D1_gate=off
 # ─────────────────────────────────────────────────────────────────
 app:
   poll_seconds: 60
@@ -57,8 +58,8 @@ strategy:
   swing_lookback: 20
   volatility_window: 20
   signal_threshold: 0.60             # V14++ PROFIT — regime-aware sweep best
-  sideways_volatility_threshold: 0.0020
-  strong_volatility_threshold: 0.0055
+  sideways_volatility_threshold: 0.20     # atr_percentile — bottom 20% = sideway
+  strong_volatility_threshold: 0.80       # atr_percentile — top 20% = strong trend
   news_block_minutes: 0              # Tắt blackout ML feature (dùng news override thay thế)
   rsi_long_threshold: 50             # Less strict than acc2 (52)
   rsi_short_threshold: 50            # Less strict than acc2 (48)
@@ -102,20 +103,21 @@ strategy:
   adx_gate_enabled: true
   adx_min_trend: 15.0              # V14++: relaxed entry gate
   # Regime-specific confidence thresholds
-  sideway_min_confidence: 0.78    # no_align sweep: optimal sc=0.78
-  volatile_min_confidence: 0.78   # matched to sideway
+  sideway_min_confidence: 0.70    # COMBO #133: WF-synced (was 0.78)
+  volatile_min_confidence: 0.70   # COMBO #133: WF-synced (was 0.78)
+  d1_trend_gate: false            # COMBO #133: TẮT — bật thì -87% P&L
 
 risk:
   mode: fixed_fractional
-  risk_per_trade: 0.05             # no_align sweep: 5% risk
+  risk_per_trade: 0.04             # COMBO #133: WF-synced (was 0.05)
   risk_tier_floor: 0.02
-  max_open_positions: 2
+  max_open_positions: 3             # COMBO #133: WF-synced (was 2)
   stop_loss_atr_multiple: 1.5
   take_profit_rr: 3.5
   entry_slippage_atr_frac: 0.07    # Shift SL/TP levels by 7% ATR to simulate MT5 fill vs bar.close (G4 fix)
   volatile_take_profit_rr: 5.0     # ACC2 logic: Volatile regime RR 1:5
   sideway_take_profit_rr: 2.5      # Sideways regime RR 1:2.5
-  min_confidence: 0.78             # no_align sweep: sc=0.78
+  min_confidence: 0.70             # COMBO #133: WF-synced (was 0.78)
   fixed_lot: 0.01
   max_risk_fraction: 0.08           # V14++
   sideway_risk_multiplier: 1.0
@@ -128,6 +130,7 @@ risk:
   consecutive_loss_cooldown_bars: 12 # V14++: 1h cooldown
   anti_martingale_factor: 0.7       # V14++: sweep best
   anti_martingale_max_reductions: 2
+  volatility_risk_scaling_enabled: false  # COMBO #133: TẮT — model wins during ATR spikes
   max_total_exposure_pct: 0.30
   reentry_guard_enabled: true
   reentry_cooldown_bars_after_sl: 3

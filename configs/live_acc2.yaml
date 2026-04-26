@@ -52,8 +52,8 @@ strategy:
   swing_lookback: 20
   volatility_window: 20
   signal_threshold: 0.60             # V14++ COMPOSITE — regime-aware sweep best
-  sideways_volatility_threshold: 0.0020
-  strong_volatility_threshold: 0.0055
+  sideways_volatility_threshold: 0.20     # atr_percentile — bottom 20% = sideway
+  strong_volatility_threshold: 0.80       # atr_percentile — top 20% = strong trend
   news_block_minutes: 0
   rsi_long_threshold: 50
   rsi_short_threshold: 50

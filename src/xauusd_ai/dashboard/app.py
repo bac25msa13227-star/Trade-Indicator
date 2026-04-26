@@ -1,17 +1,21 @@
-"""XAUUSD AI Bot — Comprehensive Live Dashboard v3.0 ICT+Wyckoff
+"""XAUUSD AI Bot — Comprehensive Live Dashboard v4.0 Combo #133
 
-Model: HistGradientBoostingClassifier, 28 features
-Features: D1(1) + H4(9: ICT) + H1(3: Wyckoff) + M15(15: execution)
-Threshold: 0.55 | Walk-Forward: 19 folds, precision avg 54.7%, AUC std 0.0123
+Model  : VotingClassifier (HGB×3 + RF×2 + ET×1, soft voting)
+Features: 56 features — D1(1)+H4(9)+H1(3)+M15(15)+News(5)+Price(5)+v2(8)+v3(6)+v4(3)+v5(2)
+Threshold: 0.70 | Walk-Forward: 28 folds (Jan 2024–Apr 2026) | 27/28 profitable | +$78,204 total
+
+Key Combo #133 params:
+  MIN_CONF=0.70, blocked=[3,15,17,22,23], D1_GATE=False, risk=4%, RR=3.5, max_pos=3
 
 Tabs:
-  1. Live Monitor        — Bot status, account overview, latest signal
-  2. Phan tich Chi tiet  — 6-step decision breakdown (ICT→Wyckoff→Execution)
-  3. P&L & Von           — Equity curve, drawdown, win/loss streaks
-  4. Hoc Lien Tuc        — Learning cycle, ROC-AUC improvement, win/loss log
-  5. Backtest            — Historical backtest results (ICT+Wyckoff model)
-  6. Walk-Forward        — 19-fold walk-forward analysis
-  7. Risk & Cai dat      — Lot calculator, position sizing
+  1. Live Monitor        — Bot status, retrain countdown, signal, toggle with confirm
+  2. Phân tích Chi tiết  — 6-step decision breakdown (ICT→Wyckoff→Execution)
+  3. P&L & Vốn           — Equity curve, drawdown, win/loss streaks
+  4. Tự học              — Learning cycle, ROC-AUC improvement, win/loss log
+  5. Backtest            — Historical backtest results
+  6. Walk-Forward        — 28-fold walk-forward analysis
+  7. Rủi ro              — Lot calculator, position sizing
+  8. Dữ liệu             — Data quality, M5 bar count, CSV status
 """
 from __future__ import annotations
 
@@ -1538,6 +1542,8 @@ def _render_live_tab() -> None:
         _consec = _ks["consecutive_losses"]
         _cd_bars = _ks["cooldown_bars"]
         _dd_loss = _ks["daily_loss"]
+        _confirm_key = f"confirm_pending_{cfg_file}"
+        st.session_state.setdefault(_confirm_key, False)
         with col:
             st.markdown(
                 f'<div style="background:linear-gradient(145deg,rgba(255,255,255,0.92),rgba(255,255,255,0.70));'
@@ -1555,16 +1561,44 @@ def _render_live_tab() -> None:
                 f'</div>',
                 unsafe_allow_html=True,
             )
-            btn_label = "⏸️ Tạm dừng Auto Trade" if is_on else "▶️ Bật Auto Trade"
-            btn_key = f"btn_toggle_at_{cfg_file}"
-            if st.button(btn_label, key=btn_key, use_container_width=True,
-                         type="primary" if not is_on else "secondary"):
-                success = _write_auto_trade(cfg_file, not is_on)
-                if success:
-                    st.success(f"✅ Đã {'dừng' if is_on else 'bật'} Auto Trade — {acc_label}. Bot sẽ cập nhật trong <60s.")
-                else:
-                    st.error("❌ Không thể ghi config file.")
-                st.rerun()
+            # ── Confirm-popup toggle ──────────────────────────────────────
+            if not st.session_state[_confirm_key]:
+                btn_label = "⏸️ Tạm dừng Auto Trade" if is_on else "▶️ Bật Auto Trade"
+                btn_key = f"btn_toggle_at_{cfg_file}"
+                if st.button(btn_label, key=btn_key, use_container_width=True,
+                             type="primary" if not is_on else "secondary"):
+                    st.session_state[_confirm_key] = True
+                    st.rerun()
+            else:
+                action_verb = "TẠM DỪNG" if is_on else "BẬT"
+                action_icon = "⏸️" if is_on else "▶️"
+                warn_c = RED if is_on else GREEN
+                st.markdown(
+                    f'<div style="background:{warn_c}10;border:1px solid {warn_c}50;'
+                    f'border-radius:14px;padding:12px 14px;margin-bottom:8px">'
+                    f'<div style="font-size:0.85rem;font-weight:800;color:{warn_c}">'
+                    f'{action_icon} Xác nhận {action_verb} bot {acc_label}?</div>'
+                    f'<div style="font-size:0.74rem;color:var(--text-secondary);margin-top:4px">'
+                    f'Thao tác này sẽ ghi trực tiếp vào config file và có hiệu lực trong &lt;60 giây.</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+                _cc1, _cc2 = st.columns(2)
+                with _cc1:
+                    if st.button(f"✅ Xác nhận", key=f"btn_confirm_yes_{cfg_file}",
+                                 use_container_width=True, type="primary"):
+                        success = _write_auto_trade(cfg_file, not is_on)
+                        st.session_state[_confirm_key] = False
+                        if success:
+                            st.success(f"✅ Đã {'dừng' if is_on else 'bật'} Auto Trade — {acc_label}.")
+                        else:
+                            st.error("❌ Không thể ghi config file.")
+                        st.rerun()
+                with _cc2:
+                    if st.button("❌ Huỷ", key=f"btn_confirm_no_{cfg_file}",
+                                 use_container_width=True):
+                        st.session_state[_confirm_key] = False
+                        st.rerun()
 
             # ── Kill Switch Status & Reset ────────────────────────────────
             if _killed:
@@ -1619,7 +1653,70 @@ def _render_live_tab() -> None:
     _auto_trade_panel(_ctrl_c1, "ACC1 — 270832477", "live_acc1.yaml", _at_acc1, "270832477", _regime_acc1, "acc1")
     _auto_trade_panel(_ctrl_c2, "ACC2 — 433326057", "live_acc2.yaml", _at_acc2, "433326057", _regime_acc2, "acc2")
 
-    # ── Tunnel URL → Telegram ─────────────────────────────────────────────
+    # ── Retrain Countdown ─────────────────────────────────────────────────
+    _retrain_state_path = OUTPUTS / "combo133_retrain_state.json"
+    _retrain_log_path   = OUTPUTS / "combo133_retrain_log.jsonl"
+    import json as _json
+    import datetime as _dt3
+    _rs = {}
+    if _retrain_state_path.exists():
+        try:
+            _rs = _json.loads(_retrain_state_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    _m5_path = ROOT / "src" / "xauusd_ai" / "real_data" / "XAUUSDm_M5.csv"
+    try:
+        _m5_count = sum(1 for _ in open(_m5_path, encoding="utf-8")) - 1
+    except Exception:
+        _m5_count = 0
+    _last_count = int(_rs.get("last_retrain_m5_count", 0))
+    _last_fold  = int(_rs.get("last_fold", 28))
+    _last_result = str(_rs.get("last_result", "—"))
+    _last_date  = str(_rs.get("last_retrain_date", "2026-04-24"))[:10]
+    _retrain_every = 6000
+    _new_bars   = max(0, _m5_count - _last_count)
+    _remaining  = max(0, _retrain_every - _new_bars)
+    _progress_pct = min(1.0, _new_bars / _retrain_every)
+    _bars_per_day = 276
+    _days_left  = _remaining / _bars_per_day
+    try:
+        _eta = (_dt3.date.today() + _dt3.timedelta(days=int(_days_left))).strftime("%Y-%m-%d")
+    except Exception:
+        _eta = "—"
+    _rt_c = GREEN if _new_bars >= _retrain_every else (AMBER if _progress_pct >= 0.6 else BLUE)
+    _last_log_entry: dict = {}
+    if _retrain_log_path.exists():
+        try:
+            _lines = [l for l in _retrain_log_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+            if _lines:
+                _last_log_entry = _json.loads(_lines[-1])
+        except Exception:
+            pass
+    _last_auc  = _last_log_entry.get("roc_auc", _rs.get("roc_auc", "—"))
+    _last_pnl  = _last_log_entry.get("net_pnl", "—")
+    _last_wr   = _last_log_entry.get("win_rate", "—")
+    st.markdown(
+        '<div style="font-family:Fredoka,cursive;font-size:1.2rem;font-weight:700;'
+        'color:var(--text-primary);margin:14px 0 8px">🔁 Combo #133 — Trạng Thái Retrain</div>',
+        unsafe_allow_html=True,
+    )
+    _r1, _r2, _r3, _r4 = st.columns(4)
+    _r1.markdown(_card("Fold hiện tại", f"#{_last_fold}", f"Retrain lần cuối: {_last_date}", PURPLE), unsafe_allow_html=True)
+    _r2.markdown(_card("Kết quả cuối", _last_result.split(" ")[0], f"P&L: ${_last_pnl:.2f}" if isinstance(_last_pnl, float) else f"P&L: {_last_pnl}", GREEN if "ACCEPTED" in _last_result else RED), unsafe_allow_html=True)
+    _r3.markdown(_card("Bars tích lũy", f"{_new_bars:,} / {_retrain_every:,}", f"Còn {_remaining:,} bars (~{_days_left:.0f} ngày)", _rt_c), unsafe_allow_html=True)
+    _r4.markdown(_card("Dự kiến retrain", _eta if _remaining > 0 else "SẴN SÀNG ✅", f"ETA fold #{_last_fold + 1}", AMBER if _remaining > 0 else GREEN), unsafe_allow_html=True)
+    st.progress(_progress_pct, text=f"Tiến trình: {_new_bars:,} / {_retrain_every:,} bars mới ({_progress_pct:.0%})")
+    if _new_bars >= _retrain_every:
+        st.success(f"✅ Đã đủ {_new_bars:,} bars mới — Chạy `python scripts/auto_update_retrain.py` để retrain fold #{_last_fold + 1}!")
+    if isinstance(_last_auc, float):
+        st.markdown(
+            f'<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:6px">'
+            f'<span class="cute-pill">ROC-AUC: <b>{_last_auc:.4f}</b></span>'
+            f'<span class="cute-pill">WR: <b>{float(_last_wr):.1%}</b></span>'
+            f'<span class="cute-pill">M5 tổng: <b>{_m5_count:,}</b></span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
     with st.expander("📡 Gửi URL Dashboard về Telegram", expanded=False):
         import os as _os
         _tun_url = _get_tunnel_url()

@@ -149,6 +149,8 @@ class HybridStrategy:
 
     def should_allow_row(self, row: pd.Series | object, probability: float) -> tuple[bool, str]:
         strategy_score = abs(float(getattr(row, "strategy_score", 0.0)))
+        raw_strategy_score = float(getattr(row, "strategy_score", 0.0))
+        trade_side = "sell" if raw_strategy_score < 0 else "buy"
         volatility_regime = int(getattr(row, "volatility_regime", 1))
         trend_alignment = int(getattr(row, "trend_alignment", 1))
         blocked_by_time, blocked_reason = self._blocked_by_time(getattr(row, "time", None))
@@ -162,6 +164,12 @@ class HybridStrategy:
             min_conf = self.settings.strategy.volatile_min_confidence
         else:
             min_conf = self.settings.risk.min_confidence
+
+        # Asymmetric directional confidence override
+        if trade_side == "sell" and self.settings.strategy.sell_min_confidence is not None:
+            min_conf = max(min_conf, self.settings.strategy.sell_min_confidence)
+        elif trade_side == "buy" and self.settings.strategy.buy_min_confidence is not None:
+            min_conf = max(min_conf, self.settings.strategy.buy_min_confidence)
 
         # Silver Bullet boost: increase effective probability during high-probability windows
         effective_prob = probability
@@ -196,6 +204,15 @@ class HybridStrategy:
             adx_val = float(getattr(row, "adx", 0.0))
             if adx_val < self.settings.strategy.adx_min_trend:
                 return False, f"adx_too_low ({adx_val:.1f} < {self.settings.strategy.adx_min_trend})"
+
+        # D1 trend gate: only trade WITH daily bias direction
+        # daily_bias = +1 (uptrend) → block sell; daily_bias = -1 (downtrend) → block buy
+        if self.settings.strategy.d1_trend_gate:
+            daily_bias = float(getattr(row, "daily_bias", 0.0))
+            if daily_bias > 0 and trade_side == "sell":
+                return False, "d1_trend_gate (uptrend, no sell)"
+            if daily_bias < 0 and trade_side == "buy":
+                return False, "d1_trend_gate (downtrend, no buy)"
 
         return True, "ok"
 
@@ -248,8 +265,18 @@ class HybridStrategy:
 
     def build_trade_decision(self, frames: dict[str, pd.DataFrame], live_row: pd.Series, model_signal: dict[str, float]) -> TradeDecision:
         confidence = float(model_signal["probability"])
-        signal_on = bool(model_signal["prediction"] == 1 and confidence >= self.settings.risk.min_confidence)
         strategy_score = float(live_row["strategy_score"])
+        hyp_side_early = "buy" if strategy_score >= 0 else "sell"
+
+        # ── Asymmetric confidence thresholds per direction ────────────────────
+        base_min_conf = self.settings.risk.min_confidence
+        if hyp_side_early == "sell" and self.settings.strategy.sell_min_confidence is not None:
+            effective_min_conf = self.settings.strategy.sell_min_confidence
+        elif hyp_side_early == "buy" and self.settings.strategy.buy_min_confidence is not None:
+            effective_min_conf = self.settings.strategy.buy_min_confidence
+        else:
+            effective_min_conf = base_min_conf
+        signal_on = bool(model_signal["prediction"] == 1 and confidence >= effective_min_conf)
         volatility_regime = int(live_row.get("volatility_regime", 1))
 
         # ── News blocking: kiểm tra news_is_blackout thực tế ──────────────────

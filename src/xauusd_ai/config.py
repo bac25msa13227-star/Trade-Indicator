@@ -122,8 +122,8 @@ class StrategySettings(StrictSettingsModel):
     swing_lookback: int = 10
     volatility_window: int = 20
     signal_threshold: float = 0.58
-    sideways_volatility_threshold: float = 0.0020
-    strong_volatility_threshold: float = 0.0055
+    sideways_volatility_threshold: float = 0.20   # atr_percentile cutoff (0-1): bottom N% = sideway
+    strong_volatility_threshold: float = 0.80    # atr_percentile cutoff (0-1): top N% = strong trend
     news_block_minutes: int = 30
     rsi_long_threshold: float = 55.0
     rsi_short_threshold: float = 45.0
@@ -152,6 +152,9 @@ class StrategySettings(StrictSettingsModel):
     # Regime-specific confidence thresholds (override min_confidence per regime)
     sideway_min_confidence: float = 0.65    # Higher bar in choppy markets
     volatile_min_confidence: float = 0.60   # Moderate bar in volatile markets
+    sell_min_confidence: float | None = None  # If set, SELL trades require this confidence (higher = fewer sells)
+    buy_min_confidence: float | None = None   # If set, BUY trades require this confidence
+    d1_trend_gate: bool = False  # If True, only trade WITH D1 daily_bias direction (block counter-trend)
     regime_shutdown_rules: list[RegimeShutdownRuleSettings] = Field(default_factory=list)
 
 
@@ -211,6 +214,15 @@ class RiskSettings(StrictSettingsModel):
     anti_martingale_max_reductions: int = 3  # Max 3 reductions (0.6^3 = 21.6% of base)
     # Total exposure cap: max % of balance at risk across all open positions
     max_total_exposure_pct: float = 0.12   # 12% total risk across all open positions
+    # ── Volatility-based risk scaling ──────────────────────────────
+    # Scale down risk_per_trade when current ATR spikes vs rolling mean (macro event filter)
+    volatility_risk_scaling_enabled: bool = False
+    vol_atr_lookback_bars: int = 96        # Rolling window for mean ATR (96 M15 bars = 24h)
+    vol_atr_spike_ratio: float = 2.0       # If current_atr > 2× mean_atr → scale down
+    vol_atr_spike_risk_mult: float = 0.5   # Risk multiplier when spike detected (50%)
+    vol_atr_extreme_ratio: float = 3.5     # If current_atr > 3.5× mean_atr → extreme (25%)
+    vol_atr_extreme_risk_mult: float = 0.25  # Risk multiplier for extreme spike
+
     # Anti re-entry guard after SL (same side)
     reentry_guard_enabled: bool = True
     reentry_cooldown_bars_after_sl: int = 1
