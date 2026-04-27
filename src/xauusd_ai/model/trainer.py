@@ -417,7 +417,15 @@ class ModelTrainer:
             self._calibrator = None
         if meta_path.exists():
             metadata = json.loads(meta_path.read_text(encoding="utf-8"))
-            self.decision_threshold = float(metadata.get("decision_threshold", self.settings.strategy.signal_threshold))
+            # Always use config signal_threshold — model meta decision_threshold may be stale
+            _meta_thresh = metadata.get("decision_threshold")
+            _cfg_thresh = float(self.settings.strategy.signal_threshold)
+            if _meta_thresh is not None and float(_meta_thresh) != _cfg_thresh:
+                LOGGER.info(
+                    "load_artifacts: config signal_threshold=%.4f overrides model meta decision_threshold=%.4f",
+                    _cfg_thresh, float(_meta_thresh),
+                )
+            self.decision_threshold = _cfg_thresh
             if "feature_mask" in metadata:
                 self._feature_mask = np.array(metadata["feature_mask"], dtype=bool)
             else:

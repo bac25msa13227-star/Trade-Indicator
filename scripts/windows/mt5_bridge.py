@@ -139,7 +139,14 @@ def op_place_order(body: dict) -> dict:
     magic     = int(body.get("magic", 0))
     comment   = str(body.get("comment", "mt5-bridge"))
 
-    tick = mt5.symbol_info_tick(symbol)
+    import time as _time
+    mt5.symbol_select(symbol, True)
+    tick = None
+    for _attempt in range(3):
+        tick = mt5.symbol_info_tick(symbol)
+        if tick is not None:
+            break
+        _time.sleep(0.5)
     if tick is None:
         raise RuntimeError(f"No tick data for {symbol}: {mt5.last_error()}")
 
@@ -312,7 +319,14 @@ def op_get_account() -> dict:
 def op_get_tick(symbol: str) -> dict:
     """Return current real-time ask/bid price for symbol."""
     _ensure()
-    tick = mt5.symbol_info_tick(symbol)
+    import time as _time
+    mt5.symbol_select(symbol, True)
+    tick = None
+    for _attempt in range(3):
+        tick = mt5.symbol_info_tick(symbol)
+        if tick is not None:
+            break
+        _time.sleep(0.5)
     if tick is None:
         raise RuntimeError(f"No tick data for {symbol}: {mt5.last_error()}")
     return {
