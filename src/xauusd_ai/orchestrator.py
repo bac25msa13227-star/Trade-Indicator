@@ -20,7 +20,12 @@ from xauusd_ai.config import Settings, load_settings
 from xauusd_ai.data.market_data import MarketDataService
 from xauusd_ai.execution.mt5_executor import MT5Executor
 from xauusd_ai.execution.risk import RiskManager
-from xauusd_ai.features.dataset import build_live_feature_frame, prepare_training_dataset, build_merged_context
+from xauusd_ai.features.dataset import (
+    build_live_feature_frame,
+    build_merged_context,
+    get_label_lookahead_bars,
+    prepare_training_dataset,
+)
 from xauusd_ai.learning.self_learner import SelfLearner
 from xauusd_ai.model.trainer import ModelTrainer
 from xauusd_ai.notifications.telegram import TelegramNotifier
@@ -446,6 +451,7 @@ def run_walkforward(settings: Settings) -> None:
         candidate_settings.risk.min_confidence = min_confidence
         candidate_settings.training.label_horizon = label_horizon
         candidate_settings.training.min_return_threshold = return_threshold
+        label_lookahead = get_label_lookahead_bars(candidate_settings)
 
         trainer = ModelTrainer(candidate_settings)
         strategy = HybridStrategy(candidate_settings)
@@ -466,6 +472,13 @@ def run_walkforward(settings: Settings) -> None:
             test_end = train_end + test_size
             fold_train = dataset.iloc[fold_start:train_end].copy()
             fold_test = dataset.iloc[train_end:test_end].copy()
+
+            # Purge train tail to avoid train labels consuming bars from test range.
+            if label_lookahead > 0:
+                if len(fold_train) <= label_lookahead + 50:
+                    continue
+                fold_train = fold_train.iloc[:-label_lookahead].copy()
+
             if len(fold_train) < 200 or len(fold_test) < 50:
                 continue
 
@@ -1848,6 +1861,7 @@ def run_live_loop(settings: Settings) -> None:
     last_learning_bar_time: pd.Timestamp | None = None
     # Pre-load last logged bar time so we skip re-logging same candle after restart
     _last_logged_bar_time: pd.Timestamp | None = None
+    _last_traded_bar_time: pd.Timestamp | None = None  # per-bar dedup for Telegram+order
     if _signals_path.exists() and _signals_path.stat().st_size > 0:
         try:
             import csv as _scsv
@@ -2441,7 +2455,7 @@ def run_live_loop(settings: Settings) -> None:
             try:
                 _tunnel_url = _tunnel_url_file.read_text(encoding="utf-8").strip()
                 if _tunnel_url:
-                    _dashboard_line = f"\n└ Dashboard: {_tunnel_url}"
+                    _dashboard_line = f"\n└ Dashboard: {_tunnel_url.rstrip('/')}/dashboard"
             except Exception:
                 pass
         notifier.send_message(
@@ -2469,7 +2483,7 @@ def run_live_loop(settings: Settings) -> None:
                                 _tunnel_url_sent = _new_url
                                 notifier.send_message(
                                     f"🌐 <b>Dashboard URL mới</b>\n"
-                                    f"└ {_new_url}"
+                                    f"└ {_new_url.rstrip('/')}/dashboard"
                                 )
                     except Exception as _tuf_err:
                         LOGGER.debug("Tunnel URL watcher error: %s", _tuf_err)
@@ -3027,113 +3041,133 @@ def run_live_loop(settings: Settings) -> None:
                         "original_volume": _safe_float(getattr(order_plan, "volume", 0.0), 0.0),
                         "effective_volume": _safe_float(getattr(order_plan, "volume", 0.0), 0.0),
                     }
-                    # ── Rebase entry/SL/TP về giá real-time MT5 tick ─────────────────────
-                    # live_row["close"] = giá đóng nến M5 trước đó (broker price).
-                    # Fetch tick thật từ MT5 TRƯỚC khi gửi Telegram để notification
-                    # và lệnh thực tế khớp nhau.
-                    try:
-                        _rt_price = executor.get_current_price(order_plan.symbol, order_plan.side)
-                        if _rt_price and _rt_price > 0 and order_plan.entry_price > 0:
-                            _offset = abs(_rt_price - order_plan.entry_price)
-                            if _offset > 0.05:  # chỉ rebase khi lệch đáng kể (>0.05 USD)
-                                _sl_dist = abs(order_plan.entry_price - order_plan.stop_loss)
-                                _tp_dist = abs(order_plan.take_profit - order_plan.entry_price)
-                                if order_plan.side == "sell":
-                                    _rebased_sl = round(_rt_price + _sl_dist, 2)
-                                    _rebased_tp = round(_rt_price - _tp_dist, 2)
-                                else:
-                                    _rebased_sl = round(_rt_price - _sl_dist, 2)
-                                    _rebased_tp = round(_rt_price + _tp_dist, 2)
-                                LOGGER.info(
-                                    "Price rebase: bar_close=%.2f → mt5_tick=%.2f (offset=%.2f) | "
-                                    "SL %.2f→%.2f TP %.2f→%.2f",
-                                    order_plan.entry_price, _rt_price, _offset,
-                                    order_plan.stop_loss, _rebased_sl,
-                                    order_plan.take_profit, _rebased_tp,
-                                )
-                                from xauusd_ai.execution.risk import OrderPlan as _OP
-                                order_plan = _OP(
-                                    symbol=order_plan.symbol,
-                                    side=order_plan.side,
-                                    volume=order_plan.volume,
-                                    entry_price=_rt_price,
-                                    stop_loss=_rebased_sl,
-                                    take_profit=_rebased_tp,
-                                    confidence=order_plan.confidence,
-                                    reason=order_plan.reason,
-                                )
-                    except Exception as _rebase_err:
-                        LOGGER.warning("Price rebase failed (using bar close price): %s", _rebase_err)
-
-                    try:
-                        order_plan, _canary_report = _apply_canary_volume(order_plan)
-                        if bool(_canary_report.get("applied")):
-                            LOGGER.info(
-                                "Canary deploy volume applied: %.2f -> %.2f (fraction=%.3f)",
-                                _safe_float(_canary_report.get("original_volume"), 0.0),
-                                _safe_float(_canary_report.get("effective_volume"), 0.0),
-                                _safe_float(_canary_report.get("volume_fraction"), 1.0),
-                            )
-                    except Exception as _canary_err:
-                        LOGGER.warning("Canary volume apply failed: %s", _canary_err)
-
-                    try:
-                        notifier.send_signal(decision, order_plan)
-                    except Exception as _notify_err:
-                        LOGGER.warning("Telegram notification failed (order will still be placed): %s", _notify_err)
-                    if settings.execution.auto_trade:
-                        # ── Chốt lệnh ngược chiều đang lời trước khi vào lệnh mới ──
-                        if settings.execution.close_opposite_on_signal:
-                            try:
-                                _opposite = "sell" if decision.side == "buy" else "buy"
-                                _current_positions = executor.get_open_positions(
-                                    magic_number=settings.execution.magic_number
-                                )
-                                for _opos in _current_positions:
-                                    if _opos["side"] != _opposite:
-                                        continue
-                                    _opos_pnl = _opos["profit"] + _opos.get("swap", 0)
-                                    _min_profit = settings.execution.close_opposite_min_profit
-                                    if _opos_pnl >= _min_profit:
-                                        try:
-                                            executor.close_position(_opos["ticket"], _opos["volume"])
-                                            LOGGER.info(
-                                                "CloseOpposite: closed ticket=%d %s profit=%.2f | new signal=%s",
-                                                _opos["ticket"], _opos["side"], _opos_pnl, decision.side,
-                                            )
-                                            notifier.send_message(
-                                                f"🔄 <b>Chốt lệnh ngược chiều #{_opos['ticket']}</b> ({_opos['side'].upper()})\n"
-                                                f"├ P&L: +{_opos_pnl:.2f}$\n"
-                                                f"├ Entry: {_opos['open_price']:.3f} | Lot: {_opos['volume']:.2f}\n"
-                                                f"└ Tín hiệu mới: {decision.side.upper()} — chốt lời lệnh ngược chiều"
-                                            )
-                                        except Exception as _ce:
-                                            LOGGER.error("CloseOpposite failed ticket=%d: %s", _opos["ticket"], _ce)
-                            except Exception as _oe:
-                                LOGGER.error("CloseOpposite scan error: %s", _oe)
+                    # ── Per-bar dedup: only the first poll per bar sends Telegram + places order ──
+                    # poll_seconds=60 → bot can poll the same 5-min bar up to 5 times; only the
+                    # first poll should act.  Subsequent polls skip both Telegram and order.
+                    _do_act_this_bar = latest_bar_time != _last_traded_bar_time
+                    if not _do_act_this_bar:
+                        LOGGER.debug(
+                            "Duplicate bar signal (bar_time=%s, conf=%.3f) — Telegram+order skipped",
+                            latest_bar_time, decision.confidence,
+                        )
+                    else:
+                        # ── Rebase entry/SL/TP về giá real-time MT5 tick ─────────────────────
+                        # live_row["close"] = giá đóng nến M5 trước đó (broker price).
+                        # Fetch tick thật từ MT5 TRƯỚC khi gửi Telegram để notification
+                        # và lệnh thực tế khớp nhau.
+                        try:
+                            _rt_price = executor.get_current_price(order_plan.symbol, order_plan.side)
+                            if _rt_price and _rt_price > 0 and order_plan.entry_price > 0:
+                                _offset = abs(_rt_price - order_plan.entry_price)
+                                if _offset > 0.05:  # chỉ rebase khi lệch đáng kể (>0.05 USD)
+                                    _sl_dist = abs(order_plan.entry_price - order_plan.stop_loss)
+                                    _tp_dist = abs(order_plan.take_profit - order_plan.entry_price)
+                                    if order_plan.side == "sell":
+                                        _rebased_sl = round(_rt_price + _sl_dist, 2)
+                                        _rebased_tp = round(_rt_price - _tp_dist, 2)
+                                    else:
+                                        _rebased_sl = round(_rt_price - _sl_dist, 2)
+                                        _rebased_tp = round(_rt_price + _tp_dist, 2)
+                                    LOGGER.info(
+                                        "Price rebase: bar_close=%.2f → mt5_tick=%.2f (offset=%.2f) | "
+                                        "SL %.2f→%.2f TP %.2f→%.2f",
+                                        order_plan.entry_price, _rt_price, _offset,
+                                        order_plan.stop_loss, _rebased_sl,
+                                        order_plan.take_profit, _rebased_tp,
+                                    )
+                                    from xauusd_ai.execution.risk import OrderPlan as _OP
+                                    order_plan = _OP(
+                                        symbol=order_plan.symbol,
+                                        side=order_plan.side,
+                                        volume=order_plan.volume,
+                                        entry_price=_rt_price,
+                                        stop_loss=_rebased_sl,
+                                        take_profit=_rebased_tp,
+                                        confidence=order_plan.confidence,
+                                        reason=order_plan.reason,
+                                    )
+                        except Exception as _rebase_err:
+                            LOGGER.warning("Price rebase failed (using bar close price): %s", _rebase_err)
 
                         try:
-                            result = executor.place_order(order_plan)
-                            LOGGER.info(
-                                "MT5 order placed: side=%s lot=%.2f bal=%.2f open=%d/%d | %s",
-                                order_plan.side, order_plan.volume,
-                                account_balance, open_positions + 1, max_allowed,
-                                result,
-                            )
-                            # Track RSI at entry for exit model position-state features
-                            _new_ticket = int(result.get("position", 0) or result.get("order", 0) or result.get("deal", 0))
-                            if _new_ticket:
-                                if "rsi" in latest_row.index:
-                                    _entry_rsi_tracker[_new_ticket] = float(latest_row.get("rsi", 50.0))
-                                    _save_rsi_tracker(_entry_rsi_tracker)
-                                _entry_snapshot_tracker[_new_ticket] = _build_entry_snapshot(
-                                    _latest_row_for_snapshot,
-                                    decision,
-                                    order_plan,
+                            order_plan, _canary_report = _apply_canary_volume(order_plan)
+                            if bool(_canary_report.get("applied")):
+                                LOGGER.info(
+                                    "Canary deploy volume applied: %.2f -> %.2f (fraction=%.3f)",
+                                    _safe_float(_canary_report.get("original_volume"), 0.0),
+                                    _safe_float(_canary_report.get("effective_volume"), 0.0),
+                                    _safe_float(_canary_report.get("volume_fraction"), 1.0),
                                 )
-                                _save_entry_snapshot_tracker(_entry_snapshot_tracker)
-                        except Exception as order_err:
-                            LOGGER.error("MT5 order failed: %s", order_err)
+                        except Exception as _canary_err:
+                            LOGGER.warning("Canary volume apply failed: %s", _canary_err)
+
+                        try:
+                            notifier.send_signal(decision, order_plan)
+                        except Exception as _notify_err:
+                            LOGGER.warning("Telegram notification failed (order will still be placed): %s", _notify_err)
+                        if settings.execution.auto_trade:
+                            # ── Chốt lệnh ngược chiều đang lời trước khi vào lệnh mới ──
+                            if settings.execution.close_opposite_on_signal:
+                                try:
+                                    _opposite = "sell" if decision.side == "buy" else "buy"
+                                    _current_positions = executor.get_open_positions(
+                                        magic_number=settings.execution.magic_number
+                                    )
+                                    for _opos in _current_positions:
+                                        if _opos["side"] != _opposite:
+                                            continue
+                                        _opos_pnl = _opos["profit"] + _opos.get("swap", 0)
+                                        _min_profit = settings.execution.close_opposite_min_profit
+                                        if _opos_pnl >= _min_profit:
+                                            try:
+                                                executor.close_position(_opos["ticket"], _opos["volume"])
+                                                LOGGER.info(
+                                                    "CloseOpposite: closed ticket=%d %s profit=%.2f | new signal=%s",
+                                                    _opos["ticket"], _opos["side"], _opos_pnl, decision.side,
+                                                )
+                                                notifier.send_message(
+                                                    f"🔄 <b>Chốt lệnh ngược chiều #{_opos['ticket']}</b> ({_opos['side'].upper()})\n"
+                                                    f"├ P&L: +{_opos_pnl:.2f}$\n"
+                                                    f"├ Entry: {_opos['open_price']:.3f} | Lot: {_opos['volume']:.2f}\n"
+                                                    f"└ Tín hiệu mới: {decision.side.upper()} — chốt lời lệnh ngược chiều"
+                                                )
+                                            except Exception as _ce:
+                                                LOGGER.error("CloseOpposite failed ticket=%d: %s", _opos["ticket"], _ce)
+                                except Exception as _oe:
+                                    LOGGER.error("CloseOpposite scan error: %s", _oe)
+
+                            try:
+                                result = executor.place_order(order_plan)
+                                _last_traded_bar_time = latest_bar_time
+                                LOGGER.info(
+                                    "MT5 order placed: side=%s lot=%.2f bal=%.2f open=%d/%d | %s",
+                                    order_plan.side, order_plan.volume,
+                                    account_balance, open_positions + 1, max_allowed,
+                                    result,
+                                )
+                                # Track RSI at entry for exit model position-state features
+                                _new_ticket = int(result.get("position", 0) or result.get("order", 0) or result.get("deal", 0))
+                                if _new_ticket:
+                                    if "rsi" in latest_row.index:
+                                        _entry_rsi_tracker[_new_ticket] = float(latest_row.get("rsi", 50.0))
+                                        _save_rsi_tracker(_entry_rsi_tracker)
+                                    _entry_snapshot_tracker[_new_ticket] = _build_entry_snapshot(
+                                        _latest_row_for_snapshot,
+                                        decision,
+                                        order_plan,
+                                    )
+                                    _save_entry_snapshot_tracker(_entry_snapshot_tracker)
+                            except Exception as order_err:
+                                LOGGER.error("MT5 order failed: %s", order_err)
+                                try:
+                                    notifier.send_message(
+                                        f"🚨 <b>ĐẶT LỆNH THẤT BẠI</b> [{settings.market.symbol}]\n"
+                                        f"├ Side: {order_plan.side.upper()} | Lot: {order_plan.volume:.2f}\n"
+                                        f"├ Entry: {order_plan.entry_price:.2f} | SL: {order_plan.stop_loss:.2f} | TP: {order_plan.take_profit:.2f}\n"
+                                        f"└ Lỗi: {order_err}"
+                                    )
+                                except Exception:
+                                    pass
                 else:
                     _canary_report = {
                         "enabled": bool(settings.admin.canary.enabled),

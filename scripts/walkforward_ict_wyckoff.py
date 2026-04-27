@@ -41,7 +41,11 @@ from xauusd_ai.backtesting.engine import simulate_dynamic_concurrent_backtest
 from xauusd_ai.config import load_settings
 from xauusd_ai.data.market_data import MarketDataService
 from xauusd_ai.execution.risk import RiskManager
-from xauusd_ai.features.dataset import prepare_training_dataset, FEATURE_COLUMNS
+from xauusd_ai.features.dataset import (
+    FEATURE_COLUMNS,
+    get_label_lookahead_bars,
+    prepare_training_dataset,
+)
 from xauusd_ai.strategies.hybrid import HybridStrategy
 
 import functools
@@ -86,6 +90,8 @@ _parser.add_argument("--fast", action="store_true", help="Faster training with �
 _parser.add_argument("--cache", action="store_true", help="Cache full dataset to parquet for faster reruns")
 _parser.add_argument("--no-rr-sweep", action="store_true", help="Skip RR sweep (faster, only run concurrent sim)")
 _parser.add_argument("--no-compound", action="store_true", help="Reset balance to $200 each fold (no compounding)")
+_parser.add_argument("--test-bars", type=int, default=None, help="Override TEST_BARS (bars per fold test window)")
+_parser.add_argument("--step-bars", type=int, default=None, help="Override STEP_BARS (bars to slide per fold)")
 _known, _rest = _parser.parse_known_args()
 FAST_MODE = _known.fast
 NO_COMPOUND = _known.no_compound
@@ -107,8 +113,8 @@ settings = load_settings(CONFIG)
 
 # Walk-forward window parameters  (M15: 96 bars/day  ~252 trading days/year)
 TRAIN_BARS = 30_000   # ~312 trading days = ~13 months (v2: more data for stronger model)
-TEST_BARS  =  4_000   # ~42  trading days = ~1.5 months
-STEP_BARS  =  4_000   # slide ~1.5 months at a time
+TEST_BARS  = _known.test_bars if _known.test_bars is not None else  4_000   # ~42 trading days = ~1.5 months (override with --test-bars)
+STEP_BARS  = _known.step_bars if _known.step_bars is not None else  4_000   # slide ~1.5 months at a time (override with --step-bars)
 
 THRESHOLD_MIN   = settings.training.threshold_min        # 0.45
 THRESHOLD_MAX   = settings.training.threshold_max        # 0.80
@@ -130,6 +136,9 @@ print(f"  Balance : ${STARTING_BALANCE:.0f} khởi đầu | Rủi ro {RISK_PCT:.
 print(f"  RR Sweep: {'SKIP' if _known.no_rr_sweep else RR_SWEEP}")
 print(f"  PrecFloor:{PREC_FLOOR:.0%}  (win rate tối thiểu yêu cầu)")
 print()
+
+LABEL_LOOKAHEAD_BARS = get_label_lookahead_bars(settings)
+print(f"  Label lookahead purge: {LABEL_LOOKAHEAD_BARS} bars")
 
 # ── 1. Load data ─────────────────────────────────────────────────────────────
 print("[1/4] Loading multi-timeframe data from CSV...")
@@ -238,6 +247,13 @@ while fold_start + TRAIN_BARS + TEST_BARS <= n_total:
 
     fold_train = full_ds.iloc[fold_start:train_end]
     fold_test  = full_ds.iloc[train_end:test_end]
+
+    # Prevent boundary leakage: drop train tail whose labels depend on future bars.
+    if LABEL_LOOKAHEAD_BARS > 0:
+        if len(fold_train) <= LABEL_LOOKAHEAD_BARS + 100:
+            fold_start += STEP_BARS
+            continue
+        fold_train = fold_train.iloc[:-LABEL_LOOKAHEAD_BARS]
 
     if len(fold_train) < 500 or len(fold_test) < 100:
         fold_start += STEP_BARS

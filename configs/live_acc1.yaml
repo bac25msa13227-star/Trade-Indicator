@@ -1,21 +1,22 @@
 # ─────────────────────────────────────────────────────────────────
-# LIVE TRADING CONFIG — Account 1 (ACC1) — V14++ PROFIT (sc=0.85)
-# Model:  outputs/acc1_v14pp_model.pkl
-# WF: +47.96%/fold | PF=3.931 | DD=-8.63% | WR=57.4% | 83% pos folds
+# LIVE TRADING CONFIG — Account 1 (ACC1) — COMBO #133 SYNC
+# Model:  outputs/acc1_combo133_202604_model.pkl  [frozen 2026-04]
+# WF Combo #133: 28 folds Jan2024→Apr2026 | 27/28 profitable | +$78,204
+# Synced to WF config: min_conf=0.70, risk=4%, max_pos=3, D1_gate=off
 # ─────────────────────────────────────────────────────────────────
 app:
   poll_seconds: 60
-  model_path:          outputs/acc1_v14pp_model.pkl
-  scaler_path:         outputs/acc1_v14pp_scaler.pkl
-  model_meta_path:     outputs/acc1_v14pp_model_meta.json
+  model_path:          outputs/acc1_combo133_202604_model.pkl
+  scaler_path:         outputs/acc1_combo133_202604_scaler.pkl
+  model_meta_path:     outputs/acc1_combo133_202604_meta.json
   training_report_path: outputs/training_report_acc1.json
   training_plot_path:  outputs/training_metrics_acc1.png
   backtest_report_path: outputs/backtest_report_acc1.json
   backtest_trades_path: outputs/backtest_trades_acc1.csv
   backtest_equity_plot_path: outputs/backtest_equity_acc1.png
   backtest_trades_plot_path: outputs/backtest_trades_plot_acc1.png
-  walkforward_report_path: outputs/walkforward_report_acc1_v14pp_profit.json
-  walkforward_trades_path: outputs/walkforward_trades_acc1_v14pp_profit.csv
+  walkforward_report_path: outputs/walkforward_report_acc1.json
+  walkforward_trades_path: outputs/walkforward_trades_acc1.csv
   paper_trade_log_path: outputs/paper_trade_signals_acc1.csv
   live_learning_log_path: outputs/live_learning_log_acc1.jsonl
   live_closed_trades_path: outputs/live_closed_trades_acc1.csv
@@ -57,18 +58,18 @@ strategy:
   swing_lookback: 20
   volatility_window: 20
   signal_threshold: 0.60             # V14++ PROFIT — regime-aware sweep best
-  sideways_volatility_threshold: 0.003
-  strong_volatility_threshold: 0.016
+  sideways_volatility_threshold: 0.20     # atr_percentile — bottom 20% = sideway
+  strong_volatility_threshold: 0.80       # atr_percentile — top 20% = strong trend
   news_block_minutes: 0              # Tắt blackout ML feature (dùng news override thay thế)
   rsi_long_threshold: 50             # Less strict than acc2 (52)
   rsi_short_threshold: 50            # Less strict than acc2 (48)
   ict_weight: 0.40
   wyckoff_weight: 0.35
   momentum_weight: 0.25
-  min_strategy_score: 0.05
-  sideway_min_strategy_score: 0.10
-  strong_volatility_min_strategy_score: 0.35
-  require_trend_alignment: false
+  min_strategy_score: 0.00
+  sideway_min_strategy_score: 0.00
+  strong_volatility_min_strategy_score: 0.00
+  require_trend_alignment: false    # no_align+sc=0.78: +$68/wk, 86% pos weeks
   force_trade: false
   blocked_hours_utc: [3, 15, 17, 22, 23]
   blocked_weekdays_utc: []
@@ -102,20 +103,21 @@ strategy:
   adx_gate_enabled: true
   adx_min_trend: 15.0              # V14++: relaxed entry gate
   # Regime-specific confidence thresholds
-  sideway_min_confidence: 0.78    # V14++: stricter sideway filter
-  volatile_min_confidence: 0.78   # V14++: matched to sideway
+  sideway_min_confidence: 0.70    # COMBO #133: WF-synced (was 0.78)
+  volatile_min_confidence: 0.70   # COMBO #133: WF-synced (was 0.78)
+  d1_trend_gate: false            # COMBO #133: TẮT — bật thì -87% P&L
 
 risk:
   mode: fixed_fractional
-  risk_per_trade: 0.05             # V14++: lower risk, more stable
+  risk_per_trade: 0.04             # COMBO #133: WF-synced (was 0.05)
   risk_tier_floor: 0.02
-  max_open_positions: 2
+  max_open_positions: 3             # COMBO #133: WF-synced (was 2)
   stop_loss_atr_multiple: 1.5
   take_profit_rr: 3.5
   entry_slippage_atr_frac: 0.07    # Shift SL/TP levels by 7% ATR to simulate MT5 fill vs bar.close (G4 fix)
   volatile_take_profit_rr: 5.0     # ACC2 logic: Volatile regime RR 1:5
   sideway_take_profit_rr: 2.5      # Sideways regime RR 1:2.5
-  min_confidence: 0.78             # V14++: matched to sideway_min_confidence
+  min_confidence: 0.70             # COMBO #133: WF-synced (was 0.78)
   fixed_lot: 0.01
   max_risk_fraction: 0.08           # V14++
   sideway_risk_multiplier: 1.0
@@ -128,9 +130,10 @@ risk:
   consecutive_loss_cooldown_bars: 12 # V14++: 1h cooldown
   anti_martingale_factor: 0.7       # V14++: sweep best
   anti_martingale_max_reductions: 2
+  volatility_risk_scaling_enabled: false  # COMBO #133: TẮT — model wins during ATR spikes
   max_total_exposure_pct: 0.30
   reentry_guard_enabled: true
-  reentry_cooldown_bars_after_sl: 3
+  reentry_cooldown_bars_after_sl: 5
   reentry_min_distance_atr: 0.35
   # Partial Take Profit — book at 1.5R (better quality exits than 1.0R)
   partial_tp_enabled: true
@@ -210,6 +213,11 @@ training:
   live_learning_min_rows: 500
   min_self_learning_roc_auc: 0.53
   optimize_threshold: false          # Giữ threshold 0.62 cố định theo benchmark ACC1
+  backtest_initial_balance: 200.0
+  threshold_min: 0.40
+  threshold_max: 0.78
+  threshold_step: 0.01
+  min_precision_floor: 0.45
 
 notifications:
   telegram_enabled: true

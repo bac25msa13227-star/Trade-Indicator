@@ -1,0 +1,450 @@
+{
+  "aggregate": {
+    "avg_roc_auc": 0.5408,
+    "std_roc_auc": 0.0016,
+    "avg_precision": 0.4668,
+    "std_precision": 0.0,
+    "signal_win_rate": 0.4668,
+    "total_signals": 11065,
+    "concurrent_sim": {
+      "avg_win_rate": 0.4549,
+      "avg_profit_factor": 1.921,
+      "avg_return_pct": 1378.7,
+      "avg_max_drawdown_pct": 17.9
+    }
+  },
+  "folds": [
+    {
+      "fold": 1,
+      "test_start": "2023-12-20",
+      "test_end": "2024-01-22",
+      "trades": 545,
+      "wins": 273,
+      "concurrent_sim": {
+        "win_rate": 0.5009,
+        "profit_factor": 2.511,
+        "return_pct": 6096.6,
+        "max_drawdown_pct": 13.5,
+        "trades": 545,
+        "net_profit": 12193.19
+      }
+    },
+    {
+      "fold": 2,
+      "test_start": "2024-01-23",
+      "test_end": "2024-02-21",
+      "trades": 598,
+      "wins": 270,
+      "concurrent_sim": {
+        "win_rate": 0.4515,
+        "profit_factor": 1.816,
+        "return_pct": 681.2,
+        "max_drawdown_pct": 18.5,
+        "trades": 598,
+        "net_profit": 1362.33
+      }
+    },
+    {
+      "fold": 3,
+      "test_start": "2024-02-21",
+      "test_end": "2024-03-22",
+      "trades": 528,
+      "wins": 264,
+      "concurrent_sim": {
+        "win_rate": 0.5,
+        "profit_factor": 1.849,
+        "return_pct": 989.3,
+        "max_drawdown_pct": 16.1,
+        "trades": 528,
+        "net_profit": 1978.51
+      }
+    },
+    {
+      "fold": 4,
+      "test_start": "2024-03-22",
+      "test_end": "2024-03-26",
+      "trades": 24,
+      "wins": 7,
+      "concurrent_sim": {
+        "win_rate": 0.2917,
+        "profit_factor": 0.221,
+        "return_pct": -21.0,
+        "max_drawdown_pct": 21.0,
+        "trades": 24,
+        "net_profit": -42.03
+      }
+    },
+    {
+      "fold": 5,
+      "test_start": "2024-04-24",
+      "test_end": "2024-05-23",
+      "trades": 501,
+      "wins": 249,
+      "concurrent_sim": {
+        "win_rate": 0.497,
+        "profit_factor": 2.959,
+        "return_pct": 2311.6,
+        "max_drawdown_pct": 18.3,
+        "trades": 501,
+        "net_profit": 4623.14
+      }
+    },
+    {
+      "fold": 6,
+      "test_start": "2024-05-24",
+      "test_end": "2024-06-14",
+      "trades": 335,
+      "wins": 127,
+      "concurrent_sim": {
+        "win_rate": 0.3791,
+        "profit_factor": 1.374,
+        "return_pct": 79.4,
+        "max_drawdown_pct": 22.1,
+        "trades": 335,
+        "net_profit": 158.79
+      }
+    },
+    {
+      "fold": 7,
+      "test_start": "2024-06-25",
+      "test_end": "2024-07-10",
+      "trades": 309,
+      "wins": 139,
+      "concurrent_sim": {
+        "win_rate": 0.4498,
+        "profit_factor": 1.874,
+        "return_pct": 207.8,
+        "max_drawdown_pct": 20.4,
+        "trades": 309,
+        "net_profit": 415.62
+      }
+    },
+    {
+      "fold": 8,
+      "test_start": "2024-07-25",
+      "test_end": "2024-08-23",
+      "trades": 448,
+      "wins": 212,
+      "concurrent_sim": {
+        "win_rate": 0.4732,
+        "profit_factor": 1.823,
+        "return_pct": 1138.2,
+        "max_drawdown_pct": 15.2,
+        "trades": 448,
+        "net_profit": 2276.45
+      }
+    },
+    {
+      "fold": 9,
+      "test_start": "2024-08-23",
+      "test_end": "2024-09-20",
+      "trades": 461,
+      "wins": 231,
+      "concurrent_sim": {
+        "win_rate": 0.5011,
+        "profit_factor": 1.838,
+        "return_pct": 607.6,
+        "max_drawdown_pct": 20.1,
+        "trades": 461,
+        "net_profit": 1215.2
+      }
+    },
+    {
+      "fold": 10,
+      "test_start": "2024-09-24",
+      "test_end": "2024-10-11",
+      "trades": 365,
+      "wins": 165,
+      "concurrent_sim": {
+        "win_rate": 0.4521,
+        "profit_factor": 1.82,
+        "return_pct": 1183.9,
+        "max_drawdown_pct": 21.3,
+        "trades": 365,
+        "net_profit": 2367.74
+      }
+    },
+    {
+      "fold": 11,
+      "test_start": "2024-10-24",
+      "test_end": "2024-11-22",
+      "trades": 469,
+      "wins": 208,
+      "concurrent_sim": {
+        "win_rate": 0.4435,
+        "profit_factor": 2.154,
+        "return_pct": 621.4,
+        "max_drawdown_pct": 16.2,
+        "trades": 469,
+        "net_profit": 1242.75
+      }
+    },
+    {
+      "fold": 12,
+      "test_start": "2024-11-25",
+      "test_end": "2024-12-26",
+      "trades": 497,
+      "wins": 220,
+      "concurrent_sim": {
+        "win_rate": 0.4427,
+        "profit_factor": 2.037,
+        "return_pct": 618.7,
+        "max_drawdown_pct": 15.6,
+        "trades": 497,
+        "net_profit": 1237.39
+      }
+    },
+    {
+      "fold": 13,
+      "test_start": "2024-12-26",
+      "test_end": "2025-01-27",
+      "trades": 557,
+      "wins": 254,
+      "concurrent_sim": {
+        "win_rate": 0.456,
+        "profit_factor": 2.047,
+        "return_pct": 767.0,
+        "max_drawdown_pct": 14.3,
+        "trades": 557,
+        "net_profit": 1534.03
+      }
+    },
+    {
+      "fold": 14,
+      "test_start": "2025-01-27",
+      "test_end": "2025-02-18",
+      "trades": 339,
+      "wins": 164,
+      "concurrent_sim": {
+        "win_rate": 0.4838,
+        "profit_factor": 1.8,
+        "return_pct": 496.2,
+        "max_drawdown_pct": 20.3,
+        "trades": 339,
+        "net_profit": 992.39
+      }
+    },
+    {
+      "fold": 15,
+      "test_start": "2025-02-26",
+      "test_end": "2025-03-28",
+      "trades": 593,
+      "wins": 299,
+      "concurrent_sim": {
+        "win_rate": 0.5042,
+        "profit_factor": 3.48,
+        "return_pct": 4356.1,
+        "max_drawdown_pct": 16.3,
+        "trades": 593,
+        "net_profit": 8712.13
+      }
+    },
+    {
+      "fold": 16,
+      "test_start": "2025-03-28",
+      "test_end": "2025-04-30",
+      "trades": 240,
+      "wins": 118,
+      "concurrent_sim": {
+        "win_rate": 0.4917,
+        "profit_factor": 2.274,
+        "return_pct": 389.7,
+        "max_drawdown_pct": 13.0,
+        "trades": 240,
+        "net_profit": 779.49
+      }
+    },
+    {
+      "fold": 17,
+      "test_start": "2025-04-30",
+      "test_end": "2025-05-30",
+      "trades": 453,
+      "wins": 220,
+      "concurrent_sim": {
+        "win_rate": 0.4857,
+        "profit_factor": 1.94,
+        "return_pct": 659.2,
+        "max_drawdown_pct": 13.8,
+        "trades": 453,
+        "net_profit": 1318.48
+      }
+    },
+    {
+      "fold": 18,
+      "test_start": "2025-05-30",
+      "test_end": "2025-06-24",
+      "trades": 483,
+      "wins": 226,
+      "concurrent_sim": {
+        "win_rate": 0.4679,
+        "profit_factor": 1.593,
+        "return_pct": 455.5,
+        "max_drawdown_pct": 20.5,
+        "trades": 483,
+        "net_profit": 911.02
+      }
+    },
+    {
+      "fold": 19,
+      "test_start": "2025-06-30",
+      "test_end": "2025-07-17",
+      "trades": 324,
+      "wins": 129,
+      "concurrent_sim": {
+        "win_rate": 0.3981,
+        "profit_factor": 1.255,
+        "return_pct": 51.1,
+        "max_drawdown_pct": 22.5,
+        "trades": 324,
+        "net_profit": 102.29
+      }
+    },
+    {
+      "fold": 20,
+      "test_start": "2025-07-30",
+      "test_end": "2025-08-12",
+      "trades": 194,
+      "wins": 88,
+      "concurrent_sim": {
+        "win_rate": 0.4536,
+        "profit_factor": 1.674,
+        "return_pct": 147.5,
+        "max_drawdown_pct": 20.6,
+        "trades": 194,
+        "net_profit": 295.0
+      }
+    },
+    {
+      "fold": 21,
+      "test_start": "2025-08-29",
+      "test_end": "2025-09-12",
+      "trades": 221,
+      "wins": 100,
+      "concurrent_sim": {
+        "win_rate": 0.4525,
+        "profit_factor": 1.705,
+        "return_pct": 188.3,
+        "max_drawdown_pct": 20.1,
+        "trades": 221,
+        "net_profit": 376.52
+      }
+    },
+    {
+      "fold": 22,
+      "test_start": "2025-09-30",
+      "test_end": "2025-10-29",
+      "trades": 297,
+      "wins": 164,
+      "concurrent_sim": {
+        "win_rate": 0.5522,
+        "profit_factor": 2.698,
+        "return_pct": 994.5,
+        "max_drawdown_pct": 15.1,
+        "trades": 297,
+        "net_profit": 1988.91
+      }
+    },
+    {
+      "fold": 23,
+      "test_start": "2025-10-30",
+      "test_end": "2025-11-24",
+      "trades": 375,
+      "wins": 170,
+      "concurrent_sim": {
+        "win_rate": 0.4533,
+        "profit_factor": 1.52,
+        "return_pct": 172.4,
+        "max_drawdown_pct": 20.8,
+        "trades": 375,
+        "net_profit": 344.77
+      }
+    },
+    {
+      "fold": 24,
+      "test_start": "2025-12-01",
+      "test_end": "2025-12-08",
+      "trades": 156,
+      "wins": 47,
+      "concurrent_sim": {
+        "win_rate": 0.3013,
+        "profit_factor": 1.052,
+        "return_pct": 4.5,
+        "max_drawdown_pct": 20.0,
+        "trades": 156,
+        "net_profit": 9.05
+      }
+    },
+    {
+      "fold": 25,
+      "test_start": "2026-01-02",
+      "test_end": "2026-02-02",
+      "trades": 430,
+      "wins": 205,
+      "concurrent_sim": {
+        "win_rate": 0.4767,
+        "profit_factor": 2.966,
+        "return_pct": 551.7,
+        "max_drawdown_pct": 18.7,
+        "trades": 430,
+        "net_profit": 1103.44
+      }
+    },
+    {
+      "fold": 26,
+      "test_start": "2026-02-02",
+      "test_end": "2026-03-04",
+      "trades": 478,
+      "wins": 215,
+      "concurrent_sim": {
+        "win_rate": 0.4498,
+        "profit_factor": 1.785,
+        "return_pct": 643.5,
+        "max_drawdown_pct": 13.9,
+        "trades": 478,
+        "net_profit": 1287.06
+      }
+    },
+    {
+      "fold": 27,
+      "test_start": "2026-03-04",
+      "test_end": "2026-04-06",
+      "trades": 514,
+      "wins": 263,
+      "concurrent_sim": {
+        "win_rate": 0.5117,
+        "profit_factor": 2.357,
+        "return_pct": 6770.5,
+        "max_drawdown_pct": 14.8,
+        "trades": 514,
+        "net_profit": 13540.97
+      }
+    },
+    {
+      "fold": 28,
+      "test_start": "2026-04-06",
+      "test_end": "2026-04-24",
+      "trades": 331,
+      "wins": 138,
+      "concurrent_sim": {
+        "win_rate": 0.4169,
+        "profit_factor": 1.375,
+        "return_pct": 129.6,
+        "max_drawdown_pct": 18.6,
+        "trades": 331,
+        "net_profit": 259.17
+      }
+    }
+  ],
+  "walk_forward": {
+    "n_folds": 28,
+    "profitable_folds": 27,
+    "loss_folds": 1,
+    "model": "HistGradientBoostingClassifier + ICT/Wyckoff ensemble"
+  },
+  "account": "acc1",
+  "data_range": "2023-12-20 to 2026-04-24",
+  "benchmark_label": "Combo #133 WF \u2014 28 folds (Dec2023-Apr2026)",
+  "initial_balance": 200.0,
+  "feature_count": 59,
+  "source": "combo133_wf_202604"
+}

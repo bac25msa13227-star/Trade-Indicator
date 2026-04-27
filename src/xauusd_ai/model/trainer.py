@@ -19,7 +19,7 @@ from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_sc
 from sklearn.preprocessing import StandardScaler
 
 from xauusd_ai.config import Settings
-from xauusd_ai.features.dataset import FEATURE_COLUMNS
+from xauusd_ai.features.dataset import FEATURE_COLUMNS, get_label_lookahead_bars
 
 try:
     from xauusd_ai.infra.mlflow_client import MLflowTracker
@@ -97,6 +97,16 @@ class ModelTrainer:
     def train(self, dataset: pd.DataFrame, save_artifacts: bool = True) -> dict[str, float]:
         train_df = dataset[dataset["split"] == "train"]
         test_df = dataset[dataset["split"] == "test"]
+
+        # Purge train tail so labels cannot use future bars from test split.
+        lookahead = get_label_lookahead_bars(self.settings)
+        if lookahead > 0:
+            if len(train_df) <= lookahead:
+                raise RuntimeError(
+                    f"Train split too small after leakage purge "
+                    f"(train_rows={len(train_df)}, lookahead={lookahead})"
+                )
+            train_df = train_df.iloc[:-lookahead].copy()
 
         threshold = self.settings.strategy.signal_threshold
         if save_artifacts and self.settings.training.optimize_threshold and len(train_df) > 50:
@@ -466,6 +476,15 @@ class ModelTrainer:
         """
         train_df = dataset[dataset["split"] == "train"].copy()
         test_df = dataset[dataset["split"] == "test"]
+
+        lookahead = get_label_lookahead_bars(self.settings)
+        if lookahead > 0:
+            if len(train_df) <= lookahead:
+                raise RuntimeError(
+                    f"Train split too small after leakage purge "
+                    f"(train_rows={len(train_df)}, lookahead={lookahead})"
+                )
+            train_df = train_df.iloc[:-lookahead].copy()
 
         if train_df.empty or not loss_patterns:
             return self.train(dataset)

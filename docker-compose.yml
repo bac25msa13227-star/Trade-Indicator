@@ -427,6 +427,30 @@ services:
     restart: unless-stopped
     command: tunnel --no-autoupdate --protocol http2 --url http://nginx:80
 
+  # Watches cloudflared logs and writes the tunnel URL to outputs/tunnel_url.txt
+  # so bots and tunnel_notifier.py can pick it up automatically.
+  tunnel-watch:
+    image: alpine:3.19
+    container_name: xauusd-tunnel-watch
+    depends_on:
+      - cloudflared
+    restart: unless-stopped
+    volumes:
+      - ./outputs:/outputs
+      - /var/run/docker.sock:/var/run/docker.sock
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        apk add --no-cache docker-cli -q
+        echo "[tunnel-watch] Waiting for cloudflared logs..."
+        sleep 10
+        docker logs -f xauusd-cloudflared 2>&1 | \
+        grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' | \
+        while read url; do
+          echo "$$url" > /outputs/tunnel_url.txt
+          echo "[tunnel-watch] URL written: $$url"
+        done
+
 
   # ── Healthwatch: monitors live bots and sends Telegram alerts ─────────────
   # Lệnh: docker compose up healthwatch -d

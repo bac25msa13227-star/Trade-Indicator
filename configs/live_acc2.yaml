@@ -1,16 +1,17 @@
+# Model: outputs/acc1_combo133_202604_model.pkl  [frozen Baseline Combo133]
 app:
   poll_seconds: 60
-  model_path: outputs/acc2_v14pp_model.pkl
-  scaler_path: outputs/acc2_v14pp_scaler.pkl
-  model_meta_path: outputs/acc2_v14pp_model_meta.json
+  model_path: outputs/acc1_combo133_202604_model.pkl
+  scaler_path: outputs/acc1_combo133_202604_scaler.pkl
+  model_meta_path: outputs/acc1_combo133_202604_meta.json
   training_report_path: outputs/training_report_acc2.json
   training_plot_path: outputs/training_metrics_acc2.png
   backtest_report_path: outputs/backtest_report_acc2.json
   backtest_trades_path: outputs/backtest_trades_acc2.csv
   backtest_equity_plot_path: outputs/backtest_equity_acc2.png
   backtest_trades_plot_path: outputs/backtest_trades_plot_acc2.png
-  walkforward_report_path: outputs/walkforward_report_acc1_v14pp_composite.json
-  walkforward_trades_path: outputs/walkforward_trades_acc1_v14pp_composite.csv
+  walkforward_report_path: outputs/walkforward_report_acc1.json
+  walkforward_trades_path: outputs/walkforward_trades_acc1.csv
   paper_trade_log_path: outputs/paper_trade_signals_acc2.csv
   live_learning_log_path: outputs/live_learning_log_acc2.jsonl
   live_closed_trades_path: outputs/live_closed_trades_acc2.csv
@@ -52,18 +53,18 @@ strategy:
   swing_lookback: 20
   volatility_window: 20
   signal_threshold: 0.60             # V14++ COMPOSITE — regime-aware sweep best
-  sideways_volatility_threshold: 0.003
-  strong_volatility_threshold: 0.016
+  sideways_volatility_threshold: 0.20     # atr_percentile — bottom 20% = sideway
+  strong_volatility_threshold: 0.80       # atr_percentile — top 20% = strong trend
   news_block_minutes: 0
   rsi_long_threshold: 50
   rsi_short_threshold: 50
   ict_weight: 0.4
   wyckoff_weight: 0.35
   momentum_weight: 0.25
-  min_strategy_score: 0.05
-  sideway_min_strategy_score: 0.10
-  strong_volatility_min_strategy_score: 0.35
-  require_trend_alignment: true
+  min_strategy_score: 0.00
+  sideway_min_strategy_score: 0.00
+  strong_volatility_min_strategy_score: 0.00
+  require_trend_alignment: false
   force_trade: false
   blocked_hours_utc:
   - 3
@@ -112,76 +113,6 @@ strategy:
     - buy
     trend_strength_max: -0.4
     execution_quality_max: 0.3
-  - name: monday_0100_buy_low_adx_trap
-    weekdays_utc:
-    - Monday
-    hours_utc:
-    - 1
-    sides:
-    - buy
-    volatility_regimes:
-    - 1
-    trend_alignment_values:
-    - 0
-    adx_max: 36.0
-    execution_quality_min: 0.0
-  - name: tuesday_1600_buy_regime1_misaligned
-    weekdays_utc:
-    - Tuesday
-    hours_utc:
-    - 16
-    sides:
-    - buy
-    volatility_regimes:
-    - 1
-    trend_alignment_values:
-    - 0
-  - name: tuesday_1900_sell_sideways_trap
-    weekdays_utc:
-    - Tuesday
-    hours_utc:
-    - 19
-    sides:
-    - sell
-    volatility_regimes:
-    - 0
-  - name: thursday_0000_sell_sideways_trap
-    weekdays_utc:
-    - Thursday
-    hours_utc:
-    - 0
-    sides:
-    - sell
-    volatility_regimes:
-    - 0
-  - name: friday_0300_sell_sideways_trap
-    weekdays_utc:
-    - Friday
-    hours_utc:
-    - 3
-    sides:
-    - sell
-    volatility_regimes:
-    - 0
-  - name: tue_wed_thu_sideways_buy_exhaustion
-    weekdays_utc:
-    - Tuesday
-    - Wednesday
-    - Thursday
-    hours_utc:
-    - 7
-    - 8
-    - 11
-    - 12
-    - 13
-    sides:
-    - buy
-    volatility_regimes:
-    - 0
-    trend_alignment_values:
-    - 1
-    trend_strength_min: 0.4
-    execution_quality_min: 0.25
   silver_bullet_enabled: true
   silver_bullet_windows_utc:
   - - 3
@@ -190,11 +121,12 @@ strategy:
     - 11
   - - 14
     - 15
-  silver_bullet_confidence_boost: 0.03
+  silver_bullet_confidence_boost: 0.05
   adx_gate_enabled: true
   adx_min_trend: 15.0
-  sideway_min_confidence: 0.88    # V14++ COMPOSITE
-  volatile_min_confidence: 0.88   # V14++ COMPOSITE
+  sideway_min_confidence: 0.70
+  volatile_min_confidence: 0.70
+  d1_trend_gate: false
 risk:
   mode: fixed_fractional
   risk_per_trade: 0.04             # V14++ COMPOSITE
@@ -205,151 +137,74 @@ risk:
   entry_slippage_atr_frac: 0.07    # Shift SL/TP levels by 7% ATR to simulate MT5 fill vs bar.close (G4 fix)
   volatile_take_profit_rr: 5.0
   sideway_take_profit_rr: 2.5
-  min_confidence: 0.88             # V14++ COMPOSITE
+  min_confidence: 0.70
   fixed_lot: 0.01
   max_risk_fraction: 0.08
-  sideway_risk_multiplier: 0.6
+  sideway_risk_multiplier: 1.0
   normal_risk_multiplier: 1.0
-  strong_volatility_risk_multiplier: 0.8
-  daily_loss_limit_pct: 0.12        # V14++ COMPOSITE
-  max_drawdown_kill_pct: 0.15
+  strong_volatility_risk_multiplier: 0.70
+  kill_switch_enabled: true
+  daily_loss_limit_pct: 0.12
+  max_drawdown_kill_pct: 0.20
   consecutive_loss_pause_count: 3
   consecutive_loss_cooldown_bars: 12
   anti_martingale_factor: 0.7
   anti_martingale_max_reductions: 2
+  volatility_risk_scaling_enabled: false
   max_total_exposure_pct: 0.30
   reentry_guard_enabled: true
-  reentry_cooldown_bars_after_sl: 1
+  reentry_cooldown_bars_after_sl: 5
   reentry_min_distance_atr: 0.35
   partial_tp_enabled: true
-  partial_tp_rr: 1.2                # V14++: sync with ACC1
+  partial_tp_rr: 1.2
   partial_tp_pct: 0.5
   risk_throttle_rules:
-  - name: friday_1200_buy_regime1_misaligned
-    risk_multiplier: 0.25
-    weekdays_utc:
-    - Friday
-    hours_utc:
-    - 12
-    sides:
-    - buy
-    volatility_regimes:
-    - 1
-    trend_alignment_values:
-    - 0
-  - name: friday_1300_sell_regime1_misaligned
-    risk_multiplier: 0.25
-    weekdays_utc:
-    - Friday
-    hours_utc:
-    - 13
-    sides:
-    - sell
-    volatility_regimes:
-    - 1
-    trend_alignment_values:
-    - 0
-  - name: monday_0200_sell_regime1_bad_exec
-    risk_multiplier: 0.4
+  - name: monday_0207_all_heavy_throttle
+    risk_multiplier: 0.20
     weekdays_utc:
     - Monday
     hours_utc:
     - 2
-    sides:
-    - sell
-    volatility_regimes:
-    - 1
-    trend_alignment_values:
-    - 0
-    adx_min: 25.0
-    execution_quality_max: -0.2
-  - name: thursday_1800_sell_regime1_bad_exec
-    risk_multiplier: 0.35
-    weekdays_utc:
-    - Thursday
-    hours_utc:
-    - 18
-    sides:
-    - sell
-    volatility_regimes:
-    - 1
-    trend_alignment_values:
-    - 0
-    execution_quality_max: -0.05
-  - name: wednesday_0100_sell_sideways_drift
+    - 3
+    - 4
+    - 5
+    - 6
+    - 7
+  - name: monday_1721_all_heavy_throttle
     risk_multiplier: 0.25
-    weekdays_utc:
-    - Wednesday
-    hours_utc:
-    - 1
-    sides:
-    - sell
-    volatility_regimes:
-    - 0
-    trend_alignment_values:
-    - 1
-  - name: thursday_1400_buy_regime1_midday_fade
-    risk_multiplier: 0.25
-    weekdays_utc:
-    - Thursday
-    hours_utc:
-    - 14
-    sides:
-    - buy
-    volatility_regimes:
-    - 1
-    trend_alignment_values:
-    - 1
-    probability_max: 0.6
-  - name: monday_1400_sell_sideways_soften
-    risk_multiplier: 0.35
     weekdays_utc:
     - Monday
     hours_utc:
-    - 14
-    sides:
-    - sell
-    volatility_regimes:
-    - 0
-    trend_alignment_values:
-    - 1
-  - name: tuesday_0000_sell_sideways_soften
+    - 17
+    - 18
+    - 19
+    - 20
+    - 21
+  - name: tue_wed_thu_0207_all_throttle
     risk_multiplier: 0.35
     weekdays_utc:
     - Tuesday
-    hours_utc:
-    - 0
-    sides:
-    - sell
-    volatility_regimes:
-    - 0
-    trend_alignment_values:
-    - 1
-  - name: wednesday_0400_sell_sideways_soften
-    risk_multiplier: 0.35
-    weekdays_utc:
     - Wednesday
-    hours_utc:
-    - 4
-    sides:
-    - sell
-    volatility_regimes:
-    - 0
-    trend_alignment_values:
-    - 1
-  - name: monday_0200_sell_regime1_low_adx
-    risk_multiplier: 0.35
-    weekdays_utc:
-    - Monday
+    - Thursday
     hours_utc:
     - 2
-    sides:
-    - sell
-    volatility_regimes:
-    - 1
-    trend_alignment_values:
-    - 1
-    adx_max: 22.0
+    - 3
+    - 4
+    - 5
+    - 6
+    - 7
+  - name: tue_wed_thu_1721_all_throttle
+    risk_multiplier: 0.40
+    weekdays_utc:
+    - Tuesday
+    - Wednesday
+    - Thursday
+    hours_utc:
+    - 17
+    - 18
+    - 19
+    - 20
+    - 21
 execution:
   auto_trade: true
   deviation: 20
@@ -409,8 +264,8 @@ training:
   min_precision_floor: 0.45
   backtest_initial_balance: 200.0
   walkforward_train_size: 30000
-  walkforward_test_size: 4000
-  walkforward_step_size: 4000
+  walkforward_test_size: 6000
+  walkforward_step_size: 6000
   walkforward_max_combinations: 30
   walkforward_max_folds_per_combination: 8
 notifications:

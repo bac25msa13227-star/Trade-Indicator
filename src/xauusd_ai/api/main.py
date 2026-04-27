@@ -69,14 +69,14 @@ _LIVE_CFG_MAP: dict[str, Path] = {
 }
 _REQUIRED_MODEL_BINDINGS: dict[str, dict[str, str]] = {
     "acc1": {
-        "model": "outputs/acc1_breakthrough_net66590_dd3953_model.pkl",
-        "scaler": "outputs/acc1_breakthrough_net66590_dd3953_scaler.pkl",
-        "meta": "outputs/acc1_breakthrough_net66590_dd3953_model_meta.json",
+        "model": "outputs/acc1_combo133_202604_model.pkl",
+        "scaler": "outputs/acc1_combo133_202604_scaler.pkl",
+        "meta": "outputs/acc1_combo133_202604_meta.json",
     },
     "acc2": {
-        "model": "outputs/acc2_breakthrough_net21k_dd2333_model.pkl",
-        "scaler": "outputs/acc2_breakthrough_net21k_dd2333_scaler.pkl",
-        "meta": "outputs/acc2_breakthrough_net21k_dd2333_model_meta.json",
+        "model": "outputs/acc2_v14pp_202604_model.pkl",
+        "scaler": "outputs/acc2_v14pp_202604_scaler.pkl",
+        "meta": "outputs/acc2_v14pp_202604_meta.json",
     },
 }
 _BENCHMARK_VERIFY_FILE = Path(os.getenv("BENCHMARK_VERIFY_FILE", "outputs/wf_exact_recovery_verify_2016501.json"))
@@ -1118,11 +1118,21 @@ _DASHBOARD_CACHE_TTL = 30.0  # seconds — longer than build time to avoid thras
 
 # ── News constants & helpers ──────────────────────────────────────────────────
 
-_FF_NEWS_WEEK_URL  = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
-_FF_NEWS_MONTH_URL = "https://nfs.faireconomy.media/ff_calendar_thismonth.json"
-_NEWS_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; XAUBot/1.0)"}
-_NEWS_CACHE_TTL = 300.0   # 5 min default — short enough to catch actuals, avoids FF 429
-_NEWS_CACHE_TTL_POST_EVENT = 60.0  # reduce to 1 min for 10 min after an event fires
+_FF_NEWS_URLS = [
+    "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+    "https://cdn-nfs.faireconomy.media/ff_calendar_thisweek.json",
+    "https://nfs.faireconomy.media/ff_calendar_thismonth.json",
+    "https://cdn-nfs.faireconomy.media/ff_calendar_thismonth.json",
+]
+_NEWS_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.forexfactory.com/",
+    "Cache-Control": "no-cache",
+}
+_NEWS_CACHE_TTL = 300.0          # 5 min default
+_NEWS_CACHE_TTL_POST_EVENT = 90.0  # 90s after event fires (was 60s — less aggressive avoids 429)
 
 _NEWS_GOLD_DIR: dict[str, int] = {
     "Non-Farm Payroll": -1, "Nonfarm Payrolls": -1, "NF Payrolls": -1,
@@ -1244,11 +1254,16 @@ _news_cache_lock = _threading.Lock()
 # Track sent Telegram alerts: "{event_id}_{milestone}"
 _news_alerted: set[str] = set()
 _news_last_event_ts: float = 0.0  # monotonic time when last _past fired (shorter TTL window)
+# Intraday accumulation: keyed by event id, reset each calendar day
+_news_seen_today: dict[str, dict] = {}
+_news_seen_date: str = ""  # "YYYY-MM-DD" — reset when date changes
 
 
 def _build_news_payload() -> dict[str, Any]:
-    """Return news calendar with adaptive-TTL cache (shorter for 10 min after event fires)."""
-    global _news_cache, _news_cache_ts
+    """Return news calendar with adaptive-TTL cache (shorter for 10 min after event fires).
+    Accumulates today's events in-memory so past items are never lost on re-fetch.
+    """
+    global _news_cache, _news_cache_ts, _news_seen_today, _news_seen_date
     now = time.monotonic()
     # Use short TTL for 10 min after any event just-fired (_past branch)
     effective_ttl = (
@@ -1259,6 +1274,39 @@ def _build_news_payload() -> dict[str, Any]:
         if _news_cache and now - _news_cache_ts < effective_ttl:
             return _news_cache
         result = _fetch_news_uncached()
+        # Merge new events into the intraday accumulator so past events are not lost
+        from datetime import datetime as _dt2, timezone as _tz2
+        today_str = _dt2.now(_tz2.utc).strftime("%Y-%m-%d")
+        if _news_seen_date != today_str:
+            _news_seen_today = {}
+            _news_seen_date = today_str
+        for ev in result.get("week", []):
+            ev_id = ev.get("id")
+            if ev_id:
+                # Always overwrite with latest (captures actual values as they are released)
+                _news_seen_today[ev_id] = ev
+        # Rebuild today list from accumulated set, not just the fresh fetch
+        if _news_seen_today:
+            all_seen = sorted(_news_seen_today.values(), key=lambda e: e.get("datetime_iso", ""))
+            from datetime import datetime as _dt3, timezone as _tz3
+            now_utc3 = _dt3.now(_tz3.utc)
+            for ev in all_seen:
+                try:
+                    ev_dt = _dt3.fromisoformat(ev["datetime_iso"])
+                    if ev_dt.tzinfo is None:
+                        ev_dt = ev_dt.replace(tzinfo=_tz3.utc)
+                    ev["minutes_until"] = round((ev_dt - now_utc3).total_seconds() / 60, 1)
+                except Exception:
+                    pass
+            result_today = [e for e in all_seen if e.get("is_today")]
+            result["today"] = result_today
+            # Also include all seen events in week list (merged with fresh week)
+            fresh_ids = {e.get("id") for e in result.get("week", [])}
+            extra = [e for e in _news_seen_today.values() if e.get("id") not in fresh_ids]
+            if extra:
+                merged_week = list(result.get("week", [])) + extra
+                merged_week.sort(key=lambda e: e.get("datetime_iso", ""))
+                result["week"] = merged_week
         # Only replace cache if we got real data — don't overwrite with empty (FF rate-limit / timeout)
         if result.get("week"):
             _news_cache = result
@@ -1268,28 +1316,43 @@ def _build_news_payload() -> dict[str, Any]:
         return _news_cache
 
 
-def _fetch_news_uncached() -> dict[str, Any]:
-    """Directly fetch ForexFactory JSON and process events."""
+# Bridge URLs for news proxy (Docker containers cannot reach ForexFactory directly — Cloudflare rate-limits Docker NAT IPs)
+_BRIDGE_NEWS_URLS = [
+    "http://host.docker.internal:5600/news",
+    "http://host.docker.internal:5601/news",
+]
+
+
+def _fetch_news_via_bridge() -> list | None:
+    """Fetch ForexFactory events via the Windows MT5 bridge (which has a clean host IP).
+    Falls back to second bridge if first is unavailable.
+    Returns list of raw events, or None on failure.
+    """
     import requests as _req
+    for url in _BRIDGE_NEWS_URLS:
+        try:
+            r = _req.get(url, timeout=65)
+            if r.status_code == 200:
+                payload = r.json()
+                events = payload.get("events", [])
+                if events:
+                    logger.debug("News via bridge %s: %d events (cached=%s)", url, len(events), payload.get("cached"))
+                    return events
+        except Exception as exc:
+            logger.debug("Bridge news %s failed: %s", url, exc)
+    return None
+
+
+def _fetch_news_uncached() -> dict[str, Any]:
+    """Fetch ForexFactory news via Windows bridge proxy (avoids Docker NAT Cloudflare rate-limit)."""
     from datetime import datetime as _dt, timezone as _tz
 
     now_utc = _dt.now(_tz.utc)
     today_date = now_utc.date()
 
-    raw_events: list[dict] = []
-    for url in [_FF_NEWS_WEEK_URL, _FF_NEWS_MONTH_URL]:
-        try:
-            r = _req.get(url, headers=_NEWS_HEADERS, timeout=15)
-            if r.status_code == 429:
-                logger.warning("ForexFactory rate-limited (429) — keeping stale cache")
-                break  # don't try fallback URL, just keep existing cache
-            r.raise_for_status()
-            data = r.json()
-            if isinstance(data, list) and data:
-                raw_events = data
-                break
-        except Exception as exc:
-            logger.debug("News fetch from %s failed: %s", url, exc)
+    raw_events: list[dict] = _fetch_news_via_bridge() or []
+    if not raw_events:
+        logger.warning("All ForexFactory URLs failed — keeping stale cache")
 
     # Currencies that directly influence gold (skip exotic/irrelevant ones)
     _GOLD_CURRENCIES = {
@@ -2140,6 +2203,7 @@ async def _news_alert_loop() -> None:
                             f"⬅️ Trước: <b>{previous}</b>  🎯 Dự báo: <b>{forecast}</b>  ✅ Thực tế: <b>{actual}</b>\n"
                             f"🏅 Vàng: {label}"
                         )
+                        logger.info("News alert RELEASED: %s %s actual=%s", ev['currency'], ev['event'], actual)
                         await loop.run_in_executor(None, _tg_news_send, msg)
 
                 # ── Just passed — fire immediately even without actual ────────

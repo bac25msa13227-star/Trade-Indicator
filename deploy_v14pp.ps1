@@ -102,12 +102,12 @@ if ($LASTEXITCODE -ne 0) { Die "git lfs pull thất bại." }
 
 # Kiểm tra file model tồn tại và không phải LFS pointer
 $modelFiles = @(
-    "outputs\acc1_v14pp_model.pkl",
-    "outputs\acc1_v14pp_scaler.pkl",
-    "outputs\acc1_v14pp_model_meta.json",
-    "outputs\acc2_v14pp_model.pkl",
-    "outputs\acc2_v14pp_scaler.pkl",
-    "outputs\acc2_v14pp_model_meta.json"
+    "outputs\acc1_combo133_202604_model.pkl",
+    "outputs\acc1_combo133_202604_scaler.pkl",
+    "outputs\acc1_combo133_202604_meta.json",
+    "outputs\acc2_v14pp_202604_model.pkl",
+    "outputs\acc2_v14pp_202604_scaler.pkl",
+    "outputs\acc2_v14pp_202604_meta.json"
 )
 
 foreach ($f in $modelFiles) {
@@ -137,7 +137,7 @@ if ($RetrainModels) {
     # Hiển thị thông tin model đang dùng
     python -c "
 import json
-for acc, path in [('ACC1','outputs/acc1_v14pp_model_meta.json'),('ACC2','outputs/acc2_v14pp_model_meta.json')]:
+for acc, path in [('ACC1','outputs/acc1_combo133_202604_meta.json'),('ACC2','outputs/acc2_v14pp_202604_meta.json')]:
     m = json.load(open(path))
     print(f'  {acc}: threshold={m[\"decision_threshold\"]:.2f} | auc={m[\"roc_auc\"]:.4f} | features={sum(m[\"feature_mask\"])} | trained={m[\"retrain_date\"][:10]}')
 " 2>&1 | ForEach-Object { Log $_ }
@@ -268,14 +268,14 @@ $report += @"
 
 2. CẤU HÌNH V14++
 ─────────────────
-  ACC1 (PROFIT)    : configs/live_acc1.yaml
-    model_path     : outputs/acc1_v14pp_model.pkl
-    min_confidence : 0.85  (sideway + volatile)
+  ACC1 (COMBO #133): configs/live_acc1.yaml
+    model_path     : outputs/acc1_combo133_202604_model.pkl
+    min_confidence : 0.70  (Combo #133)
     signal_thresh  : 0.60
-    WF benchmark   : PF=3.931 | DD=-8.63% | WR=57.4% | 24/29 pos folds
+    WF benchmark   : 28 folds | 27/28 pos | +$78,204
 
-  ACC2 (COMPOSITE) : configs/live_acc2.yaml
-    model_path     : outputs/acc2_v14pp_model.pkl
+  ACC2 (V14++)     : configs/live_acc2.yaml
+    model_path     : outputs/acc2_v14pp_202604_model.pkl
     min_confidence : 0.88  (sideway + volatile)
     signal_thresh  : 0.60
     WF benchmark   : PF=3.364 | DD=-6.69% | WR=59.1% | 25/29 pos folds

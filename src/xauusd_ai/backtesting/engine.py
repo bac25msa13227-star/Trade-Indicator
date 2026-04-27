@@ -325,6 +325,17 @@ def simulate_dynamic_concurrent_backtest(
     _normal_mult  = float(getattr(settings.risk, 'normal_risk_multiplier', 1.0))
     _volatile_mult = float(getattr(settings.risk, 'strong_volatility_risk_multiplier', 1.0))
 
+    # Volatility ATR scaling — reduce risk during macro spikes
+    _vol_scaling_enabled = bool(getattr(settings.risk, 'volatility_risk_scaling_enabled', False))
+    _vol_atr_lookback = int(getattr(settings.risk, 'vol_atr_lookback_bars', 96))
+    _vol_spike_ratio = float(getattr(settings.risk, 'vol_atr_spike_ratio', 2.0))
+    _vol_spike_mult = float(getattr(settings.risk, 'vol_atr_spike_risk_mult', 0.5))
+    _vol_extreme_ratio = float(getattr(settings.risk, 'vol_atr_extreme_ratio', 3.5))
+    _vol_extreme_mult = float(getattr(settings.risk, 'vol_atr_extreme_risk_mult', 0.25))
+    # Rolling ATR window — filled as we iterate
+    from collections import deque as _deque
+    _atr_window: "_deque[float]" = _deque(maxlen=_vol_atr_lookback)
+
     # G11: Trailing SL config
     _trailing_cfg = getattr(settings.execution, 'trailing_sl', None)
     _trail_enabled = bool(getattr(_trailing_cfg, 'enabled', False)) if _trailing_cfg else False
@@ -413,6 +424,11 @@ def simulate_dynamic_concurrent_backtest(
             _daily_loss = 0.0
 
         if row.prediction == 0:
+            # Still update ATR window on every bar (including non-trade bars)
+            if _vol_scaling_enabled:
+                _bar_atr = float(getattr(row, 'atr', 0.0))
+                if _bar_atr > 0:
+                    _atr_window.append(_bar_atr)
             balance_history.append(balance)
             continue
 
@@ -528,16 +544,32 @@ def simulate_dynamic_concurrent_backtest(
         # G10: Apply score multiplier
         _strat_score = float(getattr(row, 'strategy_score', 0.5))
         _abs_score = abs(_strat_score)
-        if _abs_score >= 0.5:
-            _score_mult = 1.0
+        if bool(getattr(settings.risk, 'score_multiplier_enabled', True)):
+            if _abs_score >= 0.5:
+                _score_mult = 1.0
+            else:
+                _score_mult = 0.7 + 0.6 * _abs_score
         else:
-            _score_mult = 0.7 + 0.6 * _abs_score
+            _score_mult = 1.0  # score_multiplier_enabled=False → always full size
         rf *= _score_mult
 
         # Anti-martingale: reduce risk after consecutive losses
         if _anti_mart_factor < 1.0 and _consecutive_losses > 0:
             _n_reductions = min(_consecutive_losses, _anti_mart_max)
             rf *= _anti_mart_factor ** _n_reductions
+
+        # Volatility ATR spike scaling — reduce size during macro events
+        _cur_atr = float(getattr(row, 'atr', 0.0))
+        if _vol_scaling_enabled and _cur_atr > 0:
+            _atr_window.append(_cur_atr)
+            if len(_atr_window) >= 20:  # need at least 20 bars to form a baseline
+                _mean_atr = sum(_atr_window) / len(_atr_window)
+                if _mean_atr > 0:
+                    _atr_ratio = _cur_atr / _mean_atr
+                    if _atr_ratio >= _vol_extreme_ratio:
+                        rf *= _vol_extreme_mult   # extreme spike → 25% size
+                    elif _atr_ratio >= _vol_spike_ratio:
+                        rf *= _vol_spike_mult      # moderate spike → 50% size
         # compound=False: always use starting balance -> linear expectancy (no explosion).
         effective_bal = balance if compound else start_bal
         # Apply compound cap: prevent unrealistic exponential growth

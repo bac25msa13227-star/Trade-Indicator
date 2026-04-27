@@ -122,6 +122,21 @@ def _build_date_mask(series: pd.Series, start: str | None, end: str | None) -> p
     return mask
 
 
+def get_label_lookahead_bars(settings: Settings) -> int:
+    """Return the maximum forward-look bars used by labeling logic.
+
+    Rows in the tail of a train split can leak into the test window when labels
+    require future bars (label_horizon / SLTP horizon). Callers should drop this
+    many rows from the end of train before fitting.
+    """
+    base_horizon = int(getattr(settings.training, "label_horizon", 1) or 1)
+    lookahead = max(base_horizon, 1)
+    if bool(getattr(settings.training, "use_sltp_label", True)):
+        sltp_horizon = int(getattr(settings.training, "sltp_label_max_horizon", lookahead) or lookahead)
+        lookahead = max(lookahead, sltp_horizon)
+    return max(lookahead, 1)
+
+
 def _enrich_execution_frame(settings: Settings, frame: pd.DataFrame) -> pd.DataFrame:
     enriched = frame.copy()
     enriched["returns"] = enriched["close"].pct_change().fillna(0)
@@ -208,10 +223,15 @@ def _merge_context(settings: Settings, frames: dict[str, pd.DataFrame]) -> pd.Da
         [1, -1],
         default=0,
     )
+    # ── Regime detection: use rolling atr_percentile (self-normalising)
+    # Raw atr_ratio depends on price level (gold $300→$5000) and timeframe (M5 vs M15),
+    # causing ~70%+ bars to be misclassified as "sideway" at current prices.
+    # atr_percentile = rolling 100-bar rank (0-1) → price-agnostic, timeframe-agnostic.
+    # Config thresholds are now interpreted as percentile cutoffs (e.g. 0.20 / 0.80).
     merged["volatility_regime"] = np.select(
         [
-            merged["atr_ratio"] <= settings.strategy.sideways_volatility_threshold,
-            merged["atr_ratio"] >= settings.strategy.strong_volatility_threshold,
+            merged["atr_percentile"] <= settings.strategy.sideways_volatility_threshold,
+            merged["atr_percentile"] >= settings.strategy.strong_volatility_threshold,
         ],
         [0, 2],
         default=1,

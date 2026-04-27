@@ -61,3 +61,4 @@ tests/test_risk_manager_core.py
 tests/test_self_learner_loss_snapshot.py
 tests/test_storage_client.py
 tests/test_telegram_notifier.py
+tests/test_windows_dashboard_endpoints.py

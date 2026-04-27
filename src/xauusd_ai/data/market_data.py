@@ -345,7 +345,12 @@ class MarketDataService:
         for timeframe_name in required:
             # all_bars=True dùng cho training — load toàn bộ CSV không giới hạn
             bars = 999_999_999 if all_bars else self.settings.market.bars[timeframe_name]
-            frames[timeframe_name] = self._fetch_rates(timeframe_name, bars, resolved_source)
+            frame = self._fetch_rates(timeframe_name, bars, resolved_source)
+            if not all_bars and len(frame) > 2:
+                # MT5/bridge feeds include an in-progress candle at the tail.
+                # Drop it so live inference uses fully closed bars like WF/backtest.
+                frame = frame.iloc[:-1].reset_index(drop=True)
+            frames[timeframe_name] = frame
         return frames
 
     def market_state(self) -> dict[str, object]:
