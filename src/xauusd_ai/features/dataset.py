@@ -830,4 +830,10 @@ def build_live_feature_frame(settings: Settings, frames: dict[str, pd.DataFrame]
     merged = _merge_context(settings, frames)
     strategy_output = strategy.annotate_dataset(merged)
     dataset = merged.join(strategy_output)
-    return dataset.dropna(subset=FEATURE_COLUMNS).reset_index(drop=True)
+    dataset = dataset.dropna(subset=FEATURE_COLUMNS).reset_index(drop=True)
+    # Compute blended direction signal (same formula as WF dataset) so live bot
+    # uses 9-indicator consensus instead of raw strategy_score sign alone.
+    dataset["trade_side"] = np.where(
+        _expected_direction_from_context(dataset) > 0, "buy", "sell"
+    )
+    return dataset

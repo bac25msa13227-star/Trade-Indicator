@@ -150,7 +150,13 @@ class HybridStrategy:
     def should_allow_row(self, row: pd.Series | object, probability: float) -> tuple[bool, str]:
         strategy_score = abs(float(getattr(row, "strategy_score", 0.0)))
         raw_strategy_score = float(getattr(row, "strategy_score", 0.0))
-        trade_side = "sell" if raw_strategy_score < 0 else "buy"
+        # Prefer pre-computed trade_side (from expected_direction 9-indicator blend in dataset)
+        # over recomputing from strategy_score sign alone. This keeps WF and live consistent.
+        _row_trade_side = str(getattr(row, "trade_side", "")).strip().lower()
+        if _row_trade_side in ("buy", "sell"):
+            trade_side = _row_trade_side
+        else:
+            trade_side = "sell" if raw_strategy_score < 0 else "buy"
         volatility_regime = int(getattr(row, "volatility_regime", 1))
         trend_alignment = int(getattr(row, "trend_alignment", 1))
         blocked_by_time, blocked_reason = self._blocked_by_time(getattr(row, "time", None))
@@ -266,7 +272,10 @@ class HybridStrategy:
     def build_trade_decision(self, frames: dict[str, pd.DataFrame], live_row: pd.Series, model_signal: dict[str, float]) -> TradeDecision:
         confidence = float(model_signal["probability"])
         strategy_score = float(live_row["strategy_score"])
-        hyp_side_early = "buy" if strategy_score >= 0 else "sell"
+        # Prefer pre-computed trade_side (9-indicator blend from build_live_feature_frame)
+        # over strategy_score sign alone — keeps live direction consistent with WF sim.
+        _live_side = str(live_row.get("trade_side", "")).strip().lower()
+        hyp_side_early = _live_side if _live_side in ("buy", "sell") else ("buy" if strategy_score >= 0 else "sell")
 
         # ── Asymmetric confidence thresholds per direction ────────────────────
         base_min_conf = self.settings.risk.min_confidence
@@ -297,7 +306,7 @@ class HybridStrategy:
         entry = float(live_row["close"])
         stop_distance = atr_value * sl_mult if atr_value > 0 else 0.0
 
-        hyp_side = "buy" if strategy_score >= 0 else "sell"
+        hyp_side = _live_side if _live_side in ("buy", "sell") else ("buy" if strategy_score >= 0 else "sell")
         if hyp_side == "buy":
             hyp_sl = entry - stop_distance if stop_distance > 0 else 0.0
             hyp_tp = entry + stop_distance * rr if stop_distance > 0 else 0.0
