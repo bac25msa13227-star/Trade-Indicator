@@ -1,0 +1,113 @@
+======================================================================
+  WALK-FORWARD VALIDATION — ICT + WYCKOFF + NEWS (33 features)
+======================================================================
+
+  Config  : /Users/dodoannang/Documents/Thạc sĩ MSE/Trade Indicator/outputs/sweep_ptp_tp/sweep_ptp2.0_tp3.5_h_cymbhm.yaml
+  Mode    : ⚡ FAST
+  Features: 65  (D1:1 H4:9 H1:3 M15:15 News:5 StructMomentum:11 Adv:9)
+  Train   : 30,000 bars (~1 yr M15)
+  Test    : 6,000 bars (~3 mo M15)
+  Step    : 6,000 bars (~3 mo slide)
+  Balance : $200 khởi đầu | Rủi ro 4.00%/lệnh | NO-COMPOUND (reset $200/fold)
+  RR Sweep: SKIP
+  PrecFloor:30%  (win rate tối thiểu yêu cầu)
+  ThrMethod: MAX  (conservative → fewer trades)
+  RiskPct : 5.00% OVERRIDE (config default: 4.00%)
+  MinConf : 0.70 override (combo133 mode: trend_filter=OFF, min_strat=0.0)
+  BlockHrs: [3, 15, 17, 22, 23] UTC (filtering 5/24 hours)
+  Mode    : 🎯 COMBO133 (replicates show_combo133_daily.py settings)
+  CB mode : ✅ LIVE-equivalent (kill_switch_enabled=True)
+
+  Label lookahead purge: 32 bars
+[1/4] Loading multi-timeframe data from CSV...
+      M5:1,639,417  H4:36,909  H1:139,464  D1:7,159 rows  (3.6s)
+
+[2/4] Building full dataset with 65 ICT+Wyckoff+News features...
+      💾 Cached to: sweep_ptp2.0_tp3.5_h_cymbhm_fb9e5714c47d.parquet
+      Total rows : 1,639,360
+      Date range : 2003-05-05 → 2026-04-30
+      Label rate : 20.5%
+      Time       : 26.6s
+
+[2b] Loading M1 data for bar-by-bar trailing SL simulation...
+      M1 rows    : 7,809,491  (2003-05-05 → 2026-04-30)  (32.3s)
+      M1 sim     : ENABLED — more accurate trailing SL + partial TP
+
+[3/4] Running walk-forward folds...
+      Estimated folds: 268
+
+  Fold  1/268        Test: 2025-10-17 -> 2025-11-18 | AUC=0.6026  Prec=0.2770  Recall=0.8079  F1=0.4125  Thr=0.35  Sigs=4372/6000  Bal: $200→$159 (-20.6%)  (20.0s)
+  Fold  2/268        Test: 2025-11-18 -> 2025-12-18 | AUC=0.6229  Prec=0.2230  Recall=0.9751  F1=0.3630  Thr=0.37  Sigs=5615/6000  Bal: $200→$836 (+317.9%)  (19.6s)
+  Fold  3/268        Test: 2025-12-18 -> 2026-01-21 | AUC=0.6265  Prec=0.2630  Recall=0.7724  F1=0.3924  Thr=0.60  Sigs=4027/6000  Bal: $200→$2,307 (+1053.7%)  (19.9s)
+  Fold  4/268        Test: 2026-01-21 -> 2026-02-20 | AUC=0.6433  Prec=0.3531  Recall=0.5054  F1=0.4157  Thr=0.60  Sigs=2113/6000  Bal: $200→$12,043 (+5921.5%)  (20.0s)
+  Fold  5/268        Test: 2026-02-20 -> 2026-03-23 | AUC=0.6569  Prec=0.3083  Recall=0.7959  F1=0.4445  Thr=0.58  Sigs=3934/6000  Bal: $200→$171 (-14.3%)  (20.7s)
+  Fold  6/268        Test: 2026-03-23 -> 2026-04-23 | AUC=0.5911  Prec=0.2417  Recall=0.8041  F1=0.3716  Thr=0.55  Sigs=4262/6000  Bal: $200→$357 (+78.8%)  (19.2s)
+
+  [COMBO133 partial fold 7* — 2026-04-23 → 2026-04-30 (1360 bars)]
+  Fold  7* [PARTIAL] Test: 2026-04-23 → 2026-04-30 | AUC=0.6575  Prec=0.3203  Recall=0.8866  F1=0.4706  Thr=0.60  Sigs=1074/1360  Bal: $200→$1,498 (+649.0%)  (20.5s)
+
+
+[4/4] Aggregating results across 7 folds...
+
+======================================================================
+  WALK-FORWARD RESULTS SUMMARY
+======================================================================
+  Folds completed  : 7
+  Date range       : 2025-10-17 → 2026-04-30
+
+  ROC-AUC  avg    : 0.6287  (range 0.5911–0.6575,  std=0.0238)
+  Precision avg   : 0.2838  (range 0.2230–0.3531,  std=0.0426)
+  Recall    avg   : 0.7925
+  F1 Score  avg   : 0.4100
+  Accuracy  avg   : 0.4488
+  Signal rate avg : 69.2%
+
+  Signal win rate  : 26.8%  (6511/24323 signals correct)
+
+  📊 Dynamic Concurrent Position Simulation (per-fold avg):
+     Win Rate avg   : 35.7%
+     Profit Factor  : 1.621
+     Return/fold    : +1140.84%  ($200 start per fold)
+     Max Drawdown   : -18.76%
+     Avg concurrent : 1.9 positions | Max concurrent: 3
+
+  Overfitting Check:
+    AUC std=0.0238 < 0.04  ✅ Low variance — model generalizes well
+    Min precision=0.2230  ❌  Some folds signficantly below 50%
+
+  Per-Fold Table:
+  Fold               Test Period     AUC    Prec     Rec      F1    Thr   Sigs%
+  --------------------------------------------------------------------
+     1   2025-10-17 → 2025-11-18  0.6026  0.2770  0.8079  0.4125   0.35  72.9%  ❌
+     2   2025-11-18 → 2025-12-18  0.6229  0.2230  0.9751  0.3630   0.37  93.6%  ❌
+     3   2025-12-18 → 2026-01-21  0.6265  0.2630  0.7724  0.3924   0.60  67.1%  ❌
+     4   2026-01-21 → 2026-02-20  0.6433  0.3531  0.5054  0.4157   0.60  35.2%  ❌
+     5   2026-02-20 → 2026-03-23  0.6569  0.3083  0.7959  0.4445   0.58  65.6%  ❌
+     6   2026-03-23 → 2026-04-23  0.5911  0.2417  0.8041  0.3716   0.55  71.0%  ❌
+     7   2026-04-23 → 2026-04-30  0.6575  0.3203  0.8866  0.4706   0.60  79.0%  ❌
+
+======================================================================
+  RR SWEEP — khởi đầu $200  |  rủi ro 4.00%/lệnh
+======================================================================
+     RR   Avg Balance   Final Bal   Avg Win%   Avg EV/T   Trades    MaxDD
+  ------------------------------------------------------------------------
+
+
+  Report saved  → outputs/walkforward_report_acc1_v14pp_profit.json
+  Sim trades    → outputs/walkforward_trades_acc1_v14pp_profit_sim_trades.csv  (1,269 executed trades)
+  Signals saved → outputs/walkforward_trades_acc1_v14pp_profit.csv  (24,323 rows)
+  Win  log      → outputs/win_analysis_walkforward.jsonl  (6,511 winning signals)
+  Loss log      → outputs/loss_analysis_walkforward.jsonl  (17,812 losing signals)
+
+  Win/Loss Breakdown:
+    Total signals generated : 24,323
+    ✅ Winning signals       : 6,511  (26.8%)
+    ❌ Losing signals        : 17,812  (73.2%)
+
+  Self-Learner Status:
+    live_learning_enabled  = True  ✅
+    Win/loss logs ready for self-learner to re-train on loss patterns.
+
+======================================================================
+  Walk-Forward Complete.
+======================================================================
