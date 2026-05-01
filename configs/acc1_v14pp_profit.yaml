@@ -104,7 +104,7 @@ strategy:
 
 risk:
   mode: fixed_fractional
-  risk_per_trade: 0.02              # 🛡️ SAFETY PATCH: 0.04→0.02 — sync with live for 1:1 parity
+  risk_per_trade: 0.030             # 🎯 TARGET100k FINAL: WF 29-fold $200 reset → net $125k, lose 2, DD 19.42%, PF 3.07
   risk_tier_floor: 0.02
   max_open_positions: 3
   stop_loss_atr_multiple: 1.5
@@ -119,8 +119,8 @@ risk:
   normal_risk_multiplier: 1.0
   strong_volatility_risk_multiplier: 0.70
   kill_switch_enabled: true
-  daily_loss_limit_pct: 0.12        # V14++: SWEEP BEST
-  max_drawdown_kill_pct: 0.25       # 🛡️ SAFETY PATCH: 0.20→0.25 — sync with live
+  daily_loss_limit_pct: 0.08        # 🎯 TARGET100k: 0.12→0.08 to break cascading losses (chains <8%/day)
+  max_drawdown_kill_pct: 0.15       # 🎯 TARGET100k: 1:1 sync with live
   consecutive_loss_pause_count: 3
   consecutive_loss_cooldown_bars: 12 # V14++: SWEEP BEST — 1h cooldown
   anti_martingale_factor: 0.7       # V14++: SWEEP BEST
