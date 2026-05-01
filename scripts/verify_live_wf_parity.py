@@ -57,7 +57,7 @@ WF_COMBO133: dict[str, Any] = {
 
     # === Risk sizing (WF dùng) ===
     "risk.min_confidence":                       0.70,
-    "risk.risk_per_trade":                       0.04,
+    "risk.risk_per_trade":                       0.02,
     "risk.max_open_positions":                   3,
     "risk.stop_loss_atr_multiple":               1.5,
     "risk.take_profit_rr":                       5.5,
