@@ -108,7 +108,7 @@ risk:
   risk_tier_floor: 0.02
   max_open_positions: 3
   stop_loss_atr_multiple: 1.5
-  take_profit_rr: 3.5
+  take_profit_rr: 5.5              # ✅ SWEEP WINNER ptp=2.5/tp=5.5 — full 29-fold verify PASS
   entry_slippage_atr_frac: 0.07
   volatile_take_profit_rr: 5.0
   sideway_take_profit_rr: 2.5
@@ -136,7 +136,7 @@ risk:
   reentry_cooldown_bars_after_sl: 5
   reentry_min_distance_atr: 0.35
   partial_tp_enabled: true           # SYNC with live
-  partial_tp_rr: 1.2
+  partial_tp_rr: 2.5               # ✅ SWEEP WINNER
   partial_tp_pct: 0.5
   compound_cap: 500
   risk_throttle_rules:

@@ -113,7 +113,7 @@ risk:
   risk_tier_floor: 0.02
   max_open_positions: 3             # COMBO #133: WF-synced (was 2)
   stop_loss_atr_multiple: 1.5
-  take_profit_rr: 3.5
+  take_profit_rr: 5.5              # ✅ SWEEP WINNER ptp=2.5/tp=5.5: ret/fold +16195% DD -17.0% PF 3.40 (was 3.5 → +1280% DD -19.5%)
   entry_slippage_atr_frac: 0.07    # Shift SL/TP levels by 7% ATR to simulate MT5 fill vs bar.close (G4 fix)
   volatile_take_profit_rr: 5.0     # ACC2 logic: Volatile regime RR 1:5
   sideway_take_profit_rr: 2.5      # Sideways regime RR 1:2.5
@@ -138,9 +138,9 @@ risk:
   # Cross-side cooldown: block opposite-side flip after any SL (anti-whipsaw)
   # M5 timeframe: 3 bars = 15 min. Prevents BUY-SL → SELL → SELL-SL cascade.
   cross_side_reentry_cooldown_bars: 3
-  # Partial Take Profit — book at 1.5R (better quality exits than 1.0R)
+  # Partial Take Profit — book at 2.5R (sweep winner: holds winner longer, filters early exits)
   partial_tp_enabled: true
-  partial_tp_rr: 1.2
+  partial_tp_rr: 2.5
   partial_tp_pct: 0.5               # Close 50% of position
   risk_throttle_rules:
     - name: monday_0207_all_heavy_throttle

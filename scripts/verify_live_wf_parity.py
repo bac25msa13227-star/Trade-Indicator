@@ -60,12 +60,12 @@ WF_COMBO133: dict[str, Any] = {
     "risk.risk_per_trade":                       0.04,
     "risk.max_open_positions":                   3,
     "risk.stop_loss_atr_multiple":               1.5,
-    "risk.take_profit_rr":                       3.5,
+    "risk.take_profit_rr":                       5.5,
     "risk.volatility_risk_scaling_enabled":      False,
 
     # === Partial TP (engine.py) ===
     "risk.partial_tp_enabled":                   True,
-    "risk.partial_tp_rr":                        1.2,
+    "risk.partial_tp_rr":                        2.5,
     "risk.partial_tp_pct":                       0.5,
 
     # === Trailing SL (engine.py) ===
