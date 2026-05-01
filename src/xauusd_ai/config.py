@@ -193,6 +193,10 @@ class RiskSettings(StrictSettingsModel):
     entry_slippage_atr_frac: float = 0.0
     # commission_rr:  broker commission as fraction of 1R per trade
     commission_rr: float = 0.02
+    # max_lot:  absolute cap on lot size per trade (broker/account limit)
+    #   5.0 → max 5 standard lots per XAUUSD trade (realistic for retail $200–$100k)
+    #   0.0 → no cap (unlimited, unrealistic for large compound balances)
+    max_lot: float = 0.0
     # compound_cap:  max balance multiplier per fold for sim (0=unlimited)
     #   e.g. 50.0 → balance capped at 50× starting balance per fold
     compound_cap: float = 50.0
@@ -227,12 +231,27 @@ class RiskSettings(StrictSettingsModel):
     reentry_guard_enabled: bool = True
     reentry_cooldown_bars_after_sl: int = 1
     reentry_min_distance_atr: float = 0.35
+    # Cross-side cooldown: block opposite-side flip for N bars after any SL.
+    # Prevents whipsaw BUY-SL → SELL-SL → BUY-SL pattern in sideway markets.
+    # 0 = disabled (legacy behavior). Recommended 3-5 bars on M5 timeframe.
+    cross_side_reentry_cooldown_bars: int = 0
     # ── Partial Take Profit ────────────────────────────────────────
     partial_tp_enabled: bool = False
     partial_tp_rr: float = 1.0             # Close partial_tp_pct at 1R profit
     partial_tp_pct: float = 0.5            # Close 50% of position at partial_tp_rr
     # Score multiplier: when False, all trades use full risk_per_trade (score_mult=1.0)
     score_multiplier_enabled: bool = True
+    # ── Overnight / hold-duration costs ────────────────────────────
+    # swap_per_night_rr: negative swap cost per night held as fraction of 1R.
+    #   XAUUSD buy swap ≈ -$0.50–$1.50/0.01lot/night. At 1R=$7.50 → ≈ -0.003–0.007 per night.
+    #   Sell swap is typically a smaller positive (use 30% of absolute value).
+    #   0.0 = disabled (default for backward compat).
+    swap_per_night_rr: float = 0.0
+    # weekend_gap_penalty_rr: extra friction (negative) applied to trades that span
+    #   Fri 22:00 UTC → Sun 22:00 UTC. Models the risk of an adverse gap opening.
+    #   XAUUSD avg absolute gap ~$3–$10. In expectation (50% adverse): ~-0.05 to -0.10R.
+    #   0.0 = disabled (default for backward compat).
+    weekend_gap_penalty_rr: float = 0.0
     risk_throttle_rules: list[RiskThrottleRuleSettings] = Field(default_factory=list)
 
 

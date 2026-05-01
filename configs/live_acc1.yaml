@@ -135,6 +135,9 @@ risk:
   reentry_guard_enabled: true
   reentry_cooldown_bars_after_sl: 5
   reentry_min_distance_atr: 0.35
+  # Cross-side cooldown: block opposite-side flip after any SL (anti-whipsaw)
+  # M5 timeframe: 3 bars = 15 min. Prevents BUY-SL → SELL → SELL-SL cascade.
+  cross_side_reentry_cooldown_bars: 3
   # Partial Take Profit — book at 1.5R (better quality exits than 1.0R)
   partial_tp_enabled: true
   partial_tp_rr: 1.2

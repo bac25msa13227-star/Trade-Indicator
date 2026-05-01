@@ -2330,6 +2330,25 @@ def run_live_loop(settings: Settings) -> None:
         side = str(getattr(decision, "side", "") or "").strip().lower()
         if side not in {"buy", "sell"}:
             return True, "ok"
+
+        # ── Cross-side cooldown: block opposite-side flip after any recent SL ──
+        # Prevents whipsaw BUY-SL → SELL-SL → BUY-SL in sideway markets.
+        cross_cooldown_bars = max(_safe_int(getattr(settings.risk, "cross_side_reentry_cooldown_bars", 0), 0), 0)
+        if cross_cooldown_bars > 0:
+            opposite = "sell" if side == "buy" else "buy"
+            opp_marker = _reentry_guard_state.get(opposite)
+            if opp_marker:
+                opp_close_epoch = _safe_float(opp_marker.get("close_epoch"), 0.0)
+                if opp_close_epoch > 0:
+                    opp_close_ts = pd.to_datetime(opp_close_epoch, unit="s", utc=True, errors="coerce")
+                    if not pd.isna(opp_close_ts):
+                        opp_bars_since = int(max(0.0, (latest_bar_time - opp_close_ts).total_seconds()) // max(_exec_tf_secs, 1))
+                        if opp_bars_since < cross_cooldown_bars:
+                            return (
+                                False,
+                                f"REENTRY_GUARD: {side.upper()} flip blocked {opp_bars_since}/{cross_cooldown_bars} bars after {opposite.upper()} SL",
+                            )
+
         marker = _reentry_guard_state.get(side)
         if not marker:
             return True, "ok"
@@ -2844,6 +2863,24 @@ def run_live_loop(settings: Settings) -> None:
                 )
 
                 # ── Anti re-entry guard after SL (same side) ───────────────────────────
+                if decision.should_trade and not settings.strategy.force_trade:
+                    # ── Circuit breaker (consecutive-loss cooldown / kill switch / daily loss) ──
+                    cb_blocked, cb_reason = risk_manager.is_circuit_breaker_active(account_balance)
+                    if cb_blocked:
+                        LOGGER.warning(
+                            "Circuit breaker BLOCKED: %s | side=%s conf=%.3f",
+                            cb_reason, decision.side, decision.confidence,
+                        )
+                        decision = decision.__class__(
+                            should_trade=False,
+                            side=decision.side,
+                            confidence=decision.confidence,
+                            reason=cb_reason,
+                            entry_price=decision.entry_price,
+                            stop_loss=decision.stop_loss,
+                            take_profit=decision.take_profit,
+                        )
+
                 if decision.should_trade and not settings.strategy.force_trade:
                     reentry_allowed, reentry_reason = _check_reentry_guard(
                         decision,
