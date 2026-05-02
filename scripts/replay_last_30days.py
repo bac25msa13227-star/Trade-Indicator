@@ -119,14 +119,11 @@ def replay(
         print(f"      applied feat_mask → {X.shape[1]} features")
     proba = model.predict_proba(X)[:, 1]
 
-    # Threshold from model meta if available, else min_confidence
-    threshold = float(getattr(settings.risk, "min_confidence", 0.70))
-    if meta_path.exists():
-        import json
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        if "decision_threshold" in meta:
-            threshold = float(meta["decision_threshold"])
-    print(f"      decision threshold: {threshold:.3f}")
+    # Threshold: always use config signal_threshold so replay matches live engine exactly.
+    # meta["decision_threshold"] may be stale (0.76 vs WF calibrated ~0.60); don't use it.
+    threshold = float(getattr(settings.strategy, "signal_threshold",
+                              getattr(settings.risk, "min_confidence", 0.70)))
+    print(f"      decision threshold: {threshold:.3f}  (from settings.strategy.signal_threshold)")
 
     window["split"] = "test"
     window["probability"] = proba

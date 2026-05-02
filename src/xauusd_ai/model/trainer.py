@@ -421,7 +421,7 @@ class ModelTrainer:
             _meta_thresh = metadata.get("decision_threshold")
             _cfg_thresh = float(self.settings.strategy.signal_threshold)
             if _meta_thresh is not None and float(_meta_thresh) != _cfg_thresh:
-                LOGGER.info(
+                logging.getLogger(__name__).info(
                     "load_artifacts: config signal_threshold=%.4f overrides model meta decision_threshold=%.4f",
                     _cfg_thresh, float(_meta_thresh),
                 )
