@@ -296,7 +296,11 @@ def simulate_dynamic_concurrent_backtest(
     compound_cap = float(getattr(settings.risk, "compound_cap", 50.0))
     max_balance = start_bal * compound_cap if compound_cap > 0 else float("inf")
 
-    # pending: list of {"close_bar_idx": int, "absolute_pnl": float, "meta": dict}
+    # Hold-duration realism: overnight swap cost + weekend gap penalty
+    # swap_per_night_rr: negative value → XAUUSD buy swap ~-$0.50/0.01lot/night = ~-0.005R/night
+    # weekend_gap_penalty_rr: negative → expected loss from adverse weekend gap
+    _swap_per_night_rr = float(getattr(settings.risk, "swap_per_night_rr", 0.0))
+    _weekend_gap_rr = float(getattr(settings.risk, "weekend_gap_penalty_rr", 0.0))
     pending: list[dict] = []
     trades: list[dict] = []
     wins = 0
@@ -653,6 +657,50 @@ def simulate_dynamic_concurrent_backtest(
             side=str(getattr(row, "trade_side", "")),
             probability=float(row.probability),
         )
+        # ── Realistic lot-snapping (min_lot=0.01, XAUUSD $100/lot/pip) ──────
+        # On small accounts ($200), ideal lot is e.g. 0.005 but MT5 requires 0.01.
+        # Snap up to 0.01 and recompute actual risk fraction so PnL matches live.
+        _atr_lot = float(getattr(row, 'atr', 0.0))
+        if regime == 0:   # sideway
+            _sl_mult_lot = float(getattr(settings.risk, 'sideway_sl_atr_multiple',
+                                         settings.risk.stop_loss_atr_multiple))
+        elif regime == 2:  # volatile
+            _sl_mult_lot = float(getattr(settings.risk, 'volatile_sl_atr_multiple',
+                                         settings.risk.stop_loss_atr_multiple))
+        else:
+            _sl_mult_lot = float(settings.risk.stop_loss_atr_multiple)
+        _sl_dist = _atr_lot * _sl_mult_lot
+        _XAUUSD_OZ = 100.0
+        _MIN_LOT_SNAP = 0.01
+        _MAX_LOT_CAP = float(getattr(settings.risk, 'max_lot', 0.0))
+        if _sl_dist > 0 and effective_bal > 0:
+            _ideal_lot = (effective_bal * rf) / (_XAUUSD_OZ * _sl_dist)
+            _actual_lot = max(_MIN_LOT_SNAP, round(_ideal_lot / _MIN_LOT_SNAP) * _MIN_LOT_SNAP)
+            if _MAX_LOT_CAP > 0:
+                _actual_lot = min(_actual_lot, _MAX_LOT_CAP)
+            rf = (_actual_lot * _XAUUSD_OZ * _sl_dist) / effective_bal
+        # ── Hold-duration costs: overnight swap + weekend gap ────────────────
+        # Applied BEFORE absolute_pnl so dollar amounts are accurate.
+        _hold = int(getattr(row, 'bars_held', label_horizon))
+        _entry_time_obj = getattr(row, 'time', None)
+        _side_str = str(getattr(row, 'trade_side', ''))
+        _swap_rr = 0.0
+        _gap_rr = 0.0
+        if _swap_per_night_rr != 0.0 and _hold > 0:
+            _nights = _hold * 5.0 / (60.0 * 24.0)  # M5 bars → nights
+            if _side_str == 'buy':
+                _swap_rr = _swap_per_night_rr * _nights         # negative → cost
+            else:
+                _swap_rr = -abs(_swap_per_night_rr) * 0.3 * _nights  # sell: smaller
+        if _weekend_gap_rr != 0.0 and _entry_time_obj is not None and hasattr(_entry_time_obj, 'weekday'):
+            _wd = _entry_time_obj.weekday()  # Mon=0 .. Sun=6
+            _hr = _entry_time_obj.hour
+            # Friday trade that runs into the weekend (Fri 22:00 UTC close)
+            if _wd == 4 and _hr < 22:
+                _mins_to_close = (22 - _hr) * 60
+                if _hold * 5 > _mins_to_close:
+                    _gap_rr = _weekend_gap_rr  # negative → penalty
+        net_rr += _swap_rr + _gap_rr
         absolute_pnl = effective_bal * rf * net_rr
         open_count = len(pending)
         max_concurrent_seen = max(max_concurrent_seen, open_count + 1)
@@ -664,6 +712,9 @@ def simulate_dynamic_concurrent_backtest(
             "realized_rr": float(row.realized_rr),
             "net_rr": float(net_rr),
             "friction_rr": float(friction_rr),
+            "swap_rr": round(_swap_rr, 6),
+            "gap_rr": round(_gap_rr, 6),
+            "bars_held": _hold,
             "probability": float(row.probability),
             "risk_fraction": float(rf),
             "pnl": round(absolute_pnl, 4),
@@ -680,7 +731,6 @@ def simulate_dynamic_concurrent_backtest(
             "risk_throttle_reason": throttle_reason,
         }
         # P0: Use per-trade bars_held from SL/TP race (fallback to label_horizon)
-        _hold = int(getattr(row, 'bars_held', label_horizon))
         pending.append(
             {"close_bar_idx": i + _hold, "absolute_pnl": absolute_pnl, "meta": meta}
         )

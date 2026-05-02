@@ -184,6 +184,7 @@ risk:
   partial_tp_rr: 1.2                         # Chốt 50% tại RR=1.2
   partial_tp_pct: 0.5
   compound_cap: 500
+  max_lot: 5.0                               # Tối đa 5 lots/lệnh — realistic cho retail $200→$100k
   risk_throttle_rules:
     - name: monday_0207_all_heavy_throttle
       risk_multiplier: 0.20
@@ -201,6 +202,14 @@ risk:
       risk_multiplier: 0.40
       weekdays_utc: [Tuesday, Wednesday, Thursday]
       hours_utc: [17, 18, 19, 20, 21]
+  # ── Realistic friction (đặt tường minh để không dùng Python defaults) ──────
+  spread_cost_rr: 0.15          # Spread XAUUSD round-trip ~$0.40–$0.60 ≈ 15% của 1R
+  slippage_rr: 0.08             # Market order slippage + bar-open vs close gap ≈ 8% của 1R
+  commission_rr: 0.03           # Broker commission ≈ 3% của 1R
+  # Total friction = 0.26R/lệnh (vs default 0.17R) — bảo thủ hơn ~53%
+  # ── Hold-duration costs (swap = 0 vì broker không tính phí qua đêm) ─────────
+  swap_per_night_rr: 0.0
+  weekend_gap_penalty_rr: 0.0
 
 execution:
   auto_trade: true
@@ -228,3 +237,4 @@ training:
   threshold_max: 0.78               # COMBO #133: sweep range kết thúc tại 0.78
   threshold_step: 0.01              # bước nhảy tìm threshold
   min_precision_floor: 0.45         # precision tối thiểu để threshold được chọn
+  sltp_label_max_horizon: 96        # 8h horizon — cho trade đủ thời gian chạm TP 3.5R (M5 bars)
