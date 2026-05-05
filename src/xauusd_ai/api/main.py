@@ -59,6 +59,14 @@ try:
 except ImportError:
     logger.warning("prometheus_client not installed — /metrics endpoint unavailable.")
 
+# Mount ChartWF integration router (read-only WF artefacts)
+try:
+    from xauusd_ai.api.routes_chartwf import router as _chartwf_router
+    app.include_router(_chartwf_router)
+    logger.info("ChartWF router mounted at /api/v1/chartwf/*")
+except Exception as _e:  # noqa: BLE001
+    logger.warning("ChartWF router not mounted: %s", _e)
+
 # ── Dashboard constants ───────────────────────────────────────────────────────
 
 _OUTPUTS = Path(os.getenv("OUTPUTS_PATH", "outputs"))

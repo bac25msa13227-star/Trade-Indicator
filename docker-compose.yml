@@ -469,6 +469,58 @@ services:
     restart: unless-stopped
     command: ["/bin/sh", "-c", "pip install requests -q && python scripts/healthwatch.py"]
 
+  # ════════════════════════════════════════════════════════════════════════════
+  # MICROSERVICES
+  # ════════════════════════════════════════════════════════════════════════════
+
+  # ── WF Engine: Walk-Forward run management REST API (port 8801) ───────────
+  # Source: ../WFService/ (folder riêng)
+  # Lệnh: docker compose up wf-engine -d
+  wf-engine:
+    build:
+      context: ../WFService
+      dockerfile: Dockerfile
+    image: xauusd-wf-engine:latest
+    container_name: xauusd-wf-engine
+    environment:
+      TRADE_INDICATOR_ROOT: /trade_indicator
+    volumes:
+      - .:/trade_indicator          # toàn bộ Trade Indicator (scripts/configs/outputs/.venv)
+    ports:
+      - "8801:8801"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8801/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ── Bot Engine: Live bot container management REST API (port 8802) ────────
+  # Source: ../LiveBotService/ (folder riêng)
+  # Lệnh: docker compose up bot-engine -d
+  bot-engine:
+    build:
+      context: ../LiveBotService
+      dockerfile: Dockerfile
+    image: xauusd-bot-engine:latest
+    container_name: xauusd-bot-engine
+    environment:
+      TRADE_INDICATOR_ROOT: /trade_indicator
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./configs:/trade_indicator/configs
+      - ./outputs:/trade_indicator/outputs:ro
+    ports:
+      - "8802:8802"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8802/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
 volumes:
   postgres_data:
   minio_data:

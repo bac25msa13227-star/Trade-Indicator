@@ -189,6 +189,8 @@ def _enrich_execution_frame(settings: Settings, frame: pd.DataFrame) -> pd.DataF
     enriched["vol_delta_momentum"] = volume_delta_momentum(enriched, fast=5, slow=20)
     enriched["inst_candle_score"] = institutional_candle_score(enriched, lookback=14)
     enriched["swing_failure"] = swing_failure_pattern(enriched, lookback=20)
+    # Volume imbalance: proxy for buy/sell pressure (close relative to range)
+    enriched["volume_imbalance"] = ((enriched["close"] - enriched["low"]) / (enriched["high"] - enriched["low"]).replace(0, np.nan) - 0.5).fillna(0)
     return enriched
 
 

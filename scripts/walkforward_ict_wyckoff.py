@@ -599,7 +599,10 @@ while fold_start + TRAIN_BARS + TEST_BARS <= n_total:
     if NO_TRAIL:
         if hasattr(_sim_settings, 'execution') and hasattr(_sim_settings.execution, 'trailing_sl'):
             _sim_settings.execution.trailing_sl.enabled = False
-    fold_sim = simulate_dynamic_concurrent_backtest(fold_sim_df, _sim_settings, risk_mgr, m1_df=_m1_df)
+    # When NO_COMPOUND: create a fresh RiskManager so its internal balance state
+    # is reset to $200 each fold (the shared risk_mgr carries state across folds).
+    _fold_risk_mgr = RiskManager(_sim_settings) if NO_COMPOUND else risk_mgr
+    fold_sim = simulate_dynamic_concurrent_backtest(fold_sim_df, _sim_settings, _fold_risk_mgr, m1_df=_m1_df)
     sim_r = fold_sim.report
     _compound_balance = STARTING_BALANCE if NO_COMPOUND else sim_r["ending_balance"]  # carry forward or reset
     # Collect per-trade records for daily analysis

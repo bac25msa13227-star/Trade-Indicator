@@ -523,6 +523,12 @@ class RiskManager:
         Khi account_balance được cung cấp → dùng dynamic sizing.
         Ngược lại → fallback fixed_lot từ config.
         """
+        throttle_mult, throttle_reason = self.risk_throttle_multiplier(
+            latest_bar,
+            side=decision.side,
+            probability=decision.confidence,
+        )
+
         if account_balance is not None and account_balance > 0:
             stop_distance = abs(decision.entry_price - decision.stop_loss)
             rf = self.risk_fraction(decision.confidence, volatility_regime,
@@ -530,15 +536,11 @@ class RiskManager:
                                     current_balance=account_balance,
                                     market_row=latest_bar,
                                     side=decision.side)
-            volume = self.calculate_dynamic_lot(account_balance, stop_distance, rf)
+            rf_throttled = rf * throttle_mult
+            volume = self.calculate_dynamic_lot(account_balance, stop_distance, rf_throttled)
         else:
-            volume = self.settings.risk.fixed_lot
+            volume = self.settings.risk.fixed_lot * throttle_mult
 
-        throttle_mult, throttle_reason = self.risk_throttle_multiplier(
-            latest_bar,
-            side=decision.side,
-            probability=decision.confidence,
-        )
         reason = decision.reason
         if throttle_mult < 1.0:
             reason = f"{reason} | risk_throttle({throttle_reason}) x{throttle_mult:.2f}"
