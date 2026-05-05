@@ -41,7 +41,11 @@ from xauusd_ai.backtesting.engine import simulate_dynamic_concurrent_backtest
 from xauusd_ai.config import load_settings
 from xauusd_ai.data.market_data import MarketDataService
 from xauusd_ai.execution.risk import RiskManager
-from xauusd_ai.features.dataset import prepare_training_dataset, FEATURE_COLUMNS
+from xauusd_ai.features.dataset import (
+    FEATURE_COLUMNS,
+    get_label_lookahead_bars,
+    prepare_training_dataset,
+)
 from xauusd_ai.strategies.hybrid import HybridStrategy
 
 import functools
@@ -81,7 +85,43 @@ import argparse as _ap
 _parser = _ap.ArgumentParser(add_help=False)
 _parser.add_argument("--config", default=None)
 _parser.add_argument("--max-folds", type=int, default=None)
+_parser.add_argument("--test-start", default=None, help="Skip folds with test end < this date (YYYY-MM-DD)")
+_parser.add_argument("--fast", action="store_true", help="Faster training with ≥96%% accuracy match (reduce trees, single threshold fold)")
+_parser.add_argument("--cache", action="store_true", help="Cache full dataset to parquet for faster reruns")
+_parser.add_argument("--no-rr-sweep", action="store_true", help="Skip RR sweep (faster, only run concurrent sim)")
+_parser.add_argument("--no-compound", action="store_true", help="Reset balance to $200 each fold (no compounding)")
+_parser.add_argument("--test-bars", type=int, default=None, help="Override TEST_BARS (bars per fold test window)")
+_parser.add_argument("--step-bars", type=int, default=None, help="Override STEP_BARS (bars to slide per fold)")
+_parser.add_argument("--min-conf", type=float, default=None, help="Override min confidence threshold for signal filter (e.g. 0.70 to match combo133)")
+_parser.add_argument("--no-cb", action="store_true", help="Disable circuit breaker kill switch for simulation")
+_parser.add_argument("--no-trail", action="store_true", help="Disable trailing SL (use fixed TP at configured RR)")
+_parser.add_argument("--no-dd-kill", action="store_true", help="Disable only DD kill (max_drawdown_kill_pct=0), keep other CB active")
+_parser.add_argument("--threshold-method", default="max", choices=["max", "mean", "min"], help="How to aggregate CV threshold candidates: max=conservative (default), mean=moderate, min=aggressive (more trades)")
+_parser.add_argument("--main-thr-cal", action="store_true", help="After training main ensemble, recalibrate threshold on last 20%% of train data using main ensemble (fixes mini-HGB threshold mismatch)")
+_parser.add_argument("--force-threshold", type=float, default=None, help="Hardcode model threshold, skip CV threshold search entirely (e.g. 0.50 to match show_combo133 range)")
+_parser.add_argument("--risk-pct", type=float, default=None, help="Override risk_per_trade in config (e.g. 0.08 for 8%%)")
+_parser.add_argument("--blocked-hours", default=None, help="Comma-separated UTC hours to block trading (e.g. 3,15,17,22,23 to match show_combo133)")
+_parser.add_argument("--combo133", action="store_true", help="Apply all show_combo133 settings: min_conf=0.70, blocked=[3,15,17,22,23], require_trend=False, min_strat=0.0, d1_gate=False, fast mode")
 _known, _rest = _parser.parse_known_args()
+FAST_MODE = _known.fast
+NO_COMPOUND = _known.no_compound
+NO_CIRCUIT_BREAKER = _known.no_cb
+NO_TRAIL = _known.no_trail
+NO_DD_KILL = _known.no_dd_kill
+MIN_CONF_OVERRIDE = _known.min_conf
+THRESHOLD_METHOD = _known.threshold_method
+RISK_PCT_OVERRIDE = _known.risk_pct
+MAIN_THR_CAL = _known.main_thr_cal
+FORCE_THRESHOLD = _known.force_threshold
+COMBO133_MODE = _known.combo133
+# Parse blocked hours: --blocked-hours 3,15,17,22,23 OR from --combo133
+_bh_raw = _known.blocked_hours
+BLOCKED_HOURS: list[int] | None = [int(x) for x in _bh_raw.split(",") if x.strip()] if _bh_raw else None
+if COMBO133_MODE:
+    BLOCKED_HOURS = BLOCKED_HOURS or [3, 15, 17, 22, 23]
+    FAST_MODE = True  # --combo133 implies FAST mode
+    if _known.min_conf is None:
+        MIN_CONF_OVERRIDE = 0.70  # match show_combo133
 
 if _known.config:
     CONFIG = Path(_known.config)
@@ -100,13 +140,14 @@ settings = load_settings(CONFIG)
 
 # Walk-forward window parameters  (M15: 96 bars/day  ~252 trading days/year)
 TRAIN_BARS = 30_000   # ~312 trading days = ~13 months (v2: more data for stronger model)
-TEST_BARS  =  4_000   # ~42  trading days = ~1.5 months
-STEP_BARS  =  4_000   # slide ~1.5 months at a time
+TEST_BARS  = _known.test_bars if _known.test_bars is not None else  4_000   # ~42 trading days = ~1.5 months (override with --test-bars)
+STEP_BARS  = _known.step_bars if _known.step_bars is not None else  4_000   # slide ~1.5 months at a time (override with --step-bars)
 
 THRESHOLD_MIN   = settings.training.threshold_min        # 0.45
 THRESHOLD_MAX   = settings.training.threshold_max        # 0.80
 THRESHOLD_STEP  = settings.training.threshold_step       # 0.01
 PREC_FLOOR      = settings.training.min_precision_floor  # now 0.60 (from config)
+# Note: --min-conf only filters signals in simulation, does NOT change model threshold range.
 
 # ── Balance & RR sweep settings ─────────────────────────────────────────────
 STARTING_BALANCE = 200.0                           # USD khởi đầu
@@ -114,14 +155,39 @@ RISK_PCT         = settings.risk.risk_per_trade    # rủi ro/lệnh (0.0065 = 0
 RR_SWEEP         = [1.8, 2.0, 2.2, 2.5, 3.0, 3.5] # TP:SL ratios cần đánh giá
 
 print(f"  Config  : {CONFIG}")
+print(f"  Mode    : {'⚡ FAST' if FAST_MODE else '🎯 EXACT'}")
 print(f"  Features: {len(FEATURE_COLUMNS)}  (D1:1 H4:9 H1:3 M15:15 News:5 StructMomentum:11 Adv:9)")
 print(f"  Train   : {TRAIN_BARS:,} bars (~1 yr M15)")
 print(f"  Test    : {TEST_BARS:,} bars (~3 mo M15)")
 print(f"  Step    : {STEP_BARS:,} bars (~3 mo slide)")
-print(f"  Balance : ${STARTING_BALANCE:.0f} khởi đầu | Rủi ro {RISK_PCT:.2%}/lệnh")
-print(f"  RR Sweep: {RR_SWEEP}")
+print(f"  Balance : ${STARTING_BALANCE:.0f} khởi đầu | Rủi ro {RISK_PCT:.2%}/lệnh{' | NO-COMPOUND (reset $200/fold)' if NO_COMPOUND else ''}")
+print(f"  RR Sweep: {'SKIP' if _known.no_rr_sweep else RR_SWEEP}")
 print(f"  PrecFloor:{PREC_FLOOR:.0%}  (win rate tối thiểu yêu cầu)")
+if FORCE_THRESHOLD is not None:
+    print(f"  ForceThr : {FORCE_THRESHOLD:.2f} (bypass CV threshold entirely)")
+elif MAIN_THR_CAL:
+    print(f"  ThrCal  : main-ensemble recalibration on last 20%% of train data")
+else:
+    _thr_method_desc = {"min": "aggressive → more trades", "mean": "balanced", "max": "conservative → fewer trades"}
+    print(f"  ThrMethod: {THRESHOLD_METHOD.upper()}  ({_thr_method_desc[THRESHOLD_METHOD]})")
+if RISK_PCT_OVERRIDE is not None:
+    print(f"  RiskPct : {RISK_PCT_OVERRIDE:.2%} OVERRIDE (config default: {RISK_PCT:.2%})")
+if MIN_CONF_OVERRIDE is not None:
+    print(f"  MinConf : {MIN_CONF_OVERRIDE:.2f} override (combo133 mode: trend_filter=OFF, min_strat=0.0)")
+if BLOCKED_HOURS is not None:
+    print(f"  BlockHrs: {BLOCKED_HOURS} UTC (filtering {len(BLOCKED_HOURS)}/24 hours)")
+if COMBO133_MODE:
+    print(f"  Mode    : 🎯 COMBO133 (replicates show_combo133_daily.py settings)")
+if NO_CIRCUIT_BREAKER:
+    print(f"  CB mode : ❌ DISABLED (kill_switch=False)")
+elif NO_DD_KILL:
+    print(f"  CB mode : ⚠️  DD-Kill OFF (max_drawdown_kill_pct=0, daily_limit & pause active)")
+else:
+    print(f"  CB mode : ✅ LIVE-equivalent (kill_switch_enabled=True)")
 print()
+
+LABEL_LOOKAHEAD_BARS = get_label_lookahead_bars(settings)
+print(f"  Label lookahead purge: {LABEL_LOOKAHEAD_BARS} bars")
 
 # ── 1. Load data ─────────────────────────────────────────────────────────────
 print("[1/4] Loading multi-timeframe data from CSV...")
@@ -143,11 +209,65 @@ settings_full.training.train_start_date = None
 settings_full.training.train_end_date   = None
 settings_full.training.test_start_date  = None
 settings_full.training.test_end_date    = None
-full_ds = prepare_training_dataset(settings_full, frames, strategy)
+
+# Dataset caching: avoid recomputing features + SL/TP labels on reruns
+import hashlib as _hashlib
+_cache_dir = Path("outputs/.wf_cache")
+_cache_dir.mkdir(parents=True, exist_ok=True)
+_cache_key_parts = [
+    CONFIG.read_text(encoding="utf-8"),
+    str(len(frames[_exec_tf])),
+    str(len(FEATURE_COLUMNS)),
+    str(getattr(settings_full.training, "sltp_label_max_horizon", 32)),
+    str(settings_full.risk.take_profit_rr),
+    str(settings_full.risk.stop_loss_atr_multiple),
+]
+_cache_hash = _hashlib.sha256("||".join(_cache_key_parts).encode()).hexdigest()[:12]
+_cache_path = _cache_dir / f"{_cfg_stem}_{_cache_hash}.parquet"
+_cache_hit = False
+
+if _known.cache and _cache_path.exists():
+    try:
+        full_ds = pd.read_parquet(_cache_path)
+        _cache_hit = True
+        print(f"      ✅ Cache hit: {_cache_path.name}")
+    except Exception as _e:
+        print(f"      ⚠️  Cache read failed ({_e}), rebuilding...")
+
+if not _cache_hit:
+    full_ds = prepare_training_dataset(settings_full, frames, strategy)
+    if _known.cache:
+        try:
+            full_ds.to_parquet(_cache_path, index=False)
+            print(f"      💾 Cached to: {_cache_path.name}")
+        except Exception:
+            pass  # non-critical
 print(f"      Total rows : {len(full_ds):,}")
 print(f"      Date range : {full_ds['time'].min().date()} → {full_ds['time'].max().date()}")
 print(f"      Label rate : {full_ds['target'].mean():.1%}")
 print(f"      Time       : {time.time()-t0:.1f}s")
+
+# ── 2b. Load M1 data for accurate trailing SL / partial TP simulation ───────
+_m1_df: "pd.DataFrame | None" = None
+_m1_csv = Path("src/xauusd_ai/real_data/XAUUSDm_M1.csv")
+if _m1_csv.exists():
+    print("\n[2b] Loading M1 data for bar-by-bar trailing SL simulation...")
+    t0 = time.time()
+    try:
+        _m1_df = pd.read_csv(_m1_csv, index_col=0, parse_dates=True)
+        # Ensure UTC-aware index
+        if _m1_df.index.tz is None:
+            _m1_df.index = _m1_df.index.tz_localize("UTC")
+        else:
+            _m1_df.index = _m1_df.index.tz_convert("UTC")
+        _m1_df = _m1_df.sort_index()
+        print(f"      M1 rows    : {len(_m1_df):,}  ({_m1_df.index[0].date()} → {_m1_df.index[-1].date()})  ({time.time()-t0:.1f}s)")
+        print(f"      M1 sim     : ENABLED — more accurate trailing SL + partial TP")
+    except Exception as _e:
+        print(f"      ⚠️  M1 load failed ({_e}) — using peak_rr heuristic fallback")
+        _m1_df = None
+else:
+    print("\n[2b] M1 CSV not found — using peak_rr heuristic fallback")
 
 # ── 3. Walk-forward loop ─────────────────────────────────────────────────────
 print(f"\n[3/4] Running walk-forward folds...")
@@ -159,7 +279,9 @@ print()
 
 fold_results = []
 win_log = []   # for live-learning log (thắng/thua)
+sim_trade_log: list[pd.DataFrame] = []  # per-trade records from concurrent sim
 rr_equity_curves  = {rr: [STARTING_BALANCE] for rr in RR_SWEEP}  # cumulative equity per RR
+_compound_balance = STARTING_BALANCE  # running balance carried across folds
 
 fold_idx = 0
 fold_start = 0
@@ -172,11 +294,24 @@ while fold_start + TRAIN_BARS + TEST_BARS <= n_total:
     train_end  = fold_start + TRAIN_BARS
     test_end   = train_end  + TEST_BARS
 
-    fold_train = full_ds.iloc[fold_start:train_end].copy()
-    fold_test  = full_ds.iloc[train_end:test_end].copy()
+    fold_train = full_ds.iloc[fold_start:train_end]
+    fold_test  = full_ds.iloc[train_end:test_end]
+
+    # Prevent boundary leakage: drop train tail whose labels depend on future bars.
+    if LABEL_LOOKAHEAD_BARS > 0:
+        if len(fold_train) <= LABEL_LOOKAHEAD_BARS + 100:
+            fold_start += STEP_BARS
+            continue
+        fold_train = fold_train.iloc[:-LABEL_LOOKAHEAD_BARS]
 
     if len(fold_train) < 500 or len(fold_test) < 100:
         fold_start += STEP_BARS
+        continue
+
+    # Skip folds before --test-start date
+    if _known.test_start and str(fold_test["time"].max().date()) < _known.test_start:
+        fold_start += STEP_BARS
+        fold_idx -= 1  # don't count skipped folds
         continue
 
     t_fold = time.time()
@@ -204,17 +339,28 @@ while fold_start + TRAIN_BARS + TEST_BARS <= n_total:
     else:
         _sw_tr = None
 
-    # ── Threshold search: 3-fold temporal CV for robustness ────────
+    # ── Threshold search: temporal CV for robustness ─────────────────
+    # FAST mode: single fold (last split only) — EXACT mode: 3 folds
+    # Skip mini-HGB entirely when --force-threshold is set (saves ~30s per fold)
     _thr_candidates = []
     _n_tr = len(y_tr)
-    _thr_splits = [
-        (0, int(_n_tr * 0.50), int(_n_tr * 0.50), int(_n_tr * 0.70)),
-        (0, int(_n_tr * 0.60), int(_n_tr * 0.60), int(_n_tr * 0.80)),
-        (0, int(_n_tr * 0.70), int(_n_tr * 0.70), _n_tr),
-    ]
+    if FORCE_THRESHOLD is not None:
+        best_thr = FORCE_THRESHOLD  # will be set again after ensemble training; placeholder
+        _thr_splits = []  # skip mini-HGB training entirely
+    elif FAST_MODE:
+        _thr_splits = [
+            (0, int(_n_tr * 0.70), int(_n_tr * 0.70), _n_tr),
+        ]
+    else:
+        _thr_splits = [
+            (0, int(_n_tr * 0.50), int(_n_tr * 0.50), int(_n_tr * 0.70)),
+            (0, int(_n_tr * 0.60), int(_n_tr * 0.60), int(_n_tr * 0.80)),
+            (0, int(_n_tr * 0.70), int(_n_tr * 0.70), _n_tr),
+        ]
+    _thr_hgb_iter = 200 if FAST_MODE else 400
     for _ts_start, _ts_end, _vs_start, _vs_end in _thr_splits:
         _thr_hgb = HistGradientBoostingClassifier(
-            max_iter=400, learning_rate=0.02, max_depth=6,
+            max_iter=_thr_hgb_iter, learning_rate=0.02, max_depth=6,
             min_samples_leaf=25, l2_regularization=1.0,
             max_bins=128, class_weight=None,
             early_stopping=True, validation_fraction=0.15,
@@ -246,12 +392,21 @@ while fold_start + TRAIN_BARS + TEST_BARS <= n_total:
         if _fold_best_score == -float("inf"):
             _fold_best_thr = _fold_safe_thr
         _thr_candidates.append(_fold_best_thr)
-    # Max of 3 temporal folds → most conservative (highest precision)
-    best_thr = float(np.max(_thr_candidates))
+    # Aggregate CV threshold candidates by chosen method
+    if FORCE_THRESHOLD is not None or MAIN_THR_CAL:
+        best_thr = FORCE_THRESHOLD if FORCE_THRESHOLD is not None else THRESHOLD_MIN  # placeholder, overridden below
+    elif not _thr_candidates:
+        best_thr = THRESHOLD_MIN  # fallback if no candidates (shouldn't happen)
+    elif THRESHOLD_METHOD == "min":
+        best_thr = float(np.min(_thr_candidates))    # aggressive: more trades, lower precision
+    elif THRESHOLD_METHOD == "mean":
+        best_thr = float(np.mean(_thr_candidates))   # balanced
+    else:
+        best_thr = float(np.max(_thr_candidates))    # conservative (default, WF EXACT)
 
     # ── Feature selection: drop bottom 30% by importance ─────────────
     _scout = RandomForestClassifier(
-        n_estimators=200, max_depth=8, min_samples_leaf=20,
+        n_estimators=80 if FAST_MODE else 200, max_depth=8, min_samples_leaf=20,
         class_weight="balanced", n_jobs=-1, random_state=42,
     )
     _scout.fit(X_tr, y_tr, sample_weight=_sw_tr)
@@ -265,19 +420,20 @@ while fold_start + TRAIN_BARS + TEST_BARS <= n_total:
 
     # ── Train ENSEMBLE on 100% of fold_train ─────────────────────────
     _hgb = HistGradientBoostingClassifier(
-        max_iter=2000, learning_rate=0.01, max_depth=7,
+        max_iter=1000 if FAST_MODE else 2000,
+        learning_rate=0.01, max_depth=7,
         min_samples_leaf=20, l2_regularization=1.0,
         max_bins=128, class_weight=None,
         early_stopping=True, validation_fraction=0.1,
-        n_iter_no_change=80, random_state=42,
+        n_iter_no_change=40 if FAST_MODE else 80, random_state=42,
     )
     _rf = RandomForestClassifier(
-        n_estimators=400, max_depth=12, min_samples_leaf=15,
+        n_estimators=200 if FAST_MODE else 400, max_depth=12, min_samples_leaf=15,
         max_features="sqrt", class_weight="balanced",
         n_jobs=-1, random_state=42,
     )
     _et = ExtraTreesClassifier(
-        n_estimators=400, max_depth=14, min_samples_leaf=10,
+        n_estimators=200 if FAST_MODE else 400, max_depth=14, min_samples_leaf=10,
         max_features="sqrt", class_weight="balanced",
         n_jobs=-1, random_state=42,
     )
@@ -287,6 +443,37 @@ while fold_start + TRAIN_BARS + TEST_BARS <= n_total:
         weights=[3, 2, 1],  # HGB gets most weight (best single model)
     )
     model.fit(X_tr_sel, y_tr, sample_weight=_sw_tr)
+
+    # ── Override threshold: force-threshold or main-ensemble recalibration ──
+    if FORCE_THRESHOLD is not None:
+        best_thr = FORCE_THRESHOLD
+    elif MAIN_THR_CAL:
+        # Recalibrate threshold on last 20% of training data using MAIN ensemble
+        # Fixes mini-HGB threshold mismatch with ensemble probability scale
+        _cal_n = len(X_tr_sel)
+        _cal_s = int(_cal_n * 0.80)
+        _cal_proba = model.predict_proba(X_tr_sel[_cal_s:])[:, 1]
+        _cal_y = y_tr[_cal_s:]
+        _cal_best_thr, _cal_best_score = THRESHOLD_MIN, -float("inf")
+        _cal_safe_thr, _cal_safe_prec = THRESHOLD_MAX, -1.0
+        for _t in np.arange(THRESHOLD_MIN, THRESHOLD_MAX + THRESHOLD_STEP, THRESHOLD_STEP):
+            _cpreds = (_cal_proba >= _t).astype(int)
+            if _cpreds.sum() < 3:
+                continue
+            _cprec = precision_score(_cal_y, _cpreds, zero_division=0)
+            _crec = recall_score(_cal_y, _cpreds, zero_division=0)
+            if _crec < 0.05:
+                continue
+            if _cprec > _cal_safe_prec:
+                _cal_safe_prec = _cprec
+                _cal_safe_thr = float(_t)
+            if _cprec < PREC_FLOOR:
+                continue
+            _cscore = _cprec * np.sqrt(_crec)
+            if _cscore > _cal_best_score:
+                _cal_best_score = _cscore
+                _cal_best_thr = float(_t)
+        best_thr = _cal_best_thr if _cal_best_score > -float("inf") else _cal_safe_thr
 
     # Evaluate on fold_test
     test_proba = model.predict_proba(X_te_sel)[:, 1]
@@ -315,39 +502,44 @@ while fold_start + TRAIN_BARS + TEST_BARS <= n_total:
     ]])
 
     # ── RR sweep P&L simulation (continuous equity, per fold) ────────────────
-    _spread_rr_base = float(getattr(settings_full.risk, "spread_cost_rr", 0.10))
-    _slippage_rr = float(getattr(settings_full.risk, "slippage_rr", 0.05))
-    _commission_rr = float(getattr(settings_full.risk, "commission_rr", 0.02))
-    _friction_rr = _spread_rr_base + _slippage_rr + _commission_rr
-    _compound_cap = float(getattr(settings_full.risk, "compound_cap", 50.0))
-    _max_rr_equity = STARTING_BALANCE * _compound_cap if _compound_cap > 0 else float("inf")
-    # P1a: per-bar session spread multiplier
-    _sess_mults = fold_test_copy["session_spread_mult"].values if "session_spread_mult" in fold_test_copy.columns else None
     fold_rr_stats: dict = {}
-    for _rr in RR_SWEEP:
-        _equity = rr_equity_curves[_rr][-1]   # continue from previous fold's end balance
-        _wins   = 0
-        for _idx, (_p, _t) in enumerate(zip(test_preds, y_te)):
-            if _p == 1:
+    if not _known.no_rr_sweep:
+        _spread_rr_base = float(getattr(settings_full.risk, "spread_cost_rr", 0.10))
+        _slippage_rr = float(getattr(settings_full.risk, "slippage_rr", 0.05))
+        _commission_rr = float(getattr(settings_full.risk, "commission_rr", 0.02))
+        _friction_rr = _spread_rr_base + _slippage_rr + _commission_rr
+        _compound_cap = float(getattr(settings_full.risk, "compound_cap", 50.0))
+        _max_rr_equity = STARTING_BALANCE * _compound_cap if _compound_cap > 0 else float("inf")
+        # P1a: per-bar session spread multiplier
+        _sess_mults = fold_test_copy["session_spread_mult"].values if "session_spread_mult" in fold_test_copy.columns else None
+        # Pre-filter: only iterate over signal bars (skip non-signal bars)
+        _signal_mask = test_preds == 1
+        _signal_indices = np.where(_signal_mask)[0]
+        _signal_targets = y_te[_signal_indices]
+        _signal_sess = _sess_mults[_signal_indices] if _sess_mults is not None else None
+        for _rr in RR_SWEEP:
+            _equity = rr_equity_curves[_rr][-1]   # continue from previous fold's end balance
+            _wins   = 0
+            for _j in range(len(_signal_indices)):
                 _eff = min(_equity, _max_rr_equity)  # cap compound growth
                 _risk = _eff * RISK_PCT
-                _sm = float(_sess_mults[_idx]) if _sess_mults is not None else 1.0
+                _sm = float(_signal_sess[_j]) if _signal_sess is not None else 1.0
                 _fr = _spread_rr_base * _sm + _slippage_rr + _commission_rr
-                if _t == 1:
+                if _signal_targets[_j] == 1:
                     _equity += _risk * (_rr - _fr)
                     _wins   += 1
                 else:
                     _equity -= _risk * (1.0 + _fr)
-        _tot  = int(test_preds.sum())
-        _wr   = _wins / _tot if _tot > 0 else prec   # fallback to model precision
-        _ev   = _wr * (_rr - _friction_rr) - (1.0 - _wr) * (1.0 + _friction_rr)
-        rr_equity_curves[_rr].append(round(_equity, 2))
-        fold_rr_stats[_rr] = {
-            "final_balance": round(_equity, 2),
-            "win_rate":      round(_wr, 4),
-            "ev_per_trade":  round(_ev, 4),
-            "trades":        _tot,
-        }
+            _tot  = len(_signal_indices)
+            _wr   = _wins / _tot if _tot > 0 else prec   # fallback to model precision
+            _ev   = _wr * (_rr - _friction_rr) - (1.0 - _wr) * (1.0 + _friction_rr)
+            rr_equity_curves[_rr].append(round(_equity, 2))
+            fold_rr_stats[_rr] = {
+                "final_balance": round(_equity, 2),
+                "win_rate":      round(_wr, 4),
+                "ev_per_trade":  round(_ev, 4),
+                "trades":        _tot,
+            }
 
     elapsed = time.time() - t_fold
     result = {
@@ -375,13 +567,53 @@ while fold_start + TRAIN_BARS + TEST_BARS <= n_total:
     fold_sim_df["split"]       = "test"
     fold_sim_df["prediction"]  = test_preds
     fold_sim_df["probability"] = test_proba
-    fold_sim_df["trade_side"]  = fold_sim_df.get("trade_side", pd.Series("buy", index=fold_sim_df.index))
+    if COMBO133_MODE and "strategy_score" in fold_sim_df.columns:
+        # Match show_combo133_daily.py exactly: trade_side = buy when strategy_score >= 0
+        fold_sim_df["trade_side"] = np.where(fold_sim_df["strategy_score"] >= 0, "buy", "sell")
+    else:
+        fold_sim_df["trade_side"] = fold_sim_df.get("trade_side", pd.Series("buy", index=fold_sim_df.index))
     _sim_settings = settings_full.model_copy(deep=True)
-    _sim_settings.training.backtest_initial_balance = STARTING_BALANCE
-    fold_sim = simulate_dynamic_concurrent_backtest(fold_sim_df, _sim_settings, risk_mgr)
+    _sim_settings.training.backtest_initial_balance = _compound_balance  # compound across folds
+    if MIN_CONF_OVERRIDE is not None:
+        # Match combo133: relax strategy filters, only model threshold matters
+        _sim_settings.risk.min_confidence = MIN_CONF_OVERRIDE
+        _sim_settings.strategy.sideway_min_confidence = MIN_CONF_OVERRIDE
+        _sim_settings.strategy.volatile_min_confidence = MIN_CONF_OVERRIDE
+        _sim_settings.strategy.require_trend_alignment = False
+        _sim_settings.strategy.min_strategy_score = 0.0
+        _sim_settings.strategy.sideway_min_strategy_score = 0.0
+        _sim_settings.strategy.strong_volatility_min_strategy_score = 0.0
+        if hasattr(_sim_settings.strategy, 'd1_trend_gate'):
+            _sim_settings.strategy.d1_trend_gate = False
+    if BLOCKED_HOURS is not None:
+        _sim_settings.strategy.blocked_hours_utc = BLOCKED_HOURS
+    if NO_CIRCUIT_BREAKER:
+        _sim_settings.risk.kill_switch_enabled = False
+        _sim_settings.risk.daily_loss_limit_pct = 0.0
+        _sim_settings.risk.max_drawdown_kill_pct = 0.0
+        _sim_settings.risk.consecutive_loss_pause_count = 0
+    elif NO_DD_KILL:
+        _sim_settings.risk.max_drawdown_kill_pct = 0.0
+    if RISK_PCT_OVERRIDE is not None:
+        _sim_settings.risk.risk_per_trade = RISK_PCT_OVERRIDE
+    if NO_TRAIL:
+        if hasattr(_sim_settings, 'execution') and hasattr(_sim_settings.execution, 'trailing_sl'):
+            _sim_settings.execution.trailing_sl.enabled = False
+    # When NO_COMPOUND: create a fresh RiskManager so its internal balance state
+    # is reset to $200 each fold (the shared risk_mgr carries state across folds).
+    _fold_risk_mgr = RiskManager(_sim_settings) if NO_COMPOUND else risk_mgr
+    fold_sim = simulate_dynamic_concurrent_backtest(fold_sim_df, _sim_settings, _fold_risk_mgr, m1_df=_m1_df)
     sim_r = fold_sim.report
+    _compound_balance = STARTING_BALANCE if NO_COMPOUND else sim_r["ending_balance"]  # carry forward or reset
+    # Collect per-trade records for daily analysis
+    if not fold_sim.trades.empty:
+        _ft = fold_sim.trades.copy()
+        _ft["fold"] = fold_idx
+        _ft["test_start"] = result.get("test_start", "")
+        _ft["test_end"]   = result.get("test_end", "")
+        sim_trade_log.append(_ft)
     result["concurrent_sim"] = {
-        "starting_balance":       STARTING_BALANCE,
+        "starting_balance":       _sim_settings.training.backtest_initial_balance,
         "ending_balance":         sim_r["ending_balance"],
         "return_pct":             sim_r["return_pct"],
         "trades":                 sim_r["trades"],
@@ -398,14 +630,204 @@ while fold_start + TRAIN_BARS + TEST_BARS <= n_total:
 
     # Progress line
     star = "[BEST]" if auc == max(r["roc_auc"] for r in fold_results) else "      "
+    _bal_start = result["concurrent_sim"]["starting_balance"]
+    _bal_end   = result["concurrent_sim"]["ending_balance"]
+    _ret_pct   = result["concurrent_sim"]["return_pct"]
     print(
         f"  Fold {fold_idx:2d}/{n_folds} {star} "
         f"Test: {result['test_start']} -> {result['test_end']} | "
         f"AUC={auc:.4f}  Prec={prec:.4f}  Recall={rec:.4f}  "
-        f"F1={f1:.4f}  Thr={best_thr:.2f}  Sigs={n_sig}/{n_tot}  ({elapsed:.1f}s)"
+        f"F1={f1:.4f}  Thr={best_thr:.2f}  Sigs={n_sig}/{n_tot}  "
+        f"Bal: ${_bal_start:,.0f}→${_bal_end:,.0f} ({_ret_pct:+.1f}%)  ({elapsed:.1f}s)"
     )
 
     fold_start += STEP_BARS
+
+# ── COMBO133 Partial Fold: run remaining data after last full fold ────────────
+# Mirrors show_combo133_daily.py lines 258-420: adds ~21 days of data
+# (2026-04-06 → 2026-04-27) that WF's fixed TEST_BARS loop misses.
+if COMBO133_MODE:
+    _pf_train_end = fold_start + TRAIN_BARS
+    _pf_test_end  = n_total
+    if _pf_train_end < n_total and n_total - _pf_train_end >= 200:
+        _pf_fold_train = full_ds.iloc[fold_start:_pf_train_end]
+        _pf_fold_test  = full_ds.iloc[_pf_train_end:_pf_test_end]
+        if LABEL_LOOKAHEAD_BARS > 0 and len(_pf_fold_train) > LABEL_LOOKAHEAD_BARS + 100:
+            _pf_fold_train = _pf_fold_train.iloc[:-LABEL_LOOKAHEAD_BARS]
+        if len(_pf_fold_train) >= 500 and len(_pf_fold_test) >= 50:
+            _pf_t = time.time()
+            fold_idx += 1
+            _pf_ts = str(_pf_fold_test["time"].min().date())
+            _pf_te = str(_pf_fold_test["time"].max().date())
+            print(f"\n  [COMBO133 partial fold {fold_idx}* — {_pf_ts} → {_pf_te} ({len(_pf_fold_test)} bars)]")
+            # Scale
+            _pf_scaler = StandardScaler()
+            _pf_X_tr = _pf_scaler.fit_transform(_pf_fold_train[FEATURE_COLUMNS])
+            _pf_X_te = _pf_scaler.transform(_pf_fold_test[FEATURE_COLUMNS])
+            _pf_y_tr = _pf_fold_train["target"].values
+            _pf_y_te = _pf_fold_test["target"].values
+            # Sample weights
+            _pf_pos_c = int(_pf_y_tr.sum())
+            _pf_neg_c = int(len(_pf_y_tr) - _pf_pos_c)
+            if _pf_pos_c > 10 and _pf_neg_c > 10:
+                _pf_pw = 2.0 * _pf_neg_c / _pf_pos_c
+                _pf_cw = np.where(_pf_y_tr == 1, _pf_pw, 1.0).astype(float)
+                _pf_n  = len(_pf_y_tr)
+                _pf_tw = np.exp(np.log(2) * np.arange(_pf_n) / (_pf_n * 0.4))
+                _pf_tw /= _pf_tw.mean()
+                _pf_sw = (_pf_cw * _pf_tw).astype(float)
+                _pf_sw /= _pf_sw.mean()
+            else:
+                _pf_sw = None
+            # Threshold search (single split — FAST mode, same as combo133)
+            _pf_vs_s = int(len(_pf_y_tr) * 0.70)
+            _pf_thr_hgb = HistGradientBoostingClassifier(
+                max_iter=200, learning_rate=0.02, max_depth=6, min_samples_leaf=25,
+                l2_regularization=1.0, max_bins=128,
+                early_stopping=True, validation_fraction=0.15, n_iter_no_change=30, random_state=42,
+            )
+            _pf_thr_hgb.fit(_pf_X_tr[:_pf_vs_s], _pf_y_tr[:_pf_vs_s],
+                            sample_weight=_pf_sw[:_pf_vs_s] if _pf_sw is not None else None)
+            _pf_v_proba = _pf_thr_hgb.predict_proba(_pf_X_tr[_pf_vs_s:])[:, 1]
+            _pf_y_v     = _pf_y_tr[_pf_vs_s:]
+            _pf_best_thr, _pf_best_score = THRESHOLD_MIN, -float("inf")
+            _pf_safe_thr, _pf_safe_prec  = THRESHOLD_MAX, -1.0
+            for _pf_thr in np.arange(THRESHOLD_MIN, THRESHOLD_MAX + THRESHOLD_STEP, THRESHOLD_STEP):
+                _pf_pred_v = (_pf_v_proba >= _pf_thr).astype(int)
+                if _pf_pred_v.sum() < 3:
+                    continue
+                _pf_p = float(precision_score(_pf_y_v, _pf_pred_v, zero_division=0))
+                _pf_r = float(recall_score(_pf_y_v, _pf_pred_v, zero_division=0))
+                if _pf_r < 0.05:
+                    continue
+                if _pf_p > _pf_safe_prec:
+                    _pf_safe_prec, _pf_safe_thr = _pf_p, float(_pf_thr)
+                if _pf_p < PREC_FLOOR:
+                    continue
+                _pf_sc = _pf_p * np.sqrt(_pf_r)
+                if _pf_sc > _pf_best_score:
+                    _pf_best_score, _pf_best_thr = _pf_sc, float(_pf_thr)
+            if _pf_best_score == -float("inf"):
+                _pf_best_thr = _pf_safe_thr
+            # Feature selection
+            _pf_scout = RandomForestClassifier(
+                n_estimators=80, max_depth=8, min_samples_leaf=20,
+                class_weight="balanced", n_jobs=-1, random_state=42,
+            )
+            _pf_scout.fit(_pf_X_tr, _pf_y_tr, sample_weight=_pf_sw)
+            _pf_imp       = _pf_scout.feature_importances_
+            _pf_feat_mask = _pf_imp >= np.percentile(_pf_imp, 30)
+            if _pf_feat_mask.sum() < 10:
+                _pf_feat_mask = np.ones(len(_pf_imp), dtype=bool)
+            _pf_X_tr_sel = _pf_X_tr[:, _pf_feat_mask]
+            _pf_X_te_sel = _pf_X_te[:, _pf_feat_mask]
+            # Train full ensemble (FAST mode — same as --combo133)
+            _pf_hgb = HistGradientBoostingClassifier(
+                max_iter=1000, learning_rate=0.01, max_depth=7, min_samples_leaf=20,
+                l2_regularization=1.0, max_bins=128,
+                early_stopping=True, validation_fraction=0.1, n_iter_no_change=40, random_state=42,
+            )
+            _pf_rf = RandomForestClassifier(
+                n_estimators=200, max_depth=12, min_samples_leaf=15,
+                max_features="sqrt", class_weight="balanced", n_jobs=-1, random_state=42,
+            )
+            _pf_et = ExtraTreesClassifier(
+                n_estimators=200, max_depth=14, min_samples_leaf=10,
+                max_features="sqrt", class_weight="balanced", n_jobs=-1, random_state=42,
+            )
+            _pf_model = VotingClassifier(
+                estimators=[("hgb", _pf_hgb), ("rf", _pf_rf), ("et", _pf_et)],
+                voting="soft", weights=[3, 2, 1],
+            )
+            _pf_model.fit(_pf_X_tr_sel, _pf_y_tr, sample_weight=_pf_sw)
+            _pf_proba = _pf_model.predict_proba(_pf_X_te_sel)[:, 1]
+            _pf_preds = (_pf_proba >= _pf_best_thr).astype(int)
+            # Metrics
+            try:
+                _pf_auc = float(roc_auc_score(_pf_y_te, _pf_proba))
+            except Exception:
+                _pf_auc = 0.5
+            _pf_n_sig = int(_pf_preds.sum())
+            _pf_n_tot = len(_pf_preds)
+            _pf_prec  = float(precision_score(_pf_y_te, _pf_preds, zero_division=0))
+            _pf_rec   = float(recall_score(_pf_y_te, _pf_preds, zero_division=0))
+            _pf_f1    = float(f1_score(_pf_y_te, _pf_preds, zero_division=0))
+            _pf_acc   = float(accuracy_score(_pf_y_te, _pf_preds))
+            # Build sim DataFrame with combo133 overrides
+            _pf_sim_df = _pf_fold_test.copy()
+            _pf_sim_df["split"]      = "test"
+            _pf_sim_df["prediction"] = _pf_preds
+            _pf_sim_df["probability"] = _pf_proba
+            if "strategy_score" in _pf_sim_df.columns:
+                _pf_sim_df["trade_side"] = np.where(
+                    _pf_sim_df["strategy_score"] >= 0, "buy", "sell"
+                )
+            # Sim settings — mirror the combo133 fold loop overrides exactly
+            _pf_sim_settings = settings_full.model_copy(deep=True)
+            _pf_sim_settings.training.backtest_initial_balance          = STARTING_BALANCE
+            _pf_sim_settings.risk.min_confidence                        = MIN_CONF_OVERRIDE or 0.70
+            _pf_sim_settings.strategy.sideway_min_confidence            = MIN_CONF_OVERRIDE or 0.70
+            _pf_sim_settings.strategy.volatile_min_confidence           = MIN_CONF_OVERRIDE or 0.70
+            _pf_sim_settings.strategy.require_trend_alignment           = False
+            _pf_sim_settings.strategy.min_strategy_score                = 0.0
+            _pf_sim_settings.strategy.sideway_min_strategy_score        = 0.0
+            _pf_sim_settings.strategy.strong_volatility_min_strategy_score = 0.0
+            _pf_sim_settings.strategy.blocked_hours_utc                 = BLOCKED_HOURS or [3, 15, 17, 22, 23]
+            if hasattr(_pf_sim_settings.strategy, "d1_trend_gate"):
+                _pf_sim_settings.strategy.d1_trend_gate                 = False
+            if RISK_PCT_OVERRIDE is not None:
+                _pf_sim_settings.risk.risk_per_trade = RISK_PCT_OVERRIDE
+            _pf_fold_sim = simulate_dynamic_concurrent_backtest(
+                _pf_sim_df, _pf_sim_settings, risk_mgr, m1_df=_m1_df
+            )
+            _pf_sim_r   = _pf_fold_sim.report
+            _pf_elapsed = time.time() - _pf_t
+            # Collect trade records
+            if not _pf_fold_sim.trades.empty:
+                _pf_ft = _pf_fold_sim.trades.copy()
+                _pf_ft["fold"]       = fold_idx
+                _pf_ft["test_start"] = _pf_ts
+                _pf_ft["test_end"]   = _pf_te
+                sim_trade_log.append(_pf_ft)
+            _pf_result = {
+                "fold":        fold_idx,
+                "test_start":  _pf_ts,
+                "test_end":    _pf_te,
+                "roc_auc":     _pf_auc,
+                "precision":   _pf_prec,
+                "recall":      _pf_rec,
+                "f1":          _pf_f1,
+                "accuracy":    _pf_acc,
+                "threshold":   _pf_best_thr,
+                "n_signals":   _pf_n_sig,
+                "n_total":     _pf_n_tot,
+                "signal_rate": round(_pf_n_sig / _pf_n_tot, 4) if _pf_n_tot > 0 else 0.0,
+                "elapsed_s":   round(_pf_elapsed, 1),
+                "rr_sweep":    {},
+                "partial_fold": True,
+                "concurrent_sim": {
+                    "starting_balance":         STARTING_BALANCE,
+                    "ending_balance":           _pf_sim_r["ending_balance"],
+                    "return_pct":               _pf_sim_r["return_pct"],
+                    "trades":                   _pf_sim_r["trades"],
+                    "wins":                     _pf_sim_r["wins"],
+                    "losses":                   _pf_sim_r["losses"],
+                    "win_rate":                 _pf_sim_r["win_rate"],
+                    "profit_factor":            _pf_sim_r["profit_factor"],
+                    "max_drawdown_pct":         _pf_sim_r.get("max_drawdown_pct", 0.0),
+                    "avg_concurrent_positions": _pf_sim_r.get("avg_concurrent_positions", 0.0),
+                    "max_concurrent_positions": _pf_sim_r.get("max_concurrent_positions", 0),
+                },
+            }
+            fold_results.append(_pf_result)
+            print(
+                f"  Fold {fold_idx:2d}* [PARTIAL] "
+                f"Test: {_pf_ts} → {_pf_te} | "
+                f"AUC={_pf_auc:.4f}  Prec={_pf_prec:.4f}  Recall={_pf_rec:.4f}  "
+                f"F1={_pf_f1:.4f}  Thr={_pf_best_thr:.2f}  Sigs={_pf_n_sig}/{_pf_n_tot}  "
+                f"Bal: ${STARTING_BALANCE:,.0f}→${_pf_sim_r['ending_balance']:,.0f} "
+                f"({_pf_sim_r['return_pct']:+.1f}%)  ({_pf_elapsed:.1f}s)"
+            )
 
 print()
 
@@ -604,6 +1026,13 @@ out_signals = Path(settings.app.walkforward_trades_path)
 
 out_report.write_text(json.dumps(wf_report, indent=2, ensure_ascii=False), encoding="utf-8")
 print(f"  Report saved  → {out_report}")
+
+# Save per-trade sim records
+_out_sim_trades = out_signals.parent / (out_signals.stem + "_sim_trades.csv")
+if sim_trade_log:
+    all_sim_trades = pd.concat(sim_trade_log, ignore_index=True)
+    all_sim_trades.to_csv(_out_sim_trades, index=False)
+    print(f"  Sim trades    → {_out_sim_trades}  ({len(all_sim_trades):,} executed trades)")
 
 if not all_signals.empty:
     all_signals.to_csv(out_signals, index=False)

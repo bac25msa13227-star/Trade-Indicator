@@ -107,10 +107,72 @@ class MT5Executor:
             "connected": True,
         }
 
+    def get_tick(self, symbol: str | None = None) -> dict[str, Any]:
+        """Return latest tick in normalized shape for monitor/diagnostics."""
+        symbol = symbol or self.settings.market.symbol
+        try:
+            self._ensure_connection()
+        except Exception as exc:
+            return {
+                "symbol": symbol,
+                "bid": 0.0,
+                "ask": 0.0,
+                "time": None,
+                "source": "none",
+                "error": str(exc),
+            }
+        if mt5 is None:
+            if _BRIDGE_URL:
+                try:
+                    raw = _bridge_call("GET", f"/tick?symbol={symbol}")
+                    return {
+                        "symbol": symbol,
+                        "bid": float(raw.get("bid", 0.0) or 0.0),
+                        "ask": float(raw.get("ask", 0.0) or 0.0),
+                        "time": raw.get("time"),
+                        "source": "bridge",
+                        "error": "",
+                    }
+                except Exception as exc:
+                    return {
+                        "symbol": symbol,
+                        "bid": 0.0,
+                        "ask": 0.0,
+                        "time": None,
+                        "source": "bridge",
+                        "error": str(exc),
+                    }
+            return {
+                "symbol": symbol,
+                "bid": 0.0,
+                "ask": 0.0,
+                "time": None,
+                "source": "none",
+                "error": "MT5_UNAVAILABLE",
+            }
+        tick = mt5.symbol_info_tick(symbol)
+        if tick is None:
+            return {
+                "symbol": symbol,
+                "bid": 0.0,
+                "ask": 0.0,
+                "time": None,
+                "source": "mt5",
+                "error": str(mt5.last_error()),
+            }
+        return {
+            "symbol": symbol,
+            "bid": float(getattr(tick, "bid", 0.0) or 0.0),
+            "ask": float(getattr(tick, "ask", 0.0) or 0.0),
+            "time": int(getattr(tick, "time", 0) or 0),
+            "source": "mt5",
+            "error": "",
+        }
+
     def get_current_price(self, symbol: str, side: str) -> float:
         """
         Lấy giá thị trường real-time từ MT5: ask cho BUY, bid cho SELL.
-        Dùng để rebase entry/SL/TP từ giá yfinance (delay ~15 phút) sang giá thật
+        Dùng để rebase entry/SL/TP từ giá bar close sang giá tick hiện tại
         trước khi gửi Telegram notification và đặt lệnh.
         """
         try:
@@ -489,7 +551,7 @@ class MT5Executor:
         price = tick.ask if plan.side == "buy" else tick.bid
 
         # Re-anchor SL/TP về giá fill thực tế (giống mt5_bridge)
-        # Tránh sai lệch khi entry_price từ yfinance lệch xa giá fill 10-20 USD
+        # Tránh sai lệch khi entry_price từ bar close lệch xa giá fill thực tế
         if plan.entry_price and plan.entry_price > 0 and plan.stop_loss and plan.take_profit:
             _sl_dist = abs(plan.entry_price - plan.stop_loss)
             _tp_dist = abs(plan.take_profit - plan.entry_price)

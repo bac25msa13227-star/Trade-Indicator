@@ -111,7 +111,7 @@ docker ps --format "{{.Names}}  {{.Status}}  {{.Ports}}" 2>&1 | ForEach-Object {
 
 Log ""
 Log "=== SERVICE URLS ==="
-Log "Streamlit Dashboard : http://localhost:8501"
+Log "WebSocket Dashboard  : http://localhost:8000/dashboard"
 Log "FastAPI Swagger      : http://localhost:8000/docs"
 Log "MLflow UI            : http://localhost:5000"
 Log "MinIO Console        : http://localhost:9001  (user: minioadmin / minioadmin123)"

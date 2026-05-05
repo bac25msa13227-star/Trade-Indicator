@@ -149,6 +149,14 @@ class HybridStrategy:
 
     def should_allow_row(self, row: pd.Series | object, probability: float) -> tuple[bool, str]:
         strategy_score = abs(float(getattr(row, "strategy_score", 0.0)))
+        raw_strategy_score = float(getattr(row, "strategy_score", 0.0))
+        # Prefer pre-computed trade_side (from expected_direction 9-indicator blend in dataset)
+        # over recomputing from strategy_score sign alone. This keeps WF and live consistent.
+        _row_trade_side = str(getattr(row, "trade_side", "")).strip().lower()
+        if _row_trade_side in ("buy", "sell"):
+            trade_side = _row_trade_side
+        else:
+            trade_side = "sell" if raw_strategy_score < 0 else "buy"
         volatility_regime = int(getattr(row, "volatility_regime", 1))
         trend_alignment = int(getattr(row, "trend_alignment", 1))
         blocked_by_time, blocked_reason = self._blocked_by_time(getattr(row, "time", None))
@@ -162,6 +170,12 @@ class HybridStrategy:
             min_conf = self.settings.strategy.volatile_min_confidence
         else:
             min_conf = self.settings.risk.min_confidence
+
+        # Asymmetric directional confidence override
+        if trade_side == "sell" and self.settings.strategy.sell_min_confidence is not None:
+            min_conf = max(min_conf, self.settings.strategy.sell_min_confidence)
+        elif trade_side == "buy" and self.settings.strategy.buy_min_confidence is not None:
+            min_conf = max(min_conf, self.settings.strategy.buy_min_confidence)
 
         # Silver Bullet boost: increase effective probability during high-probability windows
         effective_prob = probability
@@ -185,7 +199,9 @@ class HybridStrategy:
         if effective_prob < min_conf:
             return False, f"confidence_below_floor ({effective_prob:.3f} < {min_conf:.3f})"
         if self.settings.strategy.require_trend_alignment and trend_alignment != 1:
-            return False, "trend_misaligned"
+            bypass_conf = self.settings.strategy.trend_bypass_confidence
+            if bypass_conf is None or effective_prob < bypass_conf:
+                return False, "trend_misaligned"
         if strategy_score < self.required_strategy_score(volatility_regime):
             return False, "strategy_score_too_weak"
 
@@ -194,6 +210,15 @@ class HybridStrategy:
             adx_val = float(getattr(row, "adx", 0.0))
             if adx_val < self.settings.strategy.adx_min_trend:
                 return False, f"adx_too_low ({adx_val:.1f} < {self.settings.strategy.adx_min_trend})"
+
+        # D1 trend gate: only trade WITH daily bias direction
+        # daily_bias = +1 (uptrend) → block sell; daily_bias = -1 (downtrend) → block buy
+        if self.settings.strategy.d1_trend_gate:
+            daily_bias = float(getattr(row, "daily_bias", 0.0))
+            if daily_bias > 0 and trade_side == "sell":
+                return False, "d1_trend_gate (uptrend, no sell)"
+            if daily_bias < 0 and trade_side == "buy":
+                return False, "d1_trend_gate (downtrend, no buy)"
 
         return True, "ok"
 
@@ -246,8 +271,21 @@ class HybridStrategy:
 
     def build_trade_decision(self, frames: dict[str, pd.DataFrame], live_row: pd.Series, model_signal: dict[str, float]) -> TradeDecision:
         confidence = float(model_signal["probability"])
-        signal_on = bool(model_signal["prediction"] == 1 and confidence >= self.settings.risk.min_confidence)
         strategy_score = float(live_row["strategy_score"])
+        # Prefer pre-computed trade_side (9-indicator blend from build_live_feature_frame)
+        # over strategy_score sign alone — keeps live direction consistent with WF sim.
+        _live_side = str(live_row.get("trade_side", "")).strip().lower()
+        hyp_side_early = _live_side if _live_side in ("buy", "sell") else ("buy" if strategy_score >= 0 else "sell")
+
+        # ── Asymmetric confidence thresholds per direction ────────────────────
+        base_min_conf = self.settings.risk.min_confidence
+        if hyp_side_early == "sell" and self.settings.strategy.sell_min_confidence is not None:
+            effective_min_conf = self.settings.strategy.sell_min_confidence
+        elif hyp_side_early == "buy" and self.settings.strategy.buy_min_confidence is not None:
+            effective_min_conf = self.settings.strategy.buy_min_confidence
+        else:
+            effective_min_conf = base_min_conf
+        signal_on = bool(model_signal["prediction"] == 1 and confidence >= effective_min_conf)
         volatility_regime = int(live_row.get("volatility_regime", 1))
 
         # ── News blocking: kiểm tra news_is_blackout thực tế ──────────────────
@@ -268,7 +306,7 @@ class HybridStrategy:
         entry = float(live_row["close"])
         stop_distance = atr_value * sl_mult if atr_value > 0 else 0.0
 
-        hyp_side = "buy" if strategy_score >= 0 else "sell"
+        hyp_side = _live_side if _live_side in ("buy", "sell") else ("buy" if strategy_score >= 0 else "sell")
         if hyp_side == "buy":
             hyp_sl = entry - stop_distance if stop_distance > 0 else 0.0
             hyp_tp = entry + stop_distance * rr if stop_distance > 0 else 0.0

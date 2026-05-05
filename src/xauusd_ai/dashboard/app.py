@@ -1,17 +1,21 @@
-"""XAUUSD AI Bot — Comprehensive Live Dashboard v3.0 ICT+Wyckoff
+"""XAUUSD AI Bot — Comprehensive Live Dashboard v4.0 Combo #133
 
-Model: HistGradientBoostingClassifier, 28 features
-Features: D1(1) + H4(9: ICT) + H1(3: Wyckoff) + M15(15: execution)
-Threshold: 0.55 | Walk-Forward: 19 folds, precision avg 54.7%, AUC std 0.0123
+Model  : VotingClassifier (HGB×3 + RF×2 + ET×1, soft voting)
+Features: 56 features — D1(1)+H4(9)+H1(3)+M15(15)+News(5)+Price(5)+v2(8)+v3(6)+v4(3)+v5(2)
+Threshold: 0.70 | Walk-Forward: 28 folds (Jan 2024–Apr 2026) | 27/28 profitable | +$78,204 total
+
+Key Combo #133 params:
+  MIN_CONF=0.70, blocked=[3,15,17,22,23], D1_GATE=False, risk=4%, RR=3.5, max_pos=3
 
 Tabs:
-  1. Live Monitor        — Bot status, account overview, latest signal
-  2. Phan tich Chi tiet  — 6-step decision breakdown (ICT→Wyckoff→Execution)
-  3. P&L & Von           — Equity curve, drawdown, win/loss streaks
-  4. Hoc Lien Tuc        — Learning cycle, ROC-AUC improvement, win/loss log
-  5. Backtest            — Historical backtest results (ICT+Wyckoff model)
-  6. Walk-Forward        — 19-fold walk-forward analysis
-  7. Risk & Cai dat      — Lot calculator, position sizing
+  1. Live Monitor        — Bot status, retrain countdown, signal, toggle with confirm
+  2. Phân tích Chi tiết  — 6-step decision breakdown (ICT→Wyckoff→Execution)
+  3. P&L & Vốn           — Equity curve, drawdown, win/loss streaks
+  4. Tự học              — Learning cycle, ROC-AUC improvement, win/loss log
+  5. Backtest            — Historical backtest results
+  6. Walk-Forward        — 28-fold walk-forward analysis
+  7. Rủi ro              — Lot calculator, position sizing
+  8. Dữ liệu             — Data quality, M5 bar count, CSV status
 """
 from __future__ import annotations
 
@@ -41,6 +45,111 @@ except ImportError:
 
 ROOT = Path(__file__).resolve().parents[3]
 OUTPUTS = ROOT / "outputs"
+
+
+def _read_auto_trade(config_filename: str) -> bool:
+    """Return current auto_trade value from a live config YAML."""
+    cfg_path = ROOT / "configs" / config_filename
+    if not cfg_path.exists():
+        return False
+    try:
+        raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+        return bool(raw.get("execution", {}).get("auto_trade", False))
+    except Exception:
+        return False
+
+
+def _write_auto_trade(config_filename: str, enabled: bool) -> bool:
+    """Toggle auto_trade in live config YAML (hot-reloaded by orchestrator)."""
+    cfg_path = ROOT / "configs" / config_filename
+    if not cfg_path.exists():
+        return False
+    try:
+        content = cfg_path.read_text(encoding="utf-8")
+        new_val = "true" if enabled else "false"
+        new_content = re.sub(
+            r"(\bauto_trade\s*:\s*)(true|false)",
+            rf"\g<1>{new_val}",
+            content,
+            flags=re.IGNORECASE,
+        )
+        cfg_path.write_text(new_content, encoding="utf-8")
+        return True
+    except Exception:
+        return False
+
+
+def _read_kill_switch(acc_tag: str) -> dict:
+    """Read kill switch state from risk_daily_state file. Returns dict with 'killed', 'daily_loss', etc."""
+    state_file = OUTPUTS / f"risk_daily_state_{acc_tag}.json"
+    if not state_file.exists():
+        # Try without suffix (single account setup)
+        state_file = OUTPUTS / "risk_daily_state.json"
+    if not state_file.exists():
+        return {"killed": False, "daily_loss": 0.0, "consecutive_losses": 0, "cooldown_bars": 0, "date": ""}
+    try:
+        data = json.loads(state_file.read_text(encoding="utf-8"))
+        return {
+            "killed": bool(data.get("killed", False)),
+            "daily_loss": float(data.get("daily_loss", 0.0)),
+            "consecutive_losses": int(data.get("consecutive_losses", 0)),
+            "cooldown_bars": int(data.get("cooldown_bars", 0)),
+            "date": str(data.get("date", "")),
+        }
+    except Exception:
+        return {"killed": False, "daily_loss": 0.0, "consecutive_losses": 0, "cooldown_bars": 0, "date": ""}
+
+
+def _reset_kill_switch(acc_tag: str, reset_daily: bool = True) -> bool:
+    """Reset kill switch (and optionally daily counters). Returns True on success."""
+    state_file = OUTPUTS / f"risk_daily_state_{acc_tag}.json"
+    if not state_file.exists():
+        state_file = OUTPUTS / "risk_daily_state.json"
+    try:
+        existing: dict = {}
+        if state_file.exists():
+            existing = json.loads(state_file.read_text(encoding="utf-8"))
+        existing["killed"] = False
+        if reset_daily:
+            existing["daily_loss"] = 0.0
+            existing["consecutive_losses"] = 0
+            existing["cooldown_bars"] = 0
+        tmp = state_file.with_suffix(".tmp")
+        tmp.write_text(json.dumps(existing, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(state_file)
+        return True
+    except Exception:
+        return False
+
+
+def _get_tunnel_url() -> str:
+    """Extract the current Cloudflare tunnel URL from tunnel log file."""
+    import re as _re
+    for _fname in ("tunnel_err.txt", "cloudflared.log", "tunnel.log"):
+        _fpath = OUTPUTS / _fname
+        if _fpath.exists():
+            try:
+                _content = _fpath.read_text(encoding="utf-8", errors="ignore")
+                _m = _re.search(r"https://[a-z0-9\-]+\.trycloudflare\.com", _content)
+                if _m:
+                    return _m.group(0)
+            except Exception:
+                pass
+    return ""
+
+
+def _send_telegram_direct(token: str, chat_id: str, text: str) -> bool:
+    """Send a Telegram message directly without requiring Settings object."""
+    import requests as _req
+    try:
+        resp = _req.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
+            timeout=10,
+        )
+        return resp.ok
+    except Exception:
+        return False
 
 
 def _load_live_app_files(config_filename: str, defaults: dict[str, str]) -> dict[str, str]:
@@ -680,7 +789,8 @@ st.set_page_config(
 # ── Bright cute theme ───────────────────────────────────────────────────────
 st.session_state.setdefault("cute_theme", "Peach Soda")
 st.session_state.setdefault("cute_focus_account", "Acc 2")
-st.session_state.setdefault("signal_table_limit", 60)
+st.session_state.setdefault("signal_table_limit", 100)
+st.session_state.setdefault("closed_trades_limit", 200)
 st.session_state.setdefault("cute_companion_question", "Tài khoản nào đang khỏe hơn lúc này?")
 st.session_state.setdefault("cute_show_sparkles", True)
 st.session_state.setdefault("cute_story_mode", True)
@@ -1300,9 +1410,16 @@ def _render_dashboard_command_center() -> None:
         st.slider(
             "Số tín hiệu hiển thị",
             min_value=20,
-            max_value=140,
+            max_value=500,
             step=20,
             key="signal_table_limit",
+        )
+        st.slider(
+            "Số lệnh đã đóng hiển thị",
+            min_value=50,
+            max_value=1000,
+            step=50,
+            key="closed_trades_limit",
         )
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -1393,6 +1510,297 @@ def _render_live_tab() -> None:
         '</div>',
         unsafe_allow_html=True,
     )
+
+    # ── AUTO-TRADE TOGGLE — ACC1 & ACC2 ─────────────────────────────────
+    _at_acc1 = _read_auto_trade("live_acc1.yaml")
+    _at_acc2 = _read_auto_trade("live_acc2.yaml")
+    _at_status_acc1 = load_json(OUTPUTS / "live_status_acc1.json")
+    _at_status_acc2 = load_json(OUTPUTS / "live_status_acc2.json")
+    # live_status overrides YAML if bot is running (most authoritative source)
+    if "auto_trade_enabled" in _at_status_acc1:
+        _at_acc1 = bool(_at_status_acc1["auto_trade_enabled"])
+    if "auto_trade_enabled" in _at_status_acc2:
+        _at_acc2 = bool(_at_status_acc2["auto_trade_enabled"])
+    # prefer live_status regime for the banner
+    _regime_acc1 = int(float(_at_status_acc1.get("volatility_regime", 1) or 1))
+    _regime_acc2 = int(float(_at_status_acc2.get("volatility_regime", 1) or 1))
+    _regime_labels = {0: ("SIDEWAYS", AMBER, "🟡"), 1: ("NORMAL", BLUE, "🔵"), 2: ("VOLATILE", GREEN, "🟢")}
+
+    st.markdown(
+        '<div style="font-family:Fredoka,cursive;font-size:1.2rem;font-weight:700;'
+        'color:var(--text-primary);margin:10px 0 8px">🎛️ Điều khiển Bot</div>',
+        unsafe_allow_html=True,
+    )
+    _ctrl_c1, _ctrl_c2 = st.columns(2)
+
+    def _auto_trade_panel(col, acc_label: str, cfg_file: str, is_on: bool, acc_id: str, regime: int, acc_tag: str) -> None:
+        rl, rc, ri = _regime_labels.get(regime, ("NORMAL", BLUE, "🔵"))
+        status_text = "🟢 ĐANG CHẠY" if is_on else "🔴 TẠM DỪNG"
+        status_c = GREEN if is_on else RED
+        _ks = _read_kill_switch(acc_tag)
+        _killed = _ks["killed"]
+        _consec = _ks["consecutive_losses"]
+        _cd_bars = _ks["cooldown_bars"]
+        _dd_loss = _ks["daily_loss"]
+        _confirm_key = f"confirm_pending_{cfg_file}"
+        st.session_state.setdefault(_confirm_key, False)
+        with col:
+            st.markdown(
+                f'<div style="background:linear-gradient(145deg,rgba(255,255,255,0.92),rgba(255,255,255,0.70));'
+                f'border:1px solid var(--border-subtle);border-left:4px solid {status_c};'
+                f'border-radius:20px;padding:16px 18px;box-shadow:var(--shadow-soft)">'
+                f'<div style="display:flex;justify-content:space-between;align-items:center">'
+                f'<div>'
+                f'<div style="font-size:0.72rem;color:var(--text-muted);text-transform:uppercase;'
+                f'letter-spacing:.08em;font-weight:700">{acc_label}</div>'
+                f'<div style="font-size:1.1rem;font-weight:800;color:{status_c};margin:2px 0">{status_text}</div>'
+                f'<div style="font-size:0.78rem;color:var(--text-secondary)">'
+                f'{ri} Thị trường: <b style="color:{rc}">{rl}</b></div>'
+                f'</div>'
+                f'</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+            # ── Confirm-popup toggle ──────────────────────────────────────
+            if not st.session_state[_confirm_key]:
+                btn_label = "⏸️ Tạm dừng Auto Trade" if is_on else "▶️ Bật Auto Trade"
+                btn_key = f"btn_toggle_at_{cfg_file}"
+                if st.button(btn_label, key=btn_key, use_container_width=True,
+                             type="primary" if not is_on else "secondary"):
+                    st.session_state[_confirm_key] = True
+                    st.rerun()
+            else:
+                action_verb = "TẠM DỪNG" if is_on else "BẬT"
+                action_icon = "⏸️" if is_on else "▶️"
+                warn_c = RED if is_on else GREEN
+                st.markdown(
+                    f'<div style="background:{warn_c}10;border:1px solid {warn_c}50;'
+                    f'border-radius:14px;padding:12px 14px;margin-bottom:8px">'
+                    f'<div style="font-size:0.85rem;font-weight:800;color:{warn_c}">'
+                    f'{action_icon} Xác nhận {action_verb} bot {acc_label}?</div>'
+                    f'<div style="font-size:0.74rem;color:var(--text-secondary);margin-top:4px">'
+                    f'Thao tác này sẽ ghi trực tiếp vào config file và có hiệu lực trong &lt;60 giây.</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+                _cc1, _cc2 = st.columns(2)
+                with _cc1:
+                    if st.button(f"✅ Xác nhận", key=f"btn_confirm_yes_{cfg_file}",
+                                 use_container_width=True, type="primary"):
+                        success = _write_auto_trade(cfg_file, not is_on)
+                        st.session_state[_confirm_key] = False
+                        if success:
+                            st.success(f"✅ Đã {'dừng' if is_on else 'bật'} Auto Trade — {acc_label}.")
+                        else:
+                            st.error("❌ Không thể ghi config file.")
+                        st.rerun()
+                with _cc2:
+                    if st.button("❌ Huỷ", key=f"btn_confirm_no_{cfg_file}",
+                                 use_container_width=True):
+                        st.session_state[_confirm_key] = False
+                        st.rerun()
+
+            # ── Kill Switch Status & Reset ────────────────────────────────
+            if _killed:
+                st.markdown(
+                    f'<div style="background:linear-gradient(135deg,{RED}18,{RED}08);'
+                    f'border:1px solid {RED}50;border-radius:12px;padding:10px 14px;margin-top:8px">'
+                    f'<div style="font-size:0.8rem;font-weight:800;color:{RED}">⛔ KILL SWITCH KÍCH HOẠT</div>'
+                    f'<div style="font-size:0.72rem;color:#94a3b8;margin-top:3px">'
+                    f'Drawdown vượt ngưỡng → Bot đã tạm dừng hoàn toàn</div>'
+                    f'<div style="font-size:0.72rem;color:{AMBER};margin-top:2px">'
+                    f'Loss hôm nay: <b>${_dd_loss:.2f}</b> | '
+                    f'Consec: <b>{_consec}</b> | Cooldown: <b>{_cd_bars} bars</b></div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+                if st.button(f"🔄 Reset Kill Switch — {acc_label}", key=f"btn_ks_reset_{acc_tag}",
+                             use_container_width=True, type="primary"):
+                    if _reset_kill_switch(acc_tag, reset_daily=True):
+                        st.success(f"✅ Kill switch đã reset — {acc_label}. Bot sẽ tiếp tục sau <60s.")
+                    else:
+                        st.error(f"❌ Không thể reset kill switch. Hãy kiểm tra file outputs/risk_daily_state_{acc_tag}.json")
+                    st.rerun()
+            elif _consec > 0 or _cd_bars > 0:
+                # Cooldown (not killed, but in cooldown period)
+                st.markdown(
+                    f'<div style="background:{AMBER}10;border:1px solid {AMBER}40;'
+                    f'border-radius:10px;padding:8px 12px;margin-top:6px">'
+                    f'<div style="font-size:0.74rem;color:{AMBER};font-weight:700">⏳ Đang Cooldown</div>'
+                    f'<div style="font-size:0.71rem;color:#94a3b8">'
+                    f'Consec losses: {_consec} | Cooldown bars còn: {_cd_bars}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+                if st.button(f"↺ Reset Cooldown — {acc_label}", key=f"btn_cd_reset_{acc_tag}",
+                             use_container_width=True):
+                    if _reset_kill_switch(acc_tag, reset_daily=False):
+                        st.success(f"✅ Cooldown reset — {acc_label}")
+                    else:
+                        st.error("❌ Reset thất bại")
+                    st.rerun()
+            else:
+                st.markdown(
+                    f'<div style="background:{GREEN}10;border:1px solid {GREEN}30;'
+                    f'border-radius:10px;padding:8px 12px;margin-top:6px">'
+                    f'<div style="font-size:0.74rem;color:{GREEN}">✅ Circuit Breaker: Bình thường</div>'
+                    f'<div style="font-size:0.71rem;color:#64748b">'
+                    f'Loss hôm nay: ${_dd_loss:.2f} | Consec losses: {_consec}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+    _auto_trade_panel(_ctrl_c1, "ACC1 — 270832477", "live_acc1.yaml", _at_acc1, "270832477", _regime_acc1, "acc1")
+    _auto_trade_panel(_ctrl_c2, "ACC2 — 433326057", "live_acc2.yaml", _at_acc2, "433326057", _regime_acc2, "acc2")
+
+    # ── Retrain Countdown ─────────────────────────────────────────────────
+    _retrain_state_path = OUTPUTS / "combo133_retrain_state.json"
+    _retrain_log_path   = OUTPUTS / "combo133_retrain_log.jsonl"
+    import json as _json
+    import datetime as _dt3
+    _rs = {}
+    if _retrain_state_path.exists():
+        try:
+            _rs = _json.loads(_retrain_state_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    _m5_path = ROOT / "src" / "xauusd_ai" / "real_data" / "XAUUSDm_M5.csv"
+    try:
+        _m5_count = sum(1 for _ in open(_m5_path, encoding="utf-8")) - 1
+    except Exception:
+        _m5_count = 0
+    _last_count = int(_rs.get("last_retrain_m5_count", 0))
+    _last_fold  = int(_rs.get("last_fold", 28))
+    _last_result = str(_rs.get("last_result", "—"))
+    _last_date  = str(_rs.get("last_retrain_date", "2026-04-24"))[:10]
+    _retrain_every = 6000
+    _new_bars   = max(0, _m5_count - _last_count)
+    _remaining  = max(0, _retrain_every - _new_bars)
+    _progress_pct = min(1.0, _new_bars / _retrain_every)
+    _bars_per_day = 276
+    _days_left  = _remaining / _bars_per_day
+    try:
+        _eta = (_dt3.date.today() + _dt3.timedelta(days=int(_days_left))).strftime("%Y-%m-%d")
+    except Exception:
+        _eta = "—"
+    _rt_c = GREEN if _new_bars >= _retrain_every else (AMBER if _progress_pct >= 0.6 else BLUE)
+    _last_log_entry: dict = {}
+    if _retrain_log_path.exists():
+        try:
+            _lines = [l for l in _retrain_log_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+            if _lines:
+                _last_log_entry = _json.loads(_lines[-1])
+        except Exception:
+            pass
+    _last_auc  = _last_log_entry.get("roc_auc", _rs.get("roc_auc", "—"))
+    _last_pnl  = _last_log_entry.get("net_pnl", "—")
+    _last_wr   = _last_log_entry.get("win_rate", "—")
+    st.markdown(
+        '<div style="font-family:Fredoka,cursive;font-size:1.2rem;font-weight:700;'
+        'color:var(--text-primary);margin:14px 0 8px">🔁 Combo #133 — Trạng Thái Retrain</div>',
+        unsafe_allow_html=True,
+    )
+    _r1, _r2, _r3, _r4 = st.columns(4)
+    _r1.markdown(_card("Fold hiện tại", f"#{_last_fold}", f"Retrain lần cuối: {_last_date}", PURPLE), unsafe_allow_html=True)
+    _r2.markdown(_card("Kết quả cuối", _last_result.split(" ")[0], f"P&L: ${_last_pnl:.2f}" if isinstance(_last_pnl, float) else f"P&L: {_last_pnl}", GREEN if "ACCEPTED" in _last_result else RED), unsafe_allow_html=True)
+    _r3.markdown(_card("Bars tích lũy", f"{_new_bars:,} / {_retrain_every:,}", f"Còn {_remaining:,} bars (~{_days_left:.0f} ngày)", _rt_c), unsafe_allow_html=True)
+    _r4.markdown(_card("Dự kiến retrain", _eta if _remaining > 0 else "SẴN SÀNG ✅", f"ETA fold #{_last_fold + 1}", AMBER if _remaining > 0 else GREEN), unsafe_allow_html=True)
+    st.progress(_progress_pct, text=f"Tiến trình: {_new_bars:,} / {_retrain_every:,} bars mới ({_progress_pct:.0%})")
+    if _new_bars >= _retrain_every:
+        st.success(f"✅ Đã đủ {_new_bars:,} bars mới — Chạy `python scripts/auto_update_retrain.py` để retrain fold #{_last_fold + 1}!")
+    if isinstance(_last_auc, float):
+        st.markdown(
+            f'<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:6px">'
+            f'<span class="cute-pill">ROC-AUC: <b>{_last_auc:.4f}</b></span>'
+            f'<span class="cute-pill">WR: <b>{float(_last_wr):.1%}</b></span>'
+            f'<span class="cute-pill">M5 tổng: <b>{_m5_count:,}</b></span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+    with st.expander("📡 Gửi URL Dashboard về Telegram", expanded=False):
+        import os as _os
+        _tun_url = _get_tunnel_url()
+        _tg_token = _os.getenv("TELEGRAM_BOT_TOKEN", "")
+        _tg_chat  = _os.getenv("TELEGRAM_CHAT_ID", "")
+        _tg_col1, _tg_col2 = st.columns([2, 1])
+        with _tg_col1:
+            if _tun_url:
+                st.markdown(
+                    f'<div style="background:{GREEN}10;border:1px solid {GREEN}40;'
+                    f'border-radius:10px;padding:10px 14px">'
+                    f'<div style="font-size:0.74rem;color:{GREEN};font-weight:700">✅ Đã tìm thấy URL tunnel:</div>'
+                    f'<div style="font-size:0.85rem;font-weight:700;color:#f1f5f9;margin-top:4px;'
+                    f'word-break:break-all">{_tun_url}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.warning("⚠️ Chưa tìm thấy URL tunnel. Hãy chạy cloudflared và đảm bảo outputs/tunnel_err.txt tồn tại.")
+            _manual_url = st.text_input(
+                "Hoặc nhập URL thủ công:", value=_tun_url,
+                placeholder="https://xxxx.trycloudflare.com",
+                key="tg_tunnel_manual_url",
+            )
+        with _tg_col2:
+            if not _tg_token or not _tg_chat:
+                st.caption("⚙️ Thiếu env TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID")
+                _tg_token  = st.text_input("Bot Token:", type="password", key="tg_token_input")
+                _tg_chat   = st.text_input("Chat ID:", key="tg_chat_input")
+            else:
+                st.success("🔑 Telegram credentials đã cấu hình (env)")
+            _send_url = _manual_url or _tun_url
+            if st.button("📤 Gửi URL về Telegram", key="btn_send_tg_url",
+                         disabled=not (_send_url and _tg_token and _tg_chat),
+                         use_container_width=True, type="primary"):
+                import datetime as _dt2
+                _msg = (
+                    f"🚀 <b>XAUUSD AI Dashboard</b>\n"
+                    f"🌐 URL: <a href='{_send_url}'>{_send_url}</a>\n"
+                    f"⏰ {_dt2.datetime.now(_dt2.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
+                )
+                if _send_telegram_direct(_tg_token, _tg_chat, _msg):
+                    st.success(f"✅ Đã gửi URL về Telegram!")
+                else:
+                    st.error("❌ Gửi thất bại — kiểm tra token/chat_id")
+
+    # ── Market regime banner ─────────────────────────────────────────────
+    _banner_cols = st.columns(4)
+    for _bi, (_acc_lbl, _status_j) in enumerate([
+        ("ACC1", _at_status_acc1), ("ACC2", _at_status_acc2),
+    ]):
+        _reg = int(float(_status_j.get("volatility_regime", 1) or 1))
+        _rl, _rc, _ri = _regime_labels.get(_reg, ("NORMAL", BLUE, "🔵"))
+        _mkt_open = bool(_status_j.get("market_is_open", True))
+        _mkt_lbl = "Market OPEN" if _mkt_open else "Market CLOSED"
+        _mkt_c = GREEN if _mkt_open else RED
+        _at_en = _read_auto_trade("live_acc1.yaml" if _acc_lbl == "ACC1" else "live_acc2.yaml")
+        with _banner_cols[_bi * 2]:
+            st.markdown(
+                f'<div style="background:linear-gradient(135deg,{_rc}0a,{_rc}18);'
+                f'border:1px solid {_rc}30;border-radius:14px;padding:12px 14px;text-align:center">'
+                f'<div style="font-size:0.68rem;color:var(--text-muted);font-weight:700;'
+                f'text-transform:uppercase;letter-spacing:.08em">{_acc_lbl} Chế Độ</div>'
+                f'<div style="font-size:1.4rem;font-weight:800;color:{_rc};margin:4px 0">{_ri} {_rl}</div>'
+                f'<div style="font-size:0.74rem;color:var(--text-secondary)">'
+                f'{"Ngưỡng score=0.05" if _reg == 0 else "Ngưỡng score=0.30"}'
+                f'{"  |  hệ số 0.5x" if _reg == 0 else ("  |  hệ số 1.2x" if _reg == 2 else "  |  hệ số 1.0x")}'
+                f'</div></div>',
+                unsafe_allow_html=True,
+            )
+        with _banner_cols[_bi * 2 + 1]:
+            st.markdown(
+                f'<div style="background:linear-gradient(135deg,{_mkt_c}0a,{_mkt_c}18);'
+                f'border:1px solid {_mkt_c}30;border-radius:14px;padding:12px 14px;text-align:center">'
+                f'<div style="font-size:0.68rem;color:var(--text-muted);font-weight:700;'
+                f'text-transform:uppercase;letter-spacing:.08em">{_acc_lbl} Sàn</div>'
+                f'<div style="font-size:1.1rem;font-weight:800;color:{_mkt_c};margin:4px 0">{_mkt_lbl}</div>'
+                f'<div style="font-size:0.74rem;color:var(--text-secondary)">'
+                f'Auto: <b style="color:{"#26a69a" if _at_en else "#ef5350"}">'
+                f'{"ON ✓" if _at_en else "OFF ✗"}</b></div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+    st.divider()
 
     hdr_l, hdr_r = st.columns([3, 1])
     with hdr_l:
@@ -1790,8 +2198,9 @@ def _render_live_tab() -> None:
                 return ["background-color: #ef444412"] * len(row)
 
             _cl_cols = [c for c in ["Thời gian", "Session", "Side", "Lot", "Entry", "Exit", "P&L ($)", "Kết quả"] if c in _closed_disp.columns]
+            _ctl = int(st.session_state.get("closed_trades_limit", 200))
             st.dataframe(
-                _closed_disp[_cl_cols].sort_values("Thời gian", ascending=False).head(200).style.apply(_highlight_trade, axis=1),
+                _closed_disp[_cl_cols].sort_values("Thời gian", ascending=False).head(_ctl).style.apply(_highlight_trade, axis=1),
                 use_container_width=True,
             )
     else:
@@ -1818,26 +2227,79 @@ with tab_analysis:
     _ana_sel = st.radio("Tài khoản:", _ana_options, horizontal=True, key="ana_acc_selector")
     _analysis_signals = live_signals if "Acc 1" in _ana_sel else live_signals_acc2
     _ana_threshold = threshold_val_acc2 if "Acc 2" in _ana_sel else threshold_val
+    # Rich real-time data from live_status.json (updated every loop ~10s)
+    _ana_status_file = "live_status_acc2.json" if "Acc 2" in _ana_sel else "live_status_acc1.json"
+    _ana_status = load_json(OUTPUTS / _ana_status_file)
 
-    if _analysis_signals.empty:
+    if _analysis_signals.empty and not _ana_status:
         st.warning("Chưa có tín hiệu. Đợi bot chạy ít nhất 1 chu kỳ.")
     else:
-        latest  = _analysis_signals.iloc[0]
-        conf    = float(latest.get("confidence", 0) or 0)
-        side    = str(latest.get("side", "flat"))
-        score   = float(latest.get("strategy_score", 0) or 0)
-        regime  = int(float(latest.get("volatility_regime", 1) or 1))
-        traded  = bool(latest.get("should_trade", False))
-        reason  = str(latest.get("reason", ""))
+        # Prefer live_status.json for real-time values; fall back to CSV
+        latest = _analysis_signals.iloc[0] if not _analysis_signals.empty else pd.Series()
+        def _af(key, default=0.0):
+            v = _ana_status.get(key) or (latest.get(key) if not latest.empty else None)
+            try:
+                r = float(v or default)
+                return default if r != r else r
+            except Exception:
+                return float(default)
+
+        conf          = _af("confidence")
+        side          = str(_ana_status.get("side") or latest.get("side", "flat"))
+        score         = _af("strategy_score")
+        regime        = int(_af("volatility_regime", 1))
+        traded        = bool(_ana_status.get("should_trade", latest.get("should_trade", False)))
+        reason        = str(_ana_status.get("reason") or latest.get("reason", ""))
+        ict_score     = _af("ict_score")
+        wyckoff_score = _af("wyckoff_score")
+        momentum_score = _af("momentum_score")
+        ict_w         = _af("ict_weight", 0.4)
+        wyckoff_w     = _af("wyckoff_weight", 0.3)
+        momentum_w    = _af("momentum_weight", 0.3)
+        regime_bias   = str(_ana_status.get("regime_bias", ""))
+        strategy_gate = bool(_ana_status.get("strategy_gate_pass", abs(score) >= 0.3))
+        daily_dd_pct  = _af("risk_daily_dd_pct")
+        consec_losses = int(_af("risk_consecutive_losses"))
+        market_open   = bool(_ana_status.get("market_is_open", True))
+        market_reason = str(_ana_status.get("market_state_reason", ""))
+        tick_age      = _af("market_tick_age_sec", 0.0)
+        str_required  = _af("strategy_required_min", 0.3)
+        # Signal threshold from config (most authoritative source)
+        _sig_thr      = _af("signal_threshold") or _ana_threshold
         r_label = {0: "Sideways", 1: "Normal", 2: "Strong Vol"}.get(regime, "?")
         reg_mult = {0: 0.5, 1: 1.0, 2: 1.2}.get(regime, 1.0)
         reg_thr  = {0: 0.05, 1: 0.30, 2: 0.30}.get(regime, 0.30)
-        blocked_hours  = [7, 10, 11, 22]
+        blocked_hours  = list(_ana_status.get("blocked_hours_utc") or [7, 10, 11, 22])
         now_utc        = dt.datetime.utcnow()
         cur_hour       = now_utc.hour
         is_blocked_now = cur_hour in blocked_hours
+        # Position state
+        if not _analysis_signals.empty and "account_balance" in _analysis_signals.columns:
+            opn_n = int(_af("open_positions", 0))
+            mx_n  = int(_af("max_positions", 1))
+        else:
+            opn_n = int(float(_ana_status.get("open_positions", 0) or 0))
+            mx_n  = int(float(_ana_status.get("max_positions", 1) or 1))
 
-        st.markdown(f"**Phân tích tại:** `{str(latest.get('time',''))[:19]}`")
+        _ts_str = str(_ana_status.get("bar_time") or (str(latest.get("time", ""))[:19] if not latest.empty else ""))
+        st.markdown(f"**Phân tích tại:** `{_ts_str}`  |  Auto-trade: **{'✅ ON' if _read_auto_trade('live_acc1.yaml' if 'Acc 1' in _ana_sel else 'live_acc2.yaml') else '🔴 OFF'}**")
+        st.divider()
+
+        # ── Regime + market state banner ─────────────────────────────────
+        _rb1, _rb2, _rb3, _rb4 = st.columns(4)
+        _reg_c = {0: AMBER, 1: BLUE, 2: GREEN}.get(regime, GREY)
+        _rb1.markdown(_card("Chế Độ Thị Trường", r_label, f"hệ số {reg_mult}x | score≥{reg_thr}", _reg_c), unsafe_allow_html=True)
+        _rb2.markdown(_card("Market Open", "✓ MỞ" if market_open else "✗ ĐÓNG",
+                             market_reason[:40] if market_reason else f"Tick age: {tick_age:.0f}s",
+                             GREEN if market_open else RED), unsafe_allow_html=True)
+        _rb3.markdown(_card("Giờ Hiện Tại UTC", f"{cur_hour:02d}:xx",
+                             "⛔ BỊ CHẶN" if is_blocked_now else "✓ Được giao dịch",
+                             RED if is_blocked_now else GREEN), unsafe_allow_html=True)
+        _rb4.markdown(_card("Auto Trade",
+                             "✅ BẬT" if _read_auto_trade("live_acc1.yaml" if "Acc 1" in _ana_sel else "live_acc2.yaml") else "🔴 TẮT",
+                             "Điều khiển ở tab Live", GREEN if _read_auto_trade("live_acc1.yaml" if "Acc 1" in _ana_sel else "live_acc2.yaml") else RED),
+                      unsafe_allow_html=True)
+
         st.divider()
 
         # 6-step flow
@@ -1849,37 +2311,59 @@ with tab_analysis:
         )
         fl, fr = st.columns([1, 1])
         with fl:
-            ml_pass = conf >= _ana_threshold
+            # Step 1: ML Confidence
+            ml_pass = conf >= _sig_thr
             _step_ok(1, "Tin cậy ML Model",
                      ml_pass,
-                     f"confidence = {conf:.1%} {'>=  ' if ml_pass else '< '} ngưỡng {_ana_threshold:.0%}")
+                     f"confidence={conf:.1%}  {'≥' if ml_pass else '<'}  ngưỡng {_sig_thr:.0%}"
+                     + (f"  |  side={side.upper()}" if side not in ("flat", "") else ""))
+
+            # Step 2: Market open gate
+            mkt_pass = market_open
+            _step_ok(2, "Cổng Thị Trường",
+                     mkt_pass,
+                     (market_reason[:70] if market_reason else "OK")
+                     + (f"  |  tick age={tick_age:.0f}s" if tick_age > 0 else ""))
+
+            # Step 3: Time filter
             time_pass = not is_blocked_now
-            _step_ok(2, "Bộ lọc thời gian",
+            _step_ok(3, "Bộ lọc thời gian",
                      time_pass,
                      f"UTC {cur_hour:02d}:xx — {'Giờ được phép' if time_pass else f'Giờ bị chặn {blocked_hours}'}")
-            _step_ok(3, "Chế độ thị trường",
-                     None,
-                     f"{r_label} — multiplier={reg_mult}x | ngưỡng score={reg_thr}")
-            score_pass = abs(score) >= reg_thr
+
+            # Step 4: Strategy score
+            score_pass = strategy_gate if _ana_status else abs(score) >= reg_thr
+            sub_detail = (
+                f"ICT={ict_score:+.3f}×{ict_w:.0%}  |  Wyck={wyckoff_score:+.3f}×{wyckoff_w:.0%}"
+                f"  |  Mom={momentum_score:+.3f}×{momentum_w:.0%}\n"
+                f"score={score:+.4f}  {'≥' if score_pass else '<'}  min={str_required:.4f}"
+                + (f"  |  regime_bias={regime_bias}" if regime_bias else "")
+            )
             _step_ok(4, "Strategy Score (ICT+Wyckoff+Momentum)",
                      score_pass,
-                     f"score={score:+.4f} abs={abs(score):.4f} {'>=  ' if score_pass else '< '}{reg_thr}")
-            trend_ok = "trend" not in reason.lower()
-            _step_ok(5, "Xu hướng D1 == H1",
-                     trend_ok if not traded else True,
-                     "OK" if trend_ok else reason)
-            if "account_balance" in _analysis_signals.columns:
-                opn_n = int(float(latest.get("open_positions", 0) or 0))
-                mx_n  = int(float(latest.get("max_positions", 1) or 1))
-                pos_ok = opn_n < mx_n
-            else:
-                pos_ok = "position" not in reason.lower()
+                     sub_detail)
+
+            # Step 5: Risk controls (daily loss limit, consecutive loss cooldown)
+            _daily_loss_limit = _af("signal_threshold", 0.12)  # proxy — actual in config
+            consec_ok = consec_losses < 3  # approximate; real value from orchestrator
+            daily_ok = daily_dd_pct > -0.12
+            risk_pass = consec_ok and daily_ok
+            _step_ok(5, "Kiểm soát rủi ro (loss limit + cooldown)",
+                     risk_pass if not traded else True,
+                     f"consecutive losses={consec_losses}  |  daily DD={daily_dd_pct:.2%}"
+                     + ("  ✓" if risk_pass else "  ✗ cooldown active"))
+
+            # Step 6: Position limit
+            pos_ok = opn_n < mx_n
             _step_ok(6, "Giới hạn số lệnh",
                      pos_ok if not traded else True,
-                     f"{opn_n}/{mx_n}" if "account_balance" in _analysis_signals.columns else "")
+                     f"đang mở={opn_n}  /  max={mx_n}"
+                     + ("  ✓ còn slot" if pos_ok else "  ✗ đầy lệnh"))
 
         with fr:
             dec_c = GREEN if traded else RED
+            # Full reason box
+            _reason_display = reason if reason else ("Tất cả điều kiện thỏa mãn ✓" if traded else "Không rõ lý do")
             st.markdown(
                 f'<div style="background:linear-gradient(135deg,{dec_c}0a,{dec_c}18);'
                 f'border:1px solid {dec_c}40;border-radius:16px;'
@@ -1887,12 +2371,12 @@ with tab_analysis:
                 f'box-shadow:0 0 30px {dec_c}08">'
                 f'<div style="font-size:2.4rem;font-weight:900;color:{dec_c};'
                 f'text-shadow:0 0 20px {dec_c}40">{"VÀO LỆNH" if traded else "KHÔNG VÀO"}</div>'
-                f'<div style="font-size:0.85rem;color:#94a3b8;margin-top:10px">'
-                f'{"Tất cả điều kiện thỏa mãn ✓" if traded else reason}'
-                f'</div></div>',
+                f'<div style="font-size:0.85rem;color:#94a3b8;margin-top:10px;text-align:left;'
+                f'white-space:pre-wrap;word-break:break-word">{_reason_display}</div>'
+                f'</div>',
                 unsafe_allow_html=True,
             )
-            _threshold_bar("ML Confidence", conf, _ana_threshold)
+            _threshold_bar("ML Confidence", conf, _sig_thr)
             _threshold_bar("Strategy Score (abs)", abs(score), reg_thr)
             prec = float(model_meta.get("precision", 0))
             rec  = float(model_meta.get("recall", 0))
@@ -1910,7 +2394,7 @@ with tab_analysis:
         sc_l, sc_r = st.columns([1, 1])
         with sc_l:
             spct = min(abs(score) / 1.2, 1.0) * 100
-            sc   = GREEN if abs(score) >= 0.3 else (AMBER if abs(score) >= 0.1 else RED)
+            sc   = GREEN if abs(score) >= reg_thr else (AMBER if abs(score) >= reg_thr * 0.5 else RED)
             st.markdown(
                 f'<div style="text-align:center;padding:22px;background:linear-gradient(135deg,#0f172a,#151d2b);'
                 f'border-radius:14px;border:1px solid #1e293b">'
@@ -1926,27 +2410,56 @@ with tab_analysis:
                 f'</div>',
                 unsafe_allow_html=True,
             )
+            # Sub-score bars for ICT / Wyckoff / Momentum
+            if ict_score != 0 or wyckoff_score != 0 or momentum_score != 0:
+                st.markdown('<div style="margin-top:14px">', unsafe_allow_html=True)
+                for _sub_lbl, _sub_val, _sub_w in [
+                    (f"ICT score ({ict_w:.0%})",        ict_score,      ict_w),
+                    (f"Wyckoff score ({wyckoff_w:.0%})", wyckoff_score,  wyckoff_w),
+                    (f"Momentum score ({momentum_w:.0%})", momentum_score, momentum_w),
+                ]:
+                    _sub_c = GREEN if _sub_val > 0 else (RED if _sub_val < 0 else GREY)
+                    _sub_pct = min(abs(_sub_val) / 1.0, 1.0) * 100
+                    st.markdown(
+                        f'<div style="margin-bottom:8px;padding:8px 12px;background:#0f172a;'
+                        f'border-radius:10px;border:1px solid #1e293b">'
+                        f'<div style="display:flex;justify-content:space-between;font-size:0.75rem;margin-bottom:4px">'
+                        f'<span style="color:#94a3b8">{_sub_lbl}</span>'
+                        f'<span style="color:{_sub_c};font-weight:700;font-family:monospace">{_sub_val:+.4f}</span>'
+                        f'</div>'
+                        f'<div style="background:#1e293b;border-radius:6px;height:6px;overflow:hidden">'
+                        f'<div style="width:{_sub_pct:.0f}%;background:{_sub_c};height:6px;border-radius:6px"></div>'
+                        f'</div></div>',
+                        unsafe_allow_html=True,
+                    )
+                st.markdown('</div>', unsafe_allow_html=True)
+
         with sc_r:
             st.code(
-                f"score = (ICT x 0.40) + (Wyckoff x 0.30) + (Momentum x 0.30)\n"
-                f"      x hệ số chế độ\n\n"
-                f"hệ số chế độ = {reg_mult}  ({r_label})\n"
-                f"ngưỡng hiện tại   = {reg_thr}\n\n"
-                f"score hiện tại = {score:.4f}\n"
-                f"|score| x mult = {abs(score) * reg_mult:.4f}",
+                f"score = (ICT × {ict_w:.0%}) + (Wyckoff × {wyckoff_w:.0%}) + (Momentum × {momentum_w:.0%})\n"
+                f"      × hệ số chế độ thị trường\n\n"
+                f"ICT     = {ict_score:+.4f}  ×  {ict_w:.0%}  =  {ict_score * ict_w:+.4f}\n"
+                f"Wyckoff = {wyckoff_score:+.4f}  ×  {wyckoff_w:.0%}  =  {wyckoff_score * wyckoff_w:+.4f}\n"
+                f"Momentum= {momentum_score:+.4f}  ×  {momentum_w:.0%}  =  {momentum_score * momentum_w:+.4f}\n\n"
+                f"hệ số chế độ = {reg_mult}x  ({r_label})\n"
+                f"regime bias  = {regime_bias or 'n/a'}\n"
+                f"ngưỡng min   = {str_required:.4f}\n\n"
+                f"score hiện tại = {score:+.4f}\n"
+                f"|score| × mult = {abs(score) * reg_mult:.4f}\n"
+                f"{'✓ GATE PASS' if strategy_gate else '✗ GATE FAIL'}",
                 language=None,
             )
 
         for cname, cweight, cdesc, ccond in [
-            ("H4 ICT Structure (BOS/ChoCH/FVG/OB/Confluence)", "60% trọng số",
+            ("H4 ICT Structure (BOS/ChoCH/FVG/OB/Confluence)", f"{ict_w:.0%} trọng số",
              "H4: Break-of-Structure, Change-of-Character, Fair Value Gap, Order Block, "
              "Displacement, Equal-High/Low, Market Structure Bias, ICT Confluence, Premium/Discount",
              "h4_bos | h4_choch | h4_fvg | h4_order_block | h4_ict_confluence | h4_premium_discount"),
-            ("H1 Wyckoff Phase Analysis", "20% trọng số",
+            ("H1 Wyckoff Phase Analysis", f"{wyckoff_w:.0%} trọng số",
              "Hourly bias xác nhận, VSA (Volume Spread Analysis), Wyckoff Spring/Upthrust detection. "
              "Spring(1)=Bullish, Upthrust(-1)=Bearish, 0=Trung lập",
              "wyckoff_spring_signal != 0 | vsa_signal != 0 | hourly_bias aligned"),
-            ("M15 Tín hiệu Thực thi (RSI/MACD/ATR/Momentum)", "20% trọng số",
+            ("M15 Tín hiệu Thực thi (RSI/MACD/ATR/Momentum)", f"{momentum_w:.0%} trọng số",
              "M15 thời điểm vào lệnh: RSI, MACD histogram, ATR ratio, range efficiency, liquidity sweep, "
              "order flow proxy, chế độ biến động, session return, tick volume zscore, spread, "
              "kill zone flag (London/NY open), Judas swing",
@@ -1964,16 +2477,21 @@ with tab_analysis:
         )
         vr_l, vr_r = st.columns([1, 2])
         with vr_l:
-            ri = {0: ("SIDEWAYS", AMBER, "Đi ngang — ngưỡng=0.05, hệ số=0.5"),
-                  1: ("NORMAL",   BLUE,  "Bình thường — ngưỡng=0.30"),
-                  2: ("STRONG",   GREEN, "Biến động mạnh — ngưỡng=0.30, hệ số=1.2")}
-            rl, rc, rdesc = ri.get(regime, ("?", GREY, ""))
+            _ri_map = {0: ("SIDEWAYS", AMBER, "Đi ngang — ngưỡng=0.05, hệ số=0.5x\n"
+                                               "Bot giảm kích cỡ lệnh, chờ breakout"),
+                       1: ("NORMAL",   BLUE,  "Bình thường — ngưỡng=0.30, hệ số=1.0x\n"
+                                               "Điều kiện giao dịch tiêu chuẩn"),
+                       2: ("STRONG VOLATILE", GREEN, "Biến động mạnh — ngưỡng=0.30, hệ số=1.2x\n"
+                                               "Xu hướng rõ, bot tăng nhẹ kích cỡ")}
+            rl, rc, rdesc = _ri_map.get(regime, ("?", GREY, ""))
             st.markdown(
                 f'<div style="background:linear-gradient(135deg,{rc}0a,{rc}18);'
                 f'border:1px solid {rc}40;border-radius:14px;'
                 f'padding:24px;text-align:center;box-shadow:0 0 20px {rc}08">'
-                f'<div style="font-size:2.2rem;font-weight:900;color:{rc};text-shadow:0 0 15px {rc}30">{rl}</div>'
-                f'<div style="font-size:0.78rem;color:#94a3b8;margin-top:10px">{rdesc}</div>'
+                f'<div style="font-size:2.0rem;font-weight:900;color:{rc};text-shadow:0 0 15px {rc}30">{rl}</div>'
+                f'<div style="font-size:0.78rem;color:#94a3b8;margin-top:10px;white-space:pre-wrap">{rdesc}</div>'
+                f'<div style="margin-top:8px;font-size:0.80rem;color:{rc};font-weight:700">'
+                f'Regime bias: {regime_bias or "neutral"}</div>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
@@ -2018,15 +2536,27 @@ with tab_analysis:
             'Luồng quyết định đầy đủ</div>',
             unsafe_allow_html=True,
         )
+        _sub_ict    = f"ICT={ict_score:+.4f}×{ict_w:.0%}"
+        _sub_wyck   = f"Wyck={wyckoff_score:+.4f}×{wyckoff_w:.0%}"
+        _sub_mom    = f"Mom={momentum_score:+.4f}×{momentum_w:.0%}"
         st.code(
-                f"Dữ liệu: D1=100, H4=200, H1=500, M15=300 nhịp\n"
-                f"=> 28 Features: D1(1) + H4(9:ICT) + H1(3:Wyckoff) + M15(15:execution)\n"
-            f"   [{('PASS' if conf >= _ana_threshold else 'FAIL')}] >= {_ana_threshold:.0%}?\n"
-            f"=> Bộ lọc thời gian UTC {cur_hour:02d}\n"
-            f"   [{('PASS' if not is_blocked_now else 'FAIL')}] not in {blocked_hours}?\n"
-            f"=> Strategy score = {score:.4f}\n"
-            f"   [{('PASS' if abs(score) >= reg_thr else 'FAIL')}] |score| >= {reg_thr}?\n"
-            f"=> Kết quả: {'VÀO LỆNH' if traded else 'KHÔNG VÀO — ' + reason}",
+            f"Dữ liệu: D1=100, H4=200, H1=500, M15=300 nhịp\n"
+            f"=> 28+ Features: D1(1) + H4(9:ICT) + H1(3:Wyckoff) + M15(15:execution)\n\n"
+            f"[Bước 1] ML confidence = {conf:.4f}  (ngưỡng={_sig_thr:.4f})\n"
+            f"   => {'PASS ✓' if conf >= _sig_thr else 'FAIL ✗'}\n\n"
+            f"[Bước 2] Market open = {market_open}  tick_age={tick_age:.0f}s\n"
+            f"   => {'PASS ✓' if market_open else 'FAIL ✗'}  {market_reason}\n\n"
+            f"[Bước 3] Thời gian UTC {cur_hour:02d}:xx  blocked={blocked_hours}\n"
+            f"   => {'PASS ✓' if not is_blocked_now else 'FAIL ✗'}\n\n"
+            f"[Bước 4] Strategy score = {score:+.4f}  (min={str_required:.4f})\n"
+            f"   {_sub_ict}  +  {_sub_wyck}  +  {_sub_mom}\n"
+            f"   regime={r_label} ({regime})  bias={regime_bias}  hệ_số={reg_mult}x\n"
+            f"   => {'PASS ✓' if strategy_gate else 'FAIL ✗'}\n\n"
+            f"[Bước 5] Risk check: consec_losses={consec_losses}  daily_dd={daily_dd_pct:.2%}\n"
+            f"   => {'PASS ✓' if consec_losses < 3 and daily_dd_pct > -0.12 else 'FAIL ✗'}\n\n"
+            f"[Bước 6] Position slots: open={opn_n}  max={mx_n}\n"
+            f"   => {'PASS ✓' if opn_n < mx_n else 'FAIL ✗'}\n\n"
+            f"Kết quả: {'VÀO LỆNH ✓' if traded else ('KHÔNG VÀO — ' + reason)}",
             language=None,
         )
 

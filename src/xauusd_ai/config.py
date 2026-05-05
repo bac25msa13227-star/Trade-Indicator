@@ -122,8 +122,8 @@ class StrategySettings(StrictSettingsModel):
     swing_lookback: int = 10
     volatility_window: int = 20
     signal_threshold: float = 0.58
-    sideways_volatility_threshold: float = 0.004
-    strong_volatility_threshold: float = 0.012
+    sideways_volatility_threshold: float = 0.20   # atr_percentile cutoff (0-1): bottom N% = sideway
+    strong_volatility_threshold: float = 0.80    # atr_percentile cutoff (0-1): top N% = strong trend
     news_block_minutes: int = 30
     rsi_long_threshold: float = 55.0
     rsi_short_threshold: float = 45.0
@@ -134,6 +134,7 @@ class StrategySettings(StrictSettingsModel):
     sideway_min_strategy_score: float = 0.25
     strong_volatility_min_strategy_score: float = 0.2
     require_trend_alignment: bool = True
+    trend_bypass_confidence: float | None = None  # If set, signals above this confidence bypass trend filter
     force_trade: bool = False  # Bypass ALL filters, trade every signal (for testing)
     blocked_hours_utc: list[int] = Field(default_factory=list)
     blocked_weekdays_utc: list[str] = Field(default_factory=list)
@@ -151,6 +152,9 @@ class StrategySettings(StrictSettingsModel):
     # Regime-specific confidence thresholds (override min_confidence per regime)
     sideway_min_confidence: float = 0.65    # Higher bar in choppy markets
     volatile_min_confidence: float = 0.60   # Moderate bar in volatile markets
+    sell_min_confidence: float | None = None  # If set, SELL trades require this confidence (higher = fewer sells)
+    buy_min_confidence: float | None = None   # If set, BUY trades require this confidence
+    d1_trend_gate: bool = False  # If True, only trade WITH D1 daily_bias direction (block counter-trend)
     regime_shutdown_rules: list[RegimeShutdownRuleSettings] = Field(default_factory=list)
 
 
@@ -183,8 +187,20 @@ class RiskSettings(StrictSettingsModel):
     spread_cost_rr: float = 0.10
     # slippage_rr:  slippage as fraction of 1R (entry+exit combined)
     slippage_rr: float = 0.05
+    # use_dynamic_slippage: enable ATR+spread+volume+session-based slippage calculation
+    #   True  → dynamic slippage per trade (realistic, varies 1-6 pips)
+    #   False → static slippage_rr applied uniformly (legacy behavior)
+    use_dynamic_slippage: bool = False
+    # entry_slippage_atr_frac: shift SL/TP price LEVELS by ATR×frac against trade direction
+    # Models MT5 tick fill differing from bar.close (live rebases preserving $ distances).
+    # 0.07 ≈ $0.14 slippage for M5 XAUUSD ATR~$2. Reduces win rate ~1-3%.  0.0 = disabled.
+    entry_slippage_atr_frac: float = 0.0
     # commission_rr:  broker commission as fraction of 1R per trade
     commission_rr: float = 0.02
+    # max_lot:  absolute cap on lot size per trade (broker/account limit)
+    #   5.0 → max 5 standard lots per XAUUSD trade (realistic for retail $200–$100k)
+    #   0.0 → no cap (unlimited, unrealistic for large compound balances)
+    max_lot: float = 0.0
     # compound_cap:  max balance multiplier per fold for sim (0=unlimited)
     #   e.g. 50.0 → balance capped at 50× starting balance per fold
     compound_cap: float = 50.0
@@ -206,14 +222,40 @@ class RiskSettings(StrictSettingsModel):
     anti_martingale_max_reductions: int = 3  # Max 3 reductions (0.6^3 = 21.6% of base)
     # Total exposure cap: max % of balance at risk across all open positions
     max_total_exposure_pct: float = 0.12   # 12% total risk across all open positions
+    # ── Volatility-based risk scaling ──────────────────────────────
+    # Scale down risk_per_trade when current ATR spikes vs rolling mean (macro event filter)
+    volatility_risk_scaling_enabled: bool = False
+    vol_atr_lookback_bars: int = 96        # Rolling window for mean ATR (96 M15 bars = 24h)
+    vol_atr_spike_ratio: float = 2.0       # If current_atr > 2× mean_atr → scale down
+    vol_atr_spike_risk_mult: float = 0.5   # Risk multiplier when spike detected (50%)
+    vol_atr_extreme_ratio: float = 3.5     # If current_atr > 3.5× mean_atr → extreme (25%)
+    vol_atr_extreme_risk_mult: float = 0.25  # Risk multiplier for extreme spike
+
     # Anti re-entry guard after SL (same side)
     reentry_guard_enabled: bool = True
     reentry_cooldown_bars_after_sl: int = 1
     reentry_min_distance_atr: float = 0.35
+    # Cross-side cooldown: block opposite-side flip for N bars after any SL.
+    # Prevents whipsaw BUY-SL → SELL-SL → BUY-SL pattern in sideway markets.
+    # 0 = disabled (legacy behavior). Recommended 3-5 bars on M5 timeframe.
+    cross_side_reentry_cooldown_bars: int = 0
     # ── Partial Take Profit ────────────────────────────────────────
     partial_tp_enabled: bool = False
     partial_tp_rr: float = 1.0             # Close partial_tp_pct at 1R profit
     partial_tp_pct: float = 0.5            # Close 50% of position at partial_tp_rr
+    # Score multiplier: when False, all trades use full risk_per_trade (score_mult=1.0)
+    score_multiplier_enabled: bool = True
+    # ── Overnight / hold-duration costs ────────────────────────────
+    # swap_per_night_rr: negative swap cost per night held as fraction of 1R.
+    #   XAUUSD buy swap ≈ -$0.50–$1.50/0.01lot/night. At 1R=$7.50 → ≈ -0.003–0.007 per night.
+    #   Sell swap is typically a smaller positive (use 30% of absolute value).
+    #   0.0 = disabled (default for backward compat).
+    swap_per_night_rr: float = 0.0
+    # weekend_gap_penalty_rr: extra friction (negative) applied to trades that span
+    #   Fri 22:00 UTC → Sun 22:00 UTC. Models the risk of an adverse gap opening.
+    #   XAUUSD avg absolute gap ~$3–$10. In expectation (50% adverse): ~-0.05 to -0.10R.
+    #   0.0 = disabled (default for backward compat).
+    weekend_gap_penalty_rr: float = 0.0
     risk_throttle_rules: list[RiskThrottleRuleSettings] = Field(default_factory=list)
 
 
@@ -285,6 +327,49 @@ class ExecutionSettings(StrictSettingsModel):
     exit_model: ExitModelSettings = Field(default_factory=ExitModelSettings)
 
 
+class CanaryDeploySettings(StrictSettingsModel):
+    enabled: bool = False
+    # 0.10-0.20 is typical canary volume range before full promote.
+    volume_fraction: float = 0.20
+    min_lot: float = 0.01
+
+
+class AutoRollbackSettings(StrictSettingsModel):
+    enabled: bool = False
+    rollback_profile: str = "balanced"
+    # Trigger rollback when daily loss exceeds N% of balance (0 = disabled)
+    daily_dd_trigger_pct: float = 0.0
+    # Trigger rollback when consecutive losses >= N (0 = disabled)
+    consecutive_losses_trigger: int = 0
+    # Prevent spam rollback notifications
+    cooldown_seconds: int = 1800
+
+
+class DataHealthMonitorSettings(StrictSettingsModel):
+    enabled: bool = True
+    alert_cooldown_seconds: int = 900
+    # Missing bar if actual gap > expected_tf_seconds * factor
+    missing_bar_gap_factor: float = 1.8
+    # Alert stale tick beyond this age (seconds)
+    stale_tick_alert_seconds: int = 300
+    # Spread spike alert threshold:
+    # current_spread > max(abs_points, median_spread * multiplier)
+    spread_spike_multiplier: float = 2.5
+    spread_spike_abs_points: float = 1.5
+    spread_lookback_bars: int = 50
+    # Bridge vs feed divergence alert in price points (USD)
+    bridge_feed_divergence_points: float = 1.5
+    # Skip divergence checks when market is closed.
+    only_when_market_open: bool = True
+
+
+class AdminSettings(StrictSettingsModel):
+    canary: CanaryDeploySettings = Field(default_factory=CanaryDeploySettings)
+    auto_rollback: AutoRollbackSettings = Field(default_factory=AutoRollbackSettings)
+    data_health: DataHealthMonitorSettings = Field(default_factory=DataHealthMonitorSettings)
+    regime_session_matrix_windows_days: list[int] = Field(default_factory=lambda: [7, 30])
+
+
 class TrainingSettings(StrictSettingsModel):
     train_split: float = 0.8
     train_start_date: str | datetime | None = None
@@ -338,6 +423,13 @@ class TrainingSettings(StrictSettingsModel):
     # Limit bars per timeframe used for training (0 = no limit).
     # Use e.g. 30000 M5 bars (~104 days) to avoid OOM during live startup training.
     max_train_bars: int = 0
+    # Use WF-identical ensemble (HGB+RF+ET) instead of single HGB.
+    use_ensemble: bool = False
+    # Feature selection: drop bottom N% by RF importance. 0 = disabled.
+    feature_selection_drop_pct: int = 0
+    # Offset applied to the optimized ML threshold at inference time.
+    # Negative = accept more signals (lower threshold), positive = stricter.
+    ml_threshold_offset: float = 0.0
 
 
 class NotificationSettings(StrictSettingsModel):
@@ -393,6 +485,7 @@ class Settings(StrictSettingsModel):
     strategy: StrategySettings = Field(default_factory=StrategySettings)
     risk: RiskSettings = Field(default_factory=RiskSettings)
     execution: ExecutionSettings = Field(default_factory=ExecutionSettings)
+    admin: AdminSettings = Field(default_factory=AdminSettings)
     training: TrainingSettings = Field(default_factory=TrainingSettings)
     notifications: NotificationSettings = Field(default_factory=NotificationSettings)
     integrations: IntegrationSettings = Field(default_factory=IntegrationSettings)

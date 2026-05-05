@@ -280,6 +280,226 @@
 			"label": "RestartAcc1NewCreds",
 			"type": "shell",
 			"command": "Write-Host 'Restarting ACC1 with new MT5 credentials...'; docker stop trade-indicator-live-acc1-1 2>&1; Start-Sleep 3; docker start trade-indicator-live-acc1-1 2>&1; Write-Host \"ACC1 restart: $LASTEXITCODE\"; Start-Sleep 20; Write-Host '=== ACC1 STARTUP LOGS ==='; docker logs trade-indicator-live-acc1-1 --tail 15 2>&1"
+		},
+		{
+			"label": "DiagAcc1Signal",
+			"type": "shell",
+			"command": "Write-Host '=CONTAINERS='; docker ps -a --format '{{.Names}}: {{.Status}}'; Write-Host '=ACC1 LOGS='; docker logs trade-indicator-live-acc1-1 --tail 80 2>&1 | Select-Object -Last 80"
+		},
+		{
+			"label": "CheckBridgeStatus22Apr",
+			"type": "shell",
+			"command": "Write-Host '=BRIDGE PORT CHECK='; netstat -ano | findstr ':5600 :5601'; Write-Host '=5600 HTTP='; try { (Invoke-WebRequest 'http://localhost:5600/health' -UseBasicParsing -TimeoutSec 4).Content } catch { Write-Host \"5600 DOWN: $_\" }; Write-Host '=5601 HTTP='; try { (Invoke-WebRequest 'http://localhost:5601/health' -UseBasicParsing -TimeoutSec 4).Content } catch { Write-Host \"5601 DOWN: $_\" }; Write-Host '=BRIDGE PROCS='; Get-Process -Name python* -ErrorAction SilentlyContinue | Select-Object Id,ProcessName,CPU; Write-Host '=LAST BRIDGE LOG='; Get-Content 'C:\\Users\\Administrator\\Documents\\Trade-Indicator\\outputs\\mt5_bridge.log' -Tail 20"
+		},
+		{
+			"label": "RestartAcc1BridgeFix22Apr",
+			"type": "shell",
+			"command": "Write-Host '=== Killing frozen ACC1 bridge (PID 10424) ==='; Stop-Process -Id 10424 -Force -ErrorAction SilentlyContinue; Start-Sleep 2; Write-Host '=== Port 5600 after kill ==='; netstat -ano | findstr ':5600 '; Write-Host '=== Starting bridge_acc1 ==='; Start-Process cmd -ArgumentList '/c C:\\Users\\Administrator\\Documents\\Trade-Indicator\\scripts\\windows\\bridge_acc1.bat' -WorkingDirectory 'C:\\Users\\Administrator\\Documents\\Trade-Indicator' -WindowStyle Normal; Write-Host 'Started bridge_acc1, waiting 25s...'; Start-Sleep 25; Write-Host '=== Bridge health check ==='; try { (Invoke-WebRequest 'http://localhost:5600/health' -UseBasicParsing -TimeoutSec 8).Content } catch { Write-Host \"5600 still down: $_\" }; Write-Host '=== Account check ==='; try { (Invoke-WebRequest 'http://localhost:5600/account' -UseBasicParsing -TimeoutSec 8).Content } catch { Write-Host \"Account error: $_\" }"
+		},
+		{
+			"label": "CheckContainerRecovery22Apr",
+			"type": "shell",
+			"command": "Write-Host '=CONTAINER STATUS='; docker ps --format '{{.Names}}: {{.Status}}'; Write-Host '=ACC1 LATEST LOGS='; docker logs trade-indicator-live-acc1-1 --tail 15 2>&1"
+		},
+		{
+			"label": "ContainerStatusFinal22Apr",
+			"type": "shell",
+			"command": "docker ps --format '{{.Names}}: {{.Status}}'"
+		},
+		{
+			"label": "FinalCheck22Apr",
+			"type": "shell",
+			"command": "Write-Host '=GIT='; git -C C:\\Users\\Administrator\\Documents\\Trade-Indicator log --oneline -3; Write-Host '=5600 HEALTH='; (Invoke-WebRequest 'http://localhost:5600/health' -UseBasicParsing -TimeoutSec 6).Content; Write-Host '=BRIDGE LOG TAIL='; Get-Content C:\\Users\\Administrator\\Documents\\Trade-Indicator\\outputs\\mt5_bridge.log -Tail 6"
+		},
+		{
+			"label": "GitAndBridgeVerify",
+			"type": "shell",
+			"command": "git log --oneline -3 2>&1 ; Write-Host '---BRIDGE---' ; (Invoke-WebRequest 'http://localhost:5600/health' -UseBasicParsing -TimeoutSec 8).Content 2>&1"
+		},
+		{
+			"label": "DiagBridgeAndLogs",
+			"type": "shell",
+			"command": "Write-Host '=ACC1 RECENT LOGS='; docker logs trade-indicator-live-acc1-1 --tail 50 2>&1 | Select-String -Pattern 'order|place|bridge|error|warn|signal|trade|auto|exception|traceback|failed|refused|connect|place_order|executor' -CaseSensitive:$false | Select-Object -Last 40; Write-Host '=BRIDGE LOG='; Get-Content C:\\Users\\Administrator\\Documents\\Trade-Indicator\\outputs\\mt5_bridge.log -Tail 20"
+		},
+		{
+			"label": "Acc1LogsRaw",
+			"type": "shell",
+			"command": "Write-Host '=ACC1 LOGS RAW='; docker logs trade-indicator-live-acc1-1 --tail 100 --timestamps 2>&1 | Select-Object -Last 60"
+		},
+		{
+			"label": "CurrentState",
+			"type": "shell",
+			"command": "Write-Host '=LATEST SIGNALS='; Get-Content C:\\Users\\Administrator\\Documents\\Trade-Indicator\\outputs\\paper_trade_signals_acc1.csv -Tail 8; Write-Host '=BRIDGE TAIL='; Get-Content C:\\Users\\Administrator\\Documents\\Trade-Indicator\\outputs\\mt5_bridge.log -Tail 20; Write-Host '=LIVE STATUS='; Get-Content C:\\Users\\Administrator\\Documents\\Trade-Indicator\\outputs\\live_status_acc1.json"
+		},
+		{
+			"label": "Acc1LogsFiltered",
+			"type": "shell",
+			"command": "docker logs trade-indicator-live-acc1-1 --tail 500 2>&1 | Where-Object { $_ -notmatch 'sklearn|scikit|UserWarning|warnings\\.warn|site-packages|parallel\\.py|joblib|delayed' } | Select-Object -Last 60"
+		},
+		{
+			"label": "Acc1AppLogs",
+			"type": "shell",
+			"command": "docker logs trade-indicator-live-acc1-1 --since '2026-04-24T04:30:00' 2>&1 | Where-Object { $_ -match '\\|' -and $_ -notmatch 'sklearn|UserWarning' } | Select-Object -First 60"
+		},
+		{
+			"label": "Acc1LogCount",
+			"type": "shell",
+			"command": "docker logs trade-indicator-live-acc1-1 --since '2026-04-24T04:30:00' 2>&1 | Measure-Object -Line; Write-Host '=Sample raw='; docker logs trade-indicator-live-acc1-1 --since '2026-04-24T04:30:00' 2>&1 | Select-Object -First 10"
+		},
+		{
+			"label": "Acc1LogCount2",
+			"type": "shell",
+			"command": "docker logs trade-indicator-live-acc1-1 --since '2026-04-24T04:30:00' 2>&1 | Measure-Object -Line | Select-Object Lines; Write-Host '=FIRST5='; docker logs trade-indicator-live-acc1-1 --since '2026-04-24T04:30:00' 2>&1 | Select-Object -First 5"
+		},
+		{
+			"label": "Acc1CriticalLogs",
+			"type": "shell",
+			"command": "docker logs trade-indicator-live-acc1-1 --since '2026-04-24T04:30:00' --until '2026-04-24T04:50:00' 2>&1 | Where-Object { $_ -notmatch 'sklearn|scikit|UserWarning|warnings\\.warn|site-packages|parallel\\.py|joblib|delayed|  [a-z]|^$' } | Select-Object -First 80"
+		},
+		{
+			"label": "DumpCriticalLogs",
+			"type": "shell",
+			"command": "docker logs trade-indicator-live-acc1-1 --since '2026-04-24T04:30:00' --until '2026-04-24T04:50:00' 2>&1 > C:\\Users\\Administrator\\Documents\\Trade-Indicator\\outputs\\acc1_logs_0430_0450.txt; Write-Host 'Written. Lines:'; (Get-Content C:\\Users\\Administrator\\Documents\\Trade-Indicator\\outputs\\acc1_logs_0430_0450.txt).Count"
+		},
+		{
+			"label": "ReadCriticalLogs",
+			"type": "shell",
+			"command": "Write-Host 'Lines:'; (Get-Content C:\\Users\\Administrator\\Documents\\Trade-Indicator\\outputs\\acc1_logs_0430_0450.txt 2>$null).Count; Write-Host '=APP LOGS='; Get-Content C:\\Users\\Administrator\\Documents\\Trade-Indicator\\outputs\\acc1_logs_0430_0450.txt 2>$null | Where-Object { $_ -notmatch 'sklearn|scikit|UserWarning|warnings|site-pack|parallel.py|joblib|delayed' } | Select-Object -First 80"
+		},
+		{
+			"label": "DumpCriticalLogs2",
+			"type": "shell",
+			"command": "docker logs trade-indicator-live-acc1-1 --since '2026-04-24T04:25:00' --until '2026-04-24T04:50:00' 2>&1 | Set-Content -Path 'C:\\Users\\Administrator\\Documents\\Trade-Indicator\\outputs\\acc1_critical_logs.txt' -Encoding UTF8; Write-Host 'Done. Lines:'; (Get-Content 'C:\\Users\\Administrator\\Documents\\Trade-Indicator\\outputs\\acc1_critical_logs.txt').Count"
+		},
+		{
+			"label": "FilteredSignalLogs",
+			"type": "shell",
+			"command": "docker logs trade-indicator-live-acc1-1 2>&1 | Where-Object { $_ -match '04:3[0-9]|04:4[0-9]' -and $_ -notmatch 'sklearn|UserWarning' } | Select-Object -First 40"
+		},
+		{
+			"label": "April24Logs",
+			"type": "shell",
+			"command": "docker logs trade-indicator-live-acc1-1 2>&1 | Where-Object { $_ -match '2026-04-24' -and $_ -notmatch 'sklearn|UserWarning|warnings' } | Select-Object -First 60"
+		},
+		{
+			"label": "April24LogsFile",
+			"type": "shell",
+			"command": "docker logs trade-indicator-live-acc1-1 2>&1 | Select-String '2026-04-24' | Where-Object { $_ -notmatch 'sklearn|UserWarning|warnings' } | Select-Object -First 60 | Out-File C:\\Users\\Administrator\\Documents\\Trade-Indicator\\outputs\\acc1_apr24_logs.txt -Encoding utf8; Write-Host 'COUNT:'; (Get-Content C:\\Users\\Administrator\\Documents\\Trade-Indicator\\outputs\\acc1_apr24_logs.txt).Count; Get-Content C:\\Users\\Administrator\\Documents\\Trade-Indicator\\outputs\\acc1_apr24_logs.txt"
+		},
+		{
+			"label": "April24LogsFile2",
+			"type": "shell",
+			"command": "docker logs trade-indicator-live-acc1-1 2>&1 | Select-String '2026-04-24' | Where { $_ -notmatch 'sklearn|UserWarning|warn' } | Select -First 60 | Out-File C:\\Users\\Administrator\\Documents\\Trade-Indicator\\outputs\\acc1_apr24_logs.txt -Encoding utf8 -Force; 'COUNT:'; (Get-Content C:\\Users\\Administrator\\Documents\\Trade-Indicator\\outputs\\acc1_apr24_logs.txt).Count; Get-Content C:\\Users\\Administrator\\Documents\\Trade-Indicator\\outputs\\acc1_apr24_logs.txt"
+		},
+		{
+			"label": "April24LogsB",
+			"type": "shell",
+			"command": "docker logs trade-indicator-live-acc1-1 2>&1 | Select-String '2026-04-24' | Where { $_ -notmatch 'sklearn|UserWarning|warn' } | Select -First 80 | Out-File C:\\Users\\Administrator\\Documents\\Trade-Indicator\\outputs\\acc1_apr24b.txt -Encoding utf8 -Force; 'COUNT:'; (Get-Content C:\\Users\\Administrator\\Documents\\Trade-Indicator\\outputs\\acc1_apr24b.txt).Count; Get-Content C:\\Users\\Administrator\\Documents\\Trade-Indicator\\outputs\\acc1_apr24b.txt"
+		},
+		{
+			"label": "SignalWindow",
+			"type": "shell",
+			"command": "docker logs trade-indicator-live-acc1-1 --since 2026-04-24T04:28:00 --until 2026-04-24T04:50:00 2>&1 | Out-File C:\\Users\\Administrator\\Documents\\Trade-Indicator\\outputs\\acc1_signal_window.txt -Encoding utf8 -Force; 'Saved lines:'; (Get-Content C:\\Users\\Administrator\\Documents\\Trade-Indicator\\outputs\\acc1_signal_window.txt).Count"
+		},
+		{
+			"label": "ReadSignalWindow",
+			"type": "shell",
+			"command": "Get-Item C:\\Users\\Administrator\\Documents\\Trade-Indicator\\outputs\\acc1_signal_window.txt 2>$null | Select Length,LastWriteTime; Get-Content C:\\Users\\Administrator\\Documents\\Trade-Indicator\\outputs\\acc1_signal_window.txt 2>$null | Where { $_ -match 'trade|order|ERROR|INFO|signal|bridge' } | Select -First 30"
+		},
+		{
+			"label": "LogConfig",
+			"type": "shell",
+			"command": "Write-Host '=LOG CONFIG='; docker inspect trade-indicator-live-acc1-1 --format '{{.HostConfig.LogConfig}}'; Write-Host '=LOG FILE='; $cid = docker inspect trade-indicator-live-acc1-1 --format '{{.Id}}'; $logpath = \"C:\\ProgramData\\docker\\containers\\$cid\\$cid-json.log\"; if (Test-Path $logpath) { $size = (Get-Item $logpath).Length/1MB; Write-Host \"Size: $([math]::Round($size,1)) MB\"; Get-Content $logpath -Tail 3 } else { Write-Host \"Path not found: $logpath\"; Get-ChildItem 'C:\\ProgramData\\docker\\containers' -ErrorAction SilentlyContinue | Select -First 3 }"
+		},
+		{
+			"label": "BridgeHistoryCheck",
+			"type": "shell",
+			"command": "Write-Host '=MT5 HISTORY DEALS APR24='; try { (Invoke-WebRequest 'http://localhost:5600/history?from=1745452800&to=1745539200' -UseBasicParsing -TimeoutSec 10).Content } catch { Write-Host \"Error: $_\" }; Write-Host '=MT5 POSITIONS='; try { (Invoke-WebRequest 'http://localhost:5600/positions' -UseBasicParsing -TimeoutSec 10).Content } catch { Write-Host \"Error: $_\" }; Write-Host '=MT5 ACCOUNT='; try { (Invoke-WebRequest 'http://localhost:5600/account' -UseBasicParsing -TimeoutSec 10).Content } catch { Write-Host \"Error: $_\" }"
+		},
+		{
+			"label": "HistoryDeals",
+			"type": "shell",
+			"command": "Write-Host '=HISTORY DEALS SINCE 04:00 UTC APR24='; $epoch = [int](Get-Date '2026-04-24 04:00:00' -AsUTC | Get-Date -UFormat %s); Write-Host \"Epoch: $epoch\"; try { (Invoke-WebRequest \"http://localhost:5600/history/closed?symbol=XAUUSD&since=$epoch&magic=20260325\" -UseBasicParsing -TimeoutSec 12).Content } catch { Write-Host \"Error: $_\" }; Write-Host '=ACCOUNT='; try { (Invoke-WebRequest 'http://localhost:5600/account' -UseBasicParsing -TimeoutSec 12).Content } catch { \"Acc err: $_\" }"
+		},
+		{
+			"label": "HistoryDeals2",
+			"type": "shell",
+			"command": "$epoch = 1745452800; $url = \"http://localhost:5600/history/closed?symbol=XAUUSD&since=$epoch&magic=20260325\"; Write-Host 'URL:' $url; try { $r = Invoke-WebRequest $url -UseBasicParsing -TimeoutSec 12; $r.Content } catch { Write-Host \"Error: $($_.Exception.Message)\" }"
+		},
+		{
+			"label": "BridgeAccountCheck",
+			"type": "shell",
+			"command": "python -c \"import urllib.request, json; r = urllib.request.urlopen('http://localhost:5600/account', timeout=10).read(); print(json.loads(r))\""
+		},
+		{
+			"label": "PythonHistoryCheck",
+			"type": "shell",
+			"command": "python -c \"import urllib.request, json; data = urllib.request.urlopen('http://localhost:5600/history/closed?symbol=XAUUSD&since=1745452800&magic=20260325', timeout=15).read(); deals = json.loads(data); print(f'Deals: {len(deals)}'); [print(d) for d in deals]\""
+		},
+		{
+			"label": "QuickAcct",
+			"type": "shell",
+			"command": "python -c \"import urllib.request, json; d=json.loads(urllib.request.urlopen('http://localhost:5600/account',timeout=10).read()); print('Balance:',d.get('balance'))\""
+		},
+		{
+			"label": "CurrentDiag",
+			"type": "shell",
+			"command": "Write-Host '=AUTO TRADE OVERRIDE='; Get-Content outputs\\auto_trade_override_acc1.json; Write-Host '=LIVE CONFIG AUTO_TRADE='; Get-Content configs\\live_acc1.yaml | Select-String 'auto_trade|close_opposite'; Write-Host '=DOCKER LOGS 05:45-06:10='; docker logs trade-indicator-live-acc1-1 --since 2026-04-24T05:40:00 --until 2026-04-24T06:15:00 2>&1 | Where { $_ -match '\\|' -and $_ -notmatch 'sklearn|UserWarning' } | Select -First 30"
+		},
+		{
+			"label": "CheckDockerStatus",
+			"type": "shell",
+			"command": "docker ps -a --format \"table {{.Names}}\\t{{.Status}}\\t{{.Image}}\" ; Write-Host 'done'"
+		},
+		{
+			"label": "CheckDockerImages",
+			"type": "shell",
+			"command": "docker images --format 'table {{.Repository}}:{{.Tag}}\\t{{.Size}}' 2>&1 | Select-Object -First 25; Write-Host 'DONE'"
+		},
+		{
+			"label": "DockerDf",
+			"type": "shell",
+			"command": "docker system df 2>&1; Write-Host 'DONE'"
+		},
+		{
+			"label": "CheckImagesNow",
+			"type": "shell",
+			"command": "docker images --format '{{.Repository}}:{{.Tag}} {{.Size}}' 2>&1; Write-Host '===DONE==='"
+		},
+		{
+			"label": "WaitAndCheck",
+			"type": "shell",
+			"command": "Write-Host 'Waiting 60s...'; Start-Sleep 60; Write-Host 'Check images:'; docker images --format '{{.Repository}}:{{.Tag}} {{.Size}}'; Write-Host 'Containers:'; docker ps --format 'table {{.Names}}\\t{{.Status}}'"
+		},
+		{
+			"label": "BuildProgress",
+			"type": "shell",
+			"command": "docker system df; Write-Host 'Containers:'; docker ps --format 'table {{.Names}}\\t{{.Status}}'"
+		},
+		{
+			"label": "WaitBuild120",
+			"type": "shell",
+			"command": "Write-Host 'Waiting 120s for build...'; Start-Sleep 120; Write-Host 'Build check:'; docker system df; Write-Host 'Images:'; docker images --format '{{.Repository}}:{{.Tag}} {{.Size}}'; Write-Host 'Containers:'; docker ps --format 'table {{.Names}}\\t{{.Status}}'"
+		},
+		{
+			"label": "WaitBuild180",
+			"type": "shell",
+			"command": "Write-Host 'Waiting 180s more...'; Start-Sleep 180; Write-Host 'Final check:'; docker system df; docker images --format '{{.Repository}}:{{.Tag}} {{.Size}}'; docker ps --format 'table {{.Names}}\\t{{.Status}}'"
+		},
+		{
+			"label": "FinalContainerCheck",
+			"type": "shell",
+			"command": "docker ps -a; Write-Host '---DONE---'"
+		},
+		{
+			"label": "ContainerState2",
+			"type": "shell",
+			"command": "docker ps -a; Write-Host '---DONE---'"
+		},
+		{
+			"label": "StartLiveBots",
+			"type": "shell",
+			"command": "docker compose up live live-acc1 -d --no-build 2>&1; Write-Host 'DONE'; docker ps"
 		}
 	]
 }

@@ -8,8 +8,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import (
+    ExtraTreesClassifier,
     HistGradientBoostingClassifier,
     RandomForestClassifier,
+    VotingClassifier,
 )
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.inspection import permutation_importance
@@ -17,7 +19,7 @@ from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_sc
 from sklearn.preprocessing import StandardScaler
 
 from xauusd_ai.config import Settings
-from xauusd_ai.features.dataset import FEATURE_COLUMNS
+from xauusd_ai.features.dataset import FEATURE_COLUMNS, get_label_lookahead_bars
 
 try:
     from xauusd_ai.infra.mlflow_client import MLflowTracker
@@ -30,19 +32,47 @@ class ModelTrainer:
     def __init__(self, settings: Settings, mlflow_tracker=None) -> None:
         self.settings = settings
         self._mlflow: MLflowTracker | None = mlflow_tracker  # type: ignore[name-defined]
-        # Single HGB model — memory-efficient, good calibration, supports sample_weight directly
-        self.model = HistGradientBoostingClassifier(
+        self._use_ensemble = bool(getattr(settings.training, 'use_ensemble', False))
+        self._feat_sel_drop = int(getattr(settings.training, 'feature_selection_drop_pct', 0))
+        self.model = self._build_model()
+        self._feature_mask = None
+        self._calibrator = None
+        self.scaler = StandardScaler()
+        self.decision_threshold = settings.strategy.signal_threshold
+        self.feature_columns: list[str] = list(FEATURE_COLUMNS)  # updated by load_artifacts for backward compat
+
+    def _build_model(self):
+        """Build model: WF-identical ensemble or single HGB."""
+        if self._use_ensemble:
+            _hgb = HistGradientBoostingClassifier(
+                max_iter=1000, learning_rate=0.01, max_depth=7,
+                min_samples_leaf=20, l2_regularization=1.0,
+                max_bins=128, class_weight=None,
+                early_stopping=True, validation_fraction=0.1,
+                n_iter_no_change=40, random_state=42,
+            )
+            _rf = RandomForestClassifier(
+                n_estimators=200, max_depth=12, min_samples_leaf=15,
+                max_features="sqrt", class_weight="balanced",
+                n_jobs=-1, random_state=42,
+            )
+            _et = ExtraTreesClassifier(
+                n_estimators=200, max_depth=14, min_samples_leaf=10,
+                max_features="sqrt", class_weight="balanced",
+                n_jobs=-1, random_state=42,
+            )
+            return VotingClassifier(
+                estimators=[("hgb", _hgb), ("rf", _rf), ("et", _et)],
+                voting="soft",
+                weights=[3, 2, 1],
+            )
+        return HistGradientBoostingClassifier(
             max_iter=300, learning_rate=0.05, max_depth=5,
             min_samples_leaf=20, l2_regularization=1.0,
             max_bins=63, class_weight=None,
             early_stopping=True, validation_fraction=0.1,
             n_iter_no_change=20, random_state=42,
         )
-        self._feature_mask = None
-        self._calibrator = None
-        self.scaler = StandardScaler()
-        self.decision_threshold = settings.strategy.signal_threshold
-        self.feature_columns: list[str] = list(FEATURE_COLUMNS)  # updated by load_artifacts for backward compat
 
     def _aligned_feature_frame(self, frame: pd.DataFrame) -> pd.DataFrame:
         """Align any dataframe/row to model feature schema.
@@ -67,6 +97,16 @@ class ModelTrainer:
     def train(self, dataset: pd.DataFrame, save_artifacts: bool = True) -> dict[str, float]:
         train_df = dataset[dataset["split"] == "train"]
         test_df = dataset[dataset["split"] == "test"]
+
+        # Purge train tail so labels cannot use future bars from test split.
+        lookahead = get_label_lookahead_bars(self.settings)
+        if lookahead > 0:
+            if len(train_df) <= lookahead:
+                raise RuntimeError(
+                    f"Train split too small after leakage purge "
+                    f"(train_rows={len(train_df)}, lookahead={lookahead})"
+                )
+            train_df = train_df.iloc[:-lookahead].copy()
 
         threshold = self.settings.strategy.signal_threshold
         if save_artifacts and self.settings.training.optimize_threshold and len(train_df) > 50:
@@ -94,11 +134,24 @@ class ModelTrainer:
         else:
             sw = None
 
-        # No feature selection mask — use all features
-        self._feature_mask = None
-        x_train_sel = x_train
-        x_test_sel = x_test
+        # Feature selection: RF-based drop bottom N% (matches WF pipeline)
+        if self._feat_sel_drop > 0:
+            _scout = RandomForestClassifier(
+                n_estimators=80, max_depth=8, min_samples_leaf=20,
+                class_weight="balanced", n_jobs=-1, random_state=42,
+            )
+            _scout.fit(x_train, y_train, sample_weight=sw)
+            _imp = _scout.feature_importances_
+            _imp_thr = np.percentile(_imp, self._feat_sel_drop)
+            self._feature_mask = _imp >= _imp_thr
+            if self._feature_mask.sum() < 10:
+                self._feature_mask = None
+        else:
+            self._feature_mask = None
+        x_train_sel = self._apply_feature_mask(x_train)
+        x_test_sel = self._apply_feature_mask(x_test)
 
+        self.model = self._build_model()  # fresh model each train
         self.model.fit(x_train_sel, y_train, sample_weight=sw)
 
         # Probability calibration via isotonic regression on validation holdout
@@ -243,13 +296,16 @@ class ModelTrainer:
         _run_name = f"train_{_dt.datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
         try:
             with self._mlflow.start_run(run_name=_run_name, tags={"source": "live_runner"}):
-                params = {
-                    "max_iter": self.model.max_iter,
-                    "learning_rate": self.model.learning_rate,
-                    "max_depth": self.model.max_depth,
+                params: dict = {
                     "signal_threshold": self.decision_threshold,
                     "feature_count": len(self.feature_columns),
+                    "use_ensemble": self._use_ensemble,
+                    "feature_selection_drop_pct": self._feat_sel_drop,
                 }
+                if hasattr(self.model, "max_iter"):
+                    params["max_iter"] = self.model.max_iter
+                    params["learning_rate"] = self.model.learning_rate
+                    params["max_depth"] = self.model.max_depth
                 self._mlflow.log_params(params)
                 self._mlflow.log_metrics({k: v for k, v in metrics.items() if isinstance(v, float)})
                 # Upload artifacts to MinIO via MLflow
@@ -318,21 +374,37 @@ class ModelTrainer:
         model_path = Path(self.settings.app.model_path)
         scaler_path = Path(self.settings.app.scaler_path)
         meta_path = Path(self.settings.app.model_meta_path)
-        if not model_path.exists() or not scaler_path.exists():
+        if not model_path.exists():
             return False
         try:
             with open(str(model_path), "rb") as file_handle:
                 self.model = pickle.load(file_handle)
-            with open(str(scaler_path), "rb") as file_handle:
-                self.scaler = pickle.load(file_handle)
         except (AttributeError, ModuleNotFoundError, ImportError, Exception) as _pkl_err:
-            import logging as _logging
-            _logging.getLogger(__name__).warning(
-                "load_artifacts: failed to unpickle model/scaler (%s). "
+            logging.getLogger(__name__).warning(
+                "load_artifacts: failed to unpickle model (%s). "
                 "Likely sklearn version mismatch — will retrain.",
                 _pkl_err,
             )
             return False
+        # Load scaler — failure here is non-fatal: tree-based models don't require scaling.
+        # An empty/corrupt scaler file (e.g. 0-byte placeholder from git) will not trigger retrain.
+        if scaler_path.exists():
+            try:
+                with open(str(scaler_path), "rb") as file_handle:
+                    _loaded_scaler = pickle.load(file_handle)
+                # Verify the scaler was actually fitted (has mean_ attribute)
+                if hasattr(_loaded_scaler, "mean_") or hasattr(_loaded_scaler, "func"):
+                    self.scaler = _loaded_scaler
+                else:
+                    raise ValueError("scaler not fitted")
+            except Exception as _scaler_err:
+                from sklearn.preprocessing import FunctionTransformer
+                self.scaler = FunctionTransformer()  # identity — tree models don't need scaling
+                logging.getLogger(__name__).warning(
+                    "load_artifacts: scaler invalid/empty (%s). "
+                    "Using identity transform (OK for tree-based models).",
+                    _scaler_err,
+                )
         # Load calibrator if available
         _cal_path = model_path.with_suffix(".cal.pkl")
         if _cal_path.exists():
@@ -345,7 +417,15 @@ class ModelTrainer:
             self._calibrator = None
         if meta_path.exists():
             metadata = json.loads(meta_path.read_text(encoding="utf-8"))
-            self.decision_threshold = float(metadata.get("decision_threshold", self.settings.strategy.signal_threshold))
+            # Always use config signal_threshold — model meta decision_threshold may be stale
+            _meta_thresh = metadata.get("decision_threshold")
+            _cfg_thresh = float(self.settings.strategy.signal_threshold)
+            if _meta_thresh is not None and float(_meta_thresh) != _cfg_thresh:
+                logging.getLogger(__name__).info(
+                    "load_artifacts: config signal_threshold=%.4f overrides model meta decision_threshold=%.4f",
+                    _cfg_thresh, float(_meta_thresh),
+                )
+            self.decision_threshold = _cfg_thresh
             if "feature_mask" in metadata:
                 self._feature_mask = np.array(metadata["feature_mask"], dtype=bool)
             else:
@@ -405,6 +485,15 @@ class ModelTrainer:
         train_df = dataset[dataset["split"] == "train"].copy()
         test_df = dataset[dataset["split"] == "test"]
 
+        lookahead = get_label_lookahead_bars(self.settings)
+        if lookahead > 0:
+            if len(train_df) <= lookahead:
+                raise RuntimeError(
+                    f"Train split too small after leakage purge "
+                    f"(train_rows={len(train_df)}, lookahead={lookahead})"
+                )
+            train_df = train_df.iloc[:-lookahead].copy()
+
         if train_df.empty or not loss_patterns:
             return self.train(dataset)
 
@@ -437,12 +526,25 @@ class ModelTrainer:
         x_test = self.scaler.transform(test_df[self.feature_columns])
         y_test = test_df["target"]
 
-        # No feature selection — use all features
-        self._feature_mask = None
-        x_train_sel = x_train
-        x_test_sel = x_test
+        # Feature selection: RF-based drop bottom N% (matches WF pipeline)
+        if self._feat_sel_drop > 0:
+            _scout = RandomForestClassifier(
+                n_estimators=80, max_depth=8, min_samples_leaf=20,
+                class_weight="balanced", n_jobs=-1, random_state=42,
+            )
+            _scout.fit(x_train, y_train, sample_weight=weights)
+            _imp = _scout.feature_importances_
+            _imp_thr = np.percentile(_imp, self._feat_sel_drop)
+            self._feature_mask = _imp >= _imp_thr
+            if self._feature_mask.sum() < 10:
+                self._feature_mask = None
+        else:
+            self._feature_mask = None
+        x_train_sel = self._apply_feature_mask(x_train)
+        x_test_sel = self._apply_feature_mask(x_test)
 
         # Fit with sample_weight
+        self.model = self._build_model()
         self.model.fit(x_train_sel, y_train, sample_weight=weights)
 
         probabilities = self.model.predict_proba(x_test_sel)[:, 1]

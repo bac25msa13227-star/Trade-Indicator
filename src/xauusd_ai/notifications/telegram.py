@@ -26,15 +26,23 @@ class TelegramNotifier:
         if not token or not chat_id:
             return
 
+        _side = str(decision.side or "").strip().lower()
+        if _side == "buy":
+            _side_label = "BUY (Mua)"
+        elif _side == "sell":
+            _side_label = "SELL (Ban)"
+        else:
+            _side_label = _side.upper() if _side else "N/A"
+
         acct_prefix = f"[<b>{self._acct.upper()}</b>] " if self._acct else ""
         message = (
-            f"{acct_prefix}XAUUSD AI Signal\n"
-            f"Side: {decision.side}\n"
-            f"Confidence: {decision.confidence:.2%}\n"
-            f"Entry: {order_plan.entry_price:.2f}\n"
-            f"SL: {order_plan.stop_loss:.2f}\n"
-            f"TP: {order_plan.take_profit:.2f}\n"
-            f"Reason: {decision.reason}"
+            f"{acct_prefix}<b>XAUUSD AI Signal / Tín hiệu XAUUSD AI</b>\n"
+            f"Side / Hướng lệnh: {_side_label}\n"
+            f"Confidence / Độ tin cậy: {decision.confidence:.2%}\n"
+            f"Entry / Giá vào: {order_plan.entry_price:.2f}\n"
+            f"SL / Cắt lỗ: {order_plan.stop_loss:.2f}\n"
+            f"TP / Chốt lời: {order_plan.take_profit:.2f}\n"
+            f"Reason / Lý do: {decision.reason}"
         )
         requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",

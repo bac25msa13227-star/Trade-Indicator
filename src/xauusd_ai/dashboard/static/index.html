@@ -96,8 +96,38 @@ body{background:var(--bg);color:var(--text);font-family:var(--f);font-size:14px;
 .card-ttl{font-size:.63rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);margin-bottom:11px;display:flex;align-items:center;gap:7px}
 
 /* stat box */
-.sb{background:var(--card2);border:1px solid var(--bdr);border-radius:var(--rs);padding:10px 12px;transition:all .15s}
+.sb{background:var(--card2);border:1px solid var(--bdr);border-radius:var(--rs);padding:10px 12px;transition:all .15s;position:relative}
 .sb:hover{background:var(--card3);border-color:var(--bdr2)}
+/* ═══ STYLED TOOLTIPS ═══ */
+.sb[title],.model-c[title]{cursor:help}
+.sb[title] .slbl::after{content:' ⓘ';font-size:.55rem;opacity:.5;font-style:normal}
+.sb[title]::after,.model-c[title]::after{
+  content:attr(title);
+  display:none;
+  position:absolute;
+  bottom:calc(100% + 8px);
+  left:50%;
+  transform:translateX(-50%);
+  background:rgba(8,11,18,.97);
+  color:#d8dde8;
+  padding:7px 11px;
+  border-radius:7px;
+  font-size:.67rem;
+  font-family:var(--s);
+  font-weight:400;
+  line-height:1.5;
+  white-space:normal;
+  word-break:normal;
+  max-width:280px;
+  width:max-content;
+  min-width:120px;
+  z-index:2000;
+  pointer-events:none;
+  border:1px solid rgba(255,255,255,.1);
+  box-shadow:0 6px 20px rgba(0,0,0,.55);
+  text-align:left;
+}
+.sb[title]:hover::after,.model-c[title]:hover::after{display:block}
 .slbl{font-size:.6rem;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--text3);margin-bottom:3px}
 .sval{font-family:var(--m);font-size:1.1rem;font-weight:700;line-height:1.2}
 .ssub{font-size:.61rem;color:var(--text3);margin-top:2px}
@@ -208,8 +238,10 @@ body{background:var(--bg);color:var(--text);font-family:var(--f);font-size:14px;
 
 /* ═══ MODEL GRID ═══ */
 .model-g{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:7px}
-.model-c{background:rgba(255,255,255,.022);border:1px solid var(--bdr);border-radius:var(--rs);padding:8px 9px;text-align:center;transition:all .15s}
+.model-c{background:rgba(255,255,255,.022);border:1px solid var(--bdr);border-radius:var(--rs);padding:8px 9px;text-align:center;transition:all .15s;position:relative}
 .model-c:hover{background:var(--card2);border-color:var(--bdr2)}
+/* tooltip overflow fix for model grid */
+.model-c[title]::after{bottom:calc(100% + 6px);max-width:240px;left:50%}
 
 /* ═══ DIVIDER ═══ */
 .dvd{display:flex;align-items:center;gap:9px;margin:13px 0 9px}
@@ -222,6 +254,23 @@ body{background:var(--bg);color:var(--text);font-family:var(--f);font-size:14px;
 .fold-bad td:first-child{border-left:3px solid var(--red)}
 .fold-neu td:first-child{border-left:3px solid var(--yellow)}
 .news-ok{color:var(--green);font-weight:700}.news-warn{color:var(--yellow);font-weight:700}.news-block{color:var(--red);font-weight:700}
+.q-score-card{display:grid;grid-template-columns:minmax(170px,220px) minmax(0,1fr);gap:12px;align-items:stretch}
+.q-main{display:flex;flex-direction:column;justify-content:center;align-items:center;border:1px solid var(--bdr);border-radius:var(--rs);background:var(--card2);padding:12px}
+.q-num{font-family:var(--m);font-size:2rem;font-weight:900;line-height:1}
+.q-sub{font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--text3);margin-top:6px}
+.q-pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:3px 10px;font-size:.64rem;font-weight:800;letter-spacing:.05em;border:1px solid}
+.q-elite{color:var(--green);border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.10)}
+.q-strong{color:var(--cyan);border-color:rgba(34,211,238,.35);background:rgba(34,211,238,.10)}
+.q-tradable{color:var(--yellow);border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.10)}
+.q-caution{color:var(--orange);border-color:rgba(251,146,60,.35);background:rgba(251,146,60,.10)}
+.q-avoid{color:var(--red);border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.10)}
+.q-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}
+.q-step{border:1px solid var(--bdr);border-radius:var(--rs);padding:8px 9px;background:var(--card2)}
+.q-step-k{font-size:.56rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);margin-bottom:4px}
+.q-step-v{font-family:var(--m);font-weight:800;font-size:.78rem}
+.q-step-s{font-size:.61rem;color:var(--text2);margin-top:2px}
+@media(max-width:1000px){.q-score-card{grid-template-columns:1fr}.q-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:520px){.q-grid{grid-template-columns:1fr}}
 /* ═══ NEWS CALENDAR ═══ */
 .news-ev{display:grid;grid-template-columns:70px 1fr;gap:12px;background:var(--card);border-radius:var(--r);padding:11px 14px;margin-bottom:8px;border:1px solid var(--bdr)}
 .news-ev:hover{border-color:var(--bdr2)}
@@ -268,6 +317,64 @@ body{background:var(--bg);color:var(--text);font-family:var(--f);font-size:14px;
 .t-sell{border-left:3px solid var(--red)}
 .t-warn{border-left:3px solid var(--yellow)}
 .t-danger{border-left:3px solid var(--red);background:rgba(239,68,68,.07)}
+.modal-open{overflow:hidden}
+.pm-backdrop{
+  position:fixed;inset:0;z-index:10020;
+  background:rgba(2,6,10,.72);
+  backdrop-filter:blur(6px);
+  display:flex;align-items:center;justify-content:center;
+  opacity:0;pointer-events:none;
+  transition:opacity .22s ease;
+  padding:16px;
+}
+.pm-backdrop.show{opacity:1;pointer-events:auto}
+.pm-card{
+  width:min(560px,100%);
+  border-radius:18px;
+  border:1px solid rgba(110,249,255,.34);
+  background:linear-gradient(165deg,rgba(8,14,20,.98),rgba(12,19,28,.96));
+  box-shadow:0 20px 60px rgba(0,0,0,.55),0 0 0 1px rgba(110,249,255,.12),0 0 24px rgba(110,249,255,.16);
+  transform:translateY(12px) scale(.985);
+  transition:transform .22s ease,opacity .22s ease;
+}
+.pm-backdrop.show .pm-card{transform:translateY(0) scale(1)}
+.pm-head{display:flex;align-items:center;justify-content:space-between;padding:16px 18px 8px}
+.pm-kicker{font-size:.62rem;letter-spacing:.14em;text-transform:uppercase;color:var(--text3);font-weight:800}
+.pm-x{
+  width:30px;height:30px;border-radius:10px;border:1px solid var(--bdr2);
+  background:rgba(255,255,255,.03);color:var(--text2);cursor:pointer;
+  font-size:1rem;line-height:1;font-family:var(--m);font-weight:700;
+}
+.pm-x:hover{border-color:rgba(110,249,255,.35);color:var(--text)}
+.pm-body{padding:0 18px 16px}
+.pm-title{font-size:1.08rem;font-weight:800;letter-spacing:.01em;margin-bottom:6px}
+.pm-desc{font-size:.8rem;color:var(--text2);line-height:1.55;margin-bottom:12px}
+.pm-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.pm-box{
+  background:rgba(255,255,255,.02);
+  border:1px solid var(--bdr);
+  border-radius:12px;
+  padding:9px 10px;
+}
+.pm-lbl{font-size:.58rem;letter-spacing:.08em;text-transform:uppercase;color:var(--text3);margin-bottom:4px}
+.pm-val{font-family:var(--m);font-size:.9rem;font-weight:800}
+.pm-foot{display:flex;justify-content:flex-end;gap:8px;padding:12px 18px 16px;border-top:1px solid var(--bdr)}
+.pm-btn{
+  border:1px solid var(--bdr2);border-radius:10px;padding:9px 13px;
+  font-size:.76rem;font-weight:800;cursor:pointer;font-family:var(--f);
+  background:rgba(255,255,255,.02);color:var(--text2);
+}
+.pm-btn:hover{color:var(--text);border-color:rgba(110,249,255,.34)}
+.pm-btn.ok{
+  color:var(--text);
+  border-color:rgba(110,249,255,.38);
+  background:linear-gradient(135deg,rgba(110,249,255,.22),rgba(53,255,146,.12));
+}
+.pm-btn.ok:hover{box-shadow:0 0 16px rgba(110,249,255,.22)}
+@media(max-width:700px){
+  .pm-grid{grid-template-columns:1fr}
+  .pm-title{font-size:.97rem}
+}
 
 /* ═══ MOBILE RESPONSIVE ═══ */
 @media(max-width:900px){
@@ -644,6 +751,38 @@ body::after{
   background:linear-gradient(135deg,rgba(255,200,87,.16),rgba(255,139,71,.10));
   border-color:rgba(255,200,87,.24);
 }
+.profile-row{display:flex;gap:8px;flex-wrap:wrap}
+.profile-btn{
+  border:none;
+  outline:none;
+  cursor:pointer;
+  border-radius:999px;
+  padding:8px 12px;
+  font-family:var(--f);
+  font-size:.76rem;
+  font-weight:800;
+  color:var(--text2);
+  background:rgba(7,13,20,.94);
+  border:1px solid rgba(110,249,255,.12);
+  transition:transform .18s ease,box-shadow .18s ease,background .18s ease,color .18s ease,border-color .18s ease;
+}
+.profile-btn:hover{
+  transform:translateY(-1px);
+  border-color:rgba(110,249,255,.22);
+  color:var(--text);
+}
+.profile-btn.active{
+  background:linear-gradient(135deg,rgba(110,249,255,.20),rgba(53,255,146,.10));
+  color:var(--text);
+  border-color:rgba(110,249,255,.34);
+  box-shadow:var(--gb);
+}
+.profile-btn:disabled,
+.profile-btn.busy{
+  cursor:not-allowed;
+  opacity:.66;
+  transform:none !important;
+}
 .signal-slider-wrap{
   display:flex;
   align-items:center;
@@ -766,14 +905,14 @@ body::after{
           <span class="acct-d"></span>
           <span>
             <div style="font-weight:700;font-size:.77rem">ACC1</div>
-            <div style="font-size:.6rem;color:var(--text3)">ICT + Wyckoff</div>
+            <div id="sb-acct-sub-acc1" style="font-size:.6rem;color:var(--text3)" title="sc = sideway_min_confidence: ngưỡng confidence tối thiểu khi thị trường sideway">COMBO133 · sc=0.70</div>
           </span>
         </button>
         <button class="acct-btn" data-acct="acc2">
           <span class="acct-d"></span>
           <span>
             <div style="font-weight:700;font-size:.77rem">ACC2</div>
-            <div style="font-size:.6rem;color:var(--text3)">Live Profile</div>
+            <div id="sb-acct-sub-acc2" style="font-size:.6rem;color:var(--text3)" title="sc = sideway_min_confidence: ngưỡng confidence tối thiểu khi thị trường sideway">V14PP · sc=0.88</div>
           </span>
         </button>
       </div>
@@ -816,8 +955,8 @@ body::after{
 
     <!-- MOBILE ACCOUNT CHIPS -->
     <div class="mob-acct-bar" id="mob-acct-bar">
-      <button class="mac active" data-acct="acc1">ACC1 &middot; ICT+Wyckoff</button>
-      <button class="mac" data-acct="acc2">ACC2 &middot; Live Profile</button>
+      <button class="mac active" data-acct="acc1" id="mob-mac-acc1">ACC1 &middot; COMBO133</button>
+      <button class="mac" data-acct="acc2" id="mob-mac-acc2">ACC2 &middot; V14PP</button>
     </div>
 
     <section class="sunny-deck" id="sunny-deck">
@@ -834,16 +973,16 @@ body::after{
           <p class="sunny-blurb" id="sunny-blurb">Waiting for the first live packet before the engine maps account state, model confidence, and risk posture for ACC1 and ACC2.</p>
           <div class="sunny-mini-grid">
             <div class="sunny-mini">
-              <span>Viewport</span>
-              <strong id="sunny-focus">ACC1 / Overview</strong>
+              <span>Regime</span>
+              <strong id="sunny-regime-display">Stand by</strong>
             </div>
             <div class="sunny-mini">
-              <span>Signal Edge</span>
-              <strong id="sunny-signal-pulse">Stand by for live score</strong>
+              <span title="Signal Edge: hướng &amp; confidence live so với threshold. Ví dụ 'SELL / 0.512 vs 0.490' = model cho confidence 0.512 hướng SELL, ngưỡng là 0.490.">Signal Edge</span>
+              <strong id="sunny-signal-pulse" title="Định dạng: [BUY/SELL/hold] / [confidence] vs [threshold]">Stand by for live score</strong>
             </div>
             <div class="sunny-mini">
-              <span>Threat Level</span>
-              <strong id="sunny-risk-mood">Risk core idle</strong>
+              <span title="Threat Level: trạng thái rủi ro hiện tại. Armed=sẵn sàng giao dịch | Guarded=chưa đủ điều kiện | Cooldown Xb=nghỉ X bar sau chuỗi thua | Kill switch=đã kích hoạt ngắt lỗ tự động.">Threat Level</span>
+              <strong id="sunny-risk-mood" title="Armed=sẵn sàng | Guarded=chờ điều kiện | Cooldown=hạ nhiệt | Kill switch=dừng giao dịch">Risk core idle</strong>
             </div>
             <div class="sunny-mini">
               <span>Live PnL</span>
@@ -864,31 +1003,30 @@ body::after{
 
       <div class="sunny-tools">
         <div class="tools-grid">
+
           <div class="tool-card">
             <div class="tool-subttl">
-              <span>Theme Matrix</span>
-              <span id="mood-label">Matrix Green</span>
+              <span>Auto Trade</span>
+              <span id="auto-trade-status" class="dim">Loading…</span>
             </div>
-            <div class="mood-row">
-              <button class="mood-chip active" data-mood="matrix">Matrix Green</button>
-              <button class="mood-chip" data-mood="ice">Ice Link</button>
-              <button class="mood-chip" data-mood="amber">Amber Alert</button>
+            <div class="quick-grid">
+              <button class="quick-btn" id="btn-at-acc1-on"  title="Bật auto trade cho ACC1 — bot sẽ tự động đặt lệnh theo tín hiệu" onclick="setAutoTrade('acc1',true)">ACC1 ON</button>
+              <button class="quick-btn" id="btn-at-acc1-off" title="Tắt auto trade cho ACC1 — bot dừng đặt lệnh mới (lệnh đang mở không bị ảnh hưởng)" onclick="setAutoTrade('acc1',false)">ACC1 OFF</button>
+              <button class="quick-btn" id="btn-at-acc2-on"  title="Bật auto trade cho ACC2 — bot sẽ tự động đặt lệnh theo tín hiệu" onclick="setAutoTrade('acc2',true)">ACC2 ON</button>
+              <button class="quick-btn" id="btn-at-acc2-off" title="Tắt auto trade cho ACC2 — bot dừng đặt lệnh mới (lệnh đang mở không bị ảnh hưởng)" onclick="setAutoTrade('acc2',false)">ACC2 OFF</button>
             </div>
           </div>
 
           <div class="tool-card">
             <div class="tool-subttl">
-              <span>Ops Shortcuts</span>
-              <span id="quick-focus-label">Jump sections</span>
+              <span>Kill Switch</span>
+              <span id="ks-status" class="dim">Normal</span>
             </div>
             <div class="quick-grid">
-              <button class="quick-btn active" data-jump="overview">Overview</button>
-              <button class="quick-btn" data-jump="trading">Live</button>
-              <button class="quick-btn" data-jump="pnl">P&amp;L</button>
-              <button class="quick-btn" data-jump="news">News</button>
-              <button class="quick-btn" data-action="compact">Compact</button>
-              <button class="quick-btn" data-action="spotlight">Pulse</button>
+              <button class="quick-btn" id="btn-ks-acc1" onclick="resetKillSwitch('acc1')">Reset ACC1</button>
+              <button class="quick-btn" id="btn-ks-acc2" onclick="resetKillSwitch('acc2')">Reset ACC2</button>
             </div>
+            <div style="font-size:.64rem;color:var(--text3);margin-top:6px">Resets consecutive losses, cooldown, and kill flag</div>
           </div>
 
           <div class="tool-card">
@@ -897,10 +1035,15 @@ body::after{
               <span id="signal-limit-text">10 rows</span>
             </div>
             <div class="signal-slider-wrap">
-              <input class="signal-slider" id="signal-limit" type="range" min="4" max="20" step="1" value="10"/>
+              <input class="signal-slider" id="signal-limit" type="range" min="10" max="500" step="10" value="10"/>
               <span class="slider-bubble" id="signal-limit-bubble">10 rows</span>
             </div>
+            <div style="margin-top:10px">
+              <button class="quick-btn" id="btn-tg-url" onclick="sendTunnelUrl()" style="width:100%">&#128225; Send tunnel URL → Telegram</button>
+            </div>
+            <div id="tg-url-result" style="font-size:.64rem;color:var(--text3);margin-top:5px;display:none"></div>
           </div>
+
         </div>
       </div>
     </section>
@@ -1094,8 +1237,59 @@ function confBar(conf,thresh){
   </div>`;
 }
 
-function statBox(lbl,val,cls='',sub=''){
-  return `<div class="sb"><div class="slbl">${lbl}</div><div class="sval-sm ${cls}">${val}</div>${sub?`<div class="ssub">${sub}</div>`:''}</div>`;
+function statBox(lbl,val,cls='',sub='',tip=''){
+  const ta=tip?` title="${tip}"`:''; 
+  const lbl2=tip?`${lbl}<span style="font-size:.55rem;color:var(--text3);margin-left:3px;opacity:.6">ⓘ</span>`:lbl;
+  return `<div class="sb"${ta}><div class="slbl">${lbl2}</div><div class="sval-sm ${cls}">${val}</div>${sub?`<div class="ssub">${sub}</div>`:''}</div>`;
+}
+
+function computeTradeQualityScore(input){
+  const clamp = (v,min,max)=>Math.max(min,Math.min(max,v));
+  const weights={time:15,vol:10,strategy:25,ml:20,risk:15,decision:15};
+  const conf=toNum(input.confidence);
+  const thr=toNum(input.threshold);
+  const strategyScore=Math.abs(toNum(input.strategyScore) ?? 0);
+  const strategyMin=Math.max(toNum(input.strategyMin) ?? 0.05, 0.01);
+  const regime=toNum(input.volatilityRegime);
+
+  const stepTime=input.timeFilterPass===true?weights.time:0;
+  let volFactor=0.55;
+  if(regime===1) volFactor=1.00;
+  else if(regime===2) volFactor=0.82;
+  else if(regime===0) volFactor=0.52;
+  else if(regime===3) volFactor=0.28;
+  const stepVol=weights.vol*volFactor;
+  const stepStrategy=weights.strategy*clamp(strategyScore/strategyMin,0,1);
+
+  let stepMl=weights.ml*0.35;
+  if(conf!=null&&thr!=null&&thr>0){
+    stepMl=weights.ml*clamp(conf/thr,0,1);
+  }else if(conf!=null){
+    stepMl=weights.ml*clamp(conf,0,1);
+  }
+
+  const stepRisk=input.riskOk===true?weights.risk:0;
+  const stepDecision=input.decisionPass===true?weights.decision:0;
+  const raw=stepTime+stepVol+stepStrategy+stepMl+stepRisk+stepDecision;
+  const score=Math.round(clamp(raw,0,100));
+
+  let label='AVOID',cls='q-avoid';
+  if(score>=90){label='ELITE';cls='q-elite';}
+  else if(score>=80){label='STRONG';cls='q-strong';}
+  else if(score>=65){label='TRADABLE';cls='q-tradable';}
+  else if(score>=50){label='CAUTION';cls='q-caution';}
+
+  return {
+    score,label,cls,
+    points:{
+      time:Math.round(stepTime),
+      volatility:Math.round(stepVol),
+      strategy:Math.round(stepStrategy),
+      ml:Math.round(stepMl),
+      risk:Math.round(stepRisk),
+      decision:Math.round(stepDecision),
+    },
+  };
 }
 
 const chartVar = (name, fallback='') => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
@@ -1103,7 +1297,7 @@ function syncChartTheme(){
   Chart.defaults.color = chartVar('--text3','#aa8a95');
 }
 function liveLabel(acct){
-  return acct==='acc2' ? 'ACC2 / guard engine' : 'ACC1 / ict stack';
+  return acct==='acc2' ? 'ACC2 / composite' : 'ACC1 / profit';
 }
 function sentenceSide(side){
   if(!side) return 'hold';
@@ -1142,9 +1336,6 @@ function assistantNarrative(acct,d){
   return {summary,detail};
 }
 function refreshQuickButtons(){
-  document.querySelectorAll('.quick-btn[data-jump]').forEach(btn=>{
-    btn.classList.toggle('active',btn.dataset.jump===State.sec[State.acct]);
-  });
   document.querySelectorAll('.quick-btn[data-action="compact"]').forEach(btn=>{
     btn.classList.toggle('active',!!State.compact);
   });
@@ -1165,7 +1356,11 @@ function renderSunnyDeck(){
   const secLabel=(State.sec[acct]||'overview').replace('walkforward','walk forward');
   el('sunny-title').textContent = `${liveLabel(acct)} is ${s.should_trade?'armed':'watching'} the tape.`;
   el('sunny-blurb').textContent = q(s.reason||'Waiting for the next live bar so the console can decode model state, regime posture, and execution gates.');
-  el('sunny-focus').textContent = `${acct.toUpperCase()} / ${secLabel}`;
+  const vrNames4=['Low','Normal','High','Extreme'];
+  const vr4=s.volatility_regime!=null?+s.volatility_regime:-1;
+  const regimeTxt=vr4===0?'Sideways / Low':vr4===1?'Normal / Trending':vr4===2?'Volatile / High ATR':vr4>=3?'EXTREME':'Stand by';
+  const regimeEl=el('sunny-regime-display');
+  if(regimeEl){regimeEl.textContent=regimeTxt;regimeEl.className=vr4===0?'loss':vr4===1?'win':vr4===2?'muted loss':'loss';}
   el('sunny-signal-pulse').textContent = signalPulse;
   el('sunny-risk-mood').textContent = riskMood;
   el('sunny-live-pnl').innerHTML = `<span class="${(d.total_pnl||0)>=0?'win':'loss'}">${dol(d.total_pnl)}</span>`;
@@ -1173,6 +1368,34 @@ function renderSunnyDeck(){
   el('assistant-detail').textContent = note.detail;
   el('sunny-live-status').textContent = live ? 'WebSocket uplink hot' : 'HTTP fallback';
   el('sunny-live-updated').textContent = data?.ts ? `Synced ${String(data.ts).replace('T',' ').slice(5,16)} UTC` : 'Realtime ops console';
+
+  // Update auto-trade + kill switch buttons for both accounts
+  ['acc1','acc2'].forEach(a=>{
+    const ad=data?.accounts?.[a];
+    const autoOn=ad?.auto_trade_enabled ?? ad?.status?.auto_trade_enabled ?? ad?.runtime?.auto_trade_enabled ?? null;
+    const killed=ad?.daily?.killed;
+    const cooldown=ad?.daily?.cooldown_bars>0;
+    const btnOn=el(`btn-at-${a}-on`);
+    const btnOff=el(`btn-at-${a}-off`);
+    if(btnOn){btnOn.classList.toggle('active',autoOn===true);}
+    if(btnOff){btnOff.classList.toggle('active',autoOn===false);}
+    const btnKs=el(`btn-ks-${a}`);
+    if(btnKs){
+      btnKs.classList.toggle('active',killed||cooldown);
+      btnKs.style.color=killed?'var(--red)':cooldown?'var(--yellow)':'';
+    }
+  });
+  const at1=data?.accounts?.acc1?.status?.auto_trade_enabled;
+  const at2=data?.accounts?.acc2?.status?.auto_trade_enabled;
+  const ksEl=el('ks-status');
+  const k1=data?.accounts?.acc1?.daily?.killed;
+  const k2=data?.accounts?.acc2?.daily?.killed;
+  if(ksEl){
+    if(k1||k2){ksEl.textContent=`${k1?'ACC1 KILLED':''}${k1&&k2?' · ':''}${k2?'ACC2 KILLED':''}`;ksEl.style.color='var(--red)';}
+    else{ksEl.textContent='Normal';ksEl.style.color='';}
+  }
+  const atEl=el('auto-trade-status');
+  if(atEl) atEl.textContent=`ACC1:${at1===true?'ON':at1===false?'OFF':'?'} ACC2:${at2===true?'ON':at2===false?'OFF':'?'}`;
   const dot=el('sunny-live-dot');
   if(dot) dot.classList.toggle('live',live);
   const assistantCard=el('assistant-card');
@@ -1182,8 +1405,6 @@ function renderSunnyDeck(){
     assistantCard.classList.add('pulse-card');
   }
   State.assistantKey=note.summary;
-  const focusLabel=el('quick-focus-label');
-  if(focusLabel) focusLabel.textContent = `Viewport ${secLabel}`;
   refreshQuickButtons();
 }
 function spotlightActiveSection(){
@@ -1240,6 +1461,19 @@ function renderOverview(acct,d){
   const wfAgg=wf.aggregate||{};
   const wfSim=wfAgg.concurrent_sim||{};
   const bench=d.benchmark||{};
+  const runtime=d.runtime||{};
+  const cfg=(() => {
+    const rtMinConf=toNum(runtime.risk_min_confidence);
+    const rtDecThr=toNum(runtime.threshold_config);
+    const rtConsecPause=toNum(runtime.consecutive_loss_pause_count);
+    const rtDailyLoss=toNum(runtime.daily_loss_limit_pct);
+    const rtMaxDDKill=toNum(runtime.max_drawdown_kill_pct);
+    const rtSideConf=toNum(runtime.sideway_min_confidence);
+    const rtVolConf=toNum(runtime.volatile_min_confidence);
+    return acct==='acc2'
+      ? {mode:'V14PP',    minConf:rtMinConf??0.88,  decThr:rtDecThr??0.46, sideConf:rtSideConf??0.88, volConf:rtVolConf??0.88, silvBoost:0.03,consecPause:rtConsecPause??3,riskPct:0.04,tpRR:3.5,sideTpRR:2.5,volTpRR:5.0,dailyLoss:rtDailyLoss??0.12,maxDDKill:rtMaxDDKill??0.15,sideRiskMul:0.60,volRiskMul:0.80}
+      : {mode:'COMBO133', minConf:rtMinConf??0.70, decThr:rtDecThr??0.60, sideConf:rtSideConf??0.70, volConf:rtVolConf??0.70, silvBoost:0.05,consecPause:rtConsecPause??3,riskPct:0.04,tpRR:3.5,sideTpRR:2.5,volTpRR:5.0,dailyLoss:rtDailyLoss??0.12,maxDDKill:rtMaxDDKill??0.20,sideRiskMul:1.00,volRiskMul:0.70};
+  })();
   const trades=d.recent_trades||[];const sig=(d.recent_signals||[]).slice(-1)[0]||{};
   const cbActive=day.killed||day.cooldown_bars>0;
   const cbTxt=day.killed?'KILL SWITCH':day.cooldown_bars>0?`Cooldown ${day.cooldown_bars}b`:'NORMAL';
@@ -1255,6 +1489,19 @@ function renderOverview(acct,d){
   const bindingOk = mod.binding_ok!==false;
   const bindingMismatch = Array.isArray(mod.binding_mismatch)?mod.binding_mismatch:[];
   const benchOk = bench.net_profit!=null && bench.max_drawdown_pct!=null;
+  const canaryEnabled=isTrue(s.canary_enabled ?? runtime.canary_enabled);
+  const canaryFraction=toNum(s.canary_volume_fraction ?? runtime.canary_volume_fraction);
+  const rollbackEnabled=isTrue(s.auto_rollback_enabled ?? runtime.auto_rollback_enabled);
+  const rollbackCount=toNum(s.auto_rollback_count) ?? 0;
+  const rollbackReason=String(s.auto_rollback_last_reason||'').trim();
+  const health=(s.data_health&&typeof s.data_health==='object')?s.data_health:{};
+  const healthAlerts=Array.isArray(health.active_alerts)?health.active_alerts:[];
+  const healthMetrics=(health.metrics&&typeof health.metrics==='object')?health.metrics:{};
+  const healthState=healthAlerts.length?`ALERT ×${healthAlerts.length}`:'HEALTHY';
+  const healthStateCls=healthAlerts.length?'loss':'win';
+  const tickAge=toNum(healthMetrics.tick_age_sec ?? s.market_tick_age_sec);
+  const bridgeDiv=toNum(healthMetrics.bridge_feed_divergence);
+  const spreadNow=toNum(healthMetrics.spread_now);
   const confColor=confPass?'var(--green)':'var(--red)';
   const vr=s.volatility_regime!=null?+s.volatility_regime:-1;
   const vrNames=['Low','Normal','High','Extreme'];
@@ -1284,35 +1531,78 @@ function renderOverview(acct,d){
 
   el(`sb-${acct}-overview`).innerHTML=`
   <div class="g6" style="margin-bottom:12px">
-    <div class="sb" style="border-left:3px solid ${(d.total_pnl||0)>=0?'var(--green)':'var(--red)'}">
+    <div class="sb" title="Số dư tài khoản MT5 real-time từ bridge. Peak = đỉnh balance lịch sử." style="border-left:3px solid ${(d.total_pnl||0)>=0?'var(--green)':'var(--red)'}">
       <div class="slbl">Balance</div>
       <div class="sval ${(d.total_pnl||0)>=0?'win':'loss'}">${dol(s.account_balance)}</div>
       <div class="ssub">Peak ${dol(d.peak_balance)}</div>
     </div>
-    <div class="sb" style="border-left:3px solid ${(d.total_pnl||0)>=0?'var(--green)':'var(--red)'}">
+    <div class="sb" title="Tổng P&L từ tất cả lệnh đã đóng trong live trading (không phải backtest/WF)." style="border-left:3px solid ${(d.total_pnl||0)>=0?'var(--green)':'var(--red)'}">
       <div class="slbl">Total Live PnL</div>
       <div class="sval ${(d.total_pnl||0)>=0?'win':'loss'}">${dol(d.total_pnl)}</div>
       <div class="ssub">${trades.length} closed trades</div>
     </div>
-    <div class="sb" style="border-left:3px solid var(--accent)">
+    <div class="sb" title="Win Rate từ live closed trades thực tế (không phải backtest). Cập nhật theo số lệnh đã đóng." style="border-left:3px solid var(--accent)">
       <div class="slbl">Win Rate</div>
       <div class="sval">${pct(d.win_rate)}</div>
       <div class="ssub">last ${trades.length} trades</div>
     </div>
-    <div class="sb" style="border-left:3px solid ${(d.drawdown_pct||0)>10?'var(--red)':(d.drawdown_pct||0)>5?'var(--yellow)':'var(--bdr)'}">
+    <div class="sb" title="% drawdown hiện tại từ peak balance. Cảnh báo vàng >5%, đỏ >10%. Bot có thể kích kill switch nếu vượt max_drawdown_kill_pct." style="border-left:3px solid ${(d.drawdown_pct||0)>10?'var(--red)':(d.drawdown_pct||0)>5?'var(--yellow)':'var(--bdr)'}">
       <div class="slbl">Drawdown</div>
       <div class="sval ${(d.drawdown_pct||0)>5?'loss':''}">${d.drawdown_pct!=null?d.drawdown_pct+'%':'&#8212;'}</div>
       <div class="ssub">from peak</div>
     </div>
-    <div class="sb" style="border-left:3px solid var(--purple)">
+    <div class="sb" title="Số lệnh đang mở / Tối đa cho phép đồng thời. Bot sẽ không mở lệnh mới nếu đã đạt max_positions." style="border-left:3px solid var(--purple)">
       <div class="slbl">Positions</div>
       <div class="sval">${s.open_positions??'0'}<span style="font-size:.75rem;font-weight:400;color:var(--text3)"> / ${s.max_positions??'&#8212;'}</span></div>
       <div class="ssub">Volatility: ${vrBadge}</div>
     </div>
-    <div class="sb" style="border-left:3px solid ${cbActive?'var(--red)':'var(--green)'}">
+    <div class="sb" title="Circuit breaker: NORMAL = hoạt động bình thường | Cooldown Xb = nghỉ X bar sau chuỗi thua liên tiếp | KILL SWITCH = dừng hoàn toàn do vượt daily_loss_limit hoặc max_drawdown_kill." style="border-left:3px solid ${cbActive?'var(--red)':'var(--green)'}">
       <div class="slbl">Circuit Breaker</div>
       <div class="sval-sm" style="padding-top:4px"><span class="${cbActive?'bdg bdg-warn':'bdg bdg-ok'}">${cbTxt}</span></div>
       <div class="ssub">${day.consecutive_losses||0} consec losses</div>
+    </div>
+  </div>
+
+  <div class="g4" style="margin-bottom:12px">
+    <div class="sb" title="Canary Deploy: chạy bot với volume nhỏ hơn (canary_volume_fraction) để test model mới trước khi full deploy. ACTIVE = đang chạy mode thử nghiệm." style="border-left:3px solid ${canaryEnabled?'var(--yellow)':'var(--bdr)'}">
+      <div class="slbl">Canary Deploy</div>
+      <div class="sval-sm"><span class="${canaryEnabled?'bdg bdg-y':'bdg bdg-n'}">${canaryEnabled?'ACTIVE':'OFF'}</span></div>
+      <div class="ssub">Volume ${canaryFraction!=null?fmt(canaryFraction,2):'1.00'}x</div>
+    </div>
+    <div class="sb" title="Auto Rollback: tự động quay lại model/config cũ nếu performance xấu theo tiêu chí đã định. auto_rollback_count = số lần đã rollback." style="border-left:3px solid ${rollbackEnabled?'var(--accent)':'var(--bdr)'}">
+      <div class="slbl">Auto Rollback</div>
+      <div class="sval-sm"><span class="${rollbackEnabled?'bdg bdg-ok':'bdg bdg-n'}">${rollbackEnabled?'ENABLED':'OFF'}</span></div>
+      <div class="ssub">Count ${rollbackCount} ${rollbackReason?`· ${q(rollbackReason).slice(0,44)}`:''}</div>
+    </div>
+    <div class="sb" title="Data Health: giám sát chất lượng data feed. ALERT = có vấn đề cần chú ý. tick age = giây từ tick cuối, spread = spread hiện tại." style="border-left:3px solid ${healthAlerts.length?'var(--red)':'var(--green)'}">
+      <div class="slbl">Data Health</div>
+      <div class="sval-sm ${healthStateCls}">${healthState}</div>
+      <div class="ssub">tick ${tickAge!=null?fmt(tickAge,1)+'s':'—'} · spread ${spreadNow!=null?fmt(spreadNow,3):'—'}</div>
+    </div>
+    <div class="sb" title="Bridge vs Feed: chênh lệch giá (points) giữa MT5 bridge và data feed thị trường. >1.5 = cảnh báo lệch feed có thể ảnh hưởng tín hiệu." style="border-left:3px solid ${(bridgeDiv!=null&&bridgeDiv>1.5)?'var(--red)':'var(--bdr)'}">
+      <div class="slbl">Bridge vs Feed</div>
+      <div class="sval-sm ${(bridgeDiv!=null&&bridgeDiv>1.5)?'loss':''}">${bridgeDiv!=null?fmt(bridgeDiv,3):'—'}</div>
+      <div class="ssub">Divergence points</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-ttl">&#9881; Strategy Config &mdash; ${acct.toUpperCase()} / <span class="win">${cfg.mode}</span></div>
+    <div class="g6">
+      ${statBox('Min Conf (Normal)','<b style="color:var(--yellow);font-family:var(--m)">'+(cfg.minConf*100).toFixed(0)+'%</b>','','risk.min_confidence — ngưỡng confidence cho chế độ Normal')}
+      ${statBox('Min Conf (Sideway)','<b style="color:var(--yellow);font-family:var(--m)">'+(cfg.sideConf*100).toFixed(0)+'%</b>','','sideway_min_confidence (sc=) — thị trường đi ngang')}
+      ${statBox('Min Conf (Volatile)','<b style="color:var(--yellow);font-family:var(--m)">'+(cfg.volConf*100).toFixed(0)+'%</b>','','volatile_min_confidence — thị trường biến động cao')}
+      ${statBox('Signal Thr (ML)','<b style="font-family:var(--m)">'+cfg.decThr.toFixed(2)+'</b>','','strategy.signal_threshold — ML model output gate')}
+      ${statBox('Consec Pause',cfg.consecPause+' losses','','Cooldown sau chuỗi thua liên tiếp')}
+      ${statBox('Partial TP','1.2R &rarr; 50%','','Đóng nửa lệnh tại 1.2R')}
+    </div>
+    <div class="g6" style="margin-top:8px">
+      ${statBox('TP RR',cfg.tpRR+'R &middot; '+cfg.sideTpRR+'R &middot; '+cfg.volTpRR+'R','','Normal / Sideway / Vol')}
+      ${statBox('Daily Loss Limit',(cfg.dailyLoss*100).toFixed(0)+'%','loss','Kill nếu lỗ vượt giới hạn')}
+      ${statBox('Max DD Kill',(cfg.maxDDKill*100).toFixed(0)+'%','loss','Kill switch tự động')}
+      ${statBox('Sideway Risk',cfg.sideRiskMul.toFixed(2)+'&times;',cfg.sideRiskMul<1?'loss':'','Hệ số rủi ro Sideway')}
+      ${statBox('Vol Risk',cfg.volRiskMul.toFixed(2)+'&times;',cfg.volRiskMul<1?'loss':'','Hệ số rủi ro Volatile')}
+      ${statBox('Strategy Weights','ICT 40% &middot; WYC 35% &middot; MOM 25%','dim','')}
     </div>
   </div>
 
@@ -1356,27 +1646,27 @@ function renderOverview(acct,d){
     <div class="card">
       <div class="card-ttl">&#128200; Model Performance</div>
       <div class="model-g">
-        <div class="model-c">
+        <div class="model-c" title="TP/(TP+FP) — % tín hiệu model đoán đúng hướng trên test set. Combo133 ≈ 46.4%">
           <div class="slbl">Precision</div>
           <div class="sval-sm ${mod.precision!=null&&+mod.precision>0.5?'win':'loss'}">${mod.precision!=null?(+mod.precision*100).toFixed(1)+'%':'&#8212;'}</div>
         </div>
-        <div class="model-c" style="border-color:rgba(245,158,11,.25)">
+        <div class="model-c" style="border-color:rgba(245,158,11,.25)" title="Decision threshold từ meta JSON. Xem dòng Thr(model/cfg/risk/effective) bên dưới để hiểu toàn bộ chain ngưỡng.">
           <div class="slbl">Threshold</div>
           <div class="sval-sm" style="color:var(--yellow)">${mod.threshold!=null?(+mod.threshold).toFixed(4):'&#8212;'}</div>
         </div>
-        <div class="model-c">
+        <div class="model-c" title="ROC-AUC: diện tích dưới đường ROC (0.5=random, 1.0=perfect). >0.55 là có edge cho signal. Combo133 ≈ 0.54 (signal-level, không phải trade-level).">
           <div class="slbl">ROC-AUC</div>
           <div class="sval-sm ${mod.roc_auc!=null&&+mod.roc_auc>0.5?'win':'loss'}">${mod.roc_auc!=null?(+mod.roc_auc).toFixed(4):'&#8212;'}</div>
         </div>
-        <div class="model-c">
+        <div class="model-c" title="TP/(TP+FN) — Tỷ lệ model bắt được các cơ hội thực sự trong dữ liệu test. Combo133 recall cao vì threshold thấp (0.49).">
           <div class="slbl">Recall</div>
           <div class="sval-sm">${mod.recall!=null?(+mod.recall*100).toFixed(1)+'%':'&#8212;'}</div>
         </div>
-        <div class="model-c">
+        <div class="model-c" title="Harmonic mean của Precision và Recall: 2*(P*R)/(P+R). Cân bằng giữa bắt nhiều tín hiệu (recall) và chất lượng (precision).">
           <div class="slbl">F1 Score</div>
           <div class="sval-sm">${mod.f1!=null?(+mod.f1).toFixed(3):'&#8212;'}</div>
         </div>
-        <div class="model-c">
+        <div class="model-c" title="% dự đoán đúng tổng thể. Ít ý nghĩa hơn AUC khi dữ liệu mất cân bằng (imbalanced). Ưu tiên xem Precision và ROC-AUC.">
           <div class="slbl">Accuracy</div>
           <div class="sval-sm">${mod.accuracy!=null?(+mod.accuracy*100).toFixed(1)+'%':'&#8212;'}</div>
         </div>
@@ -1384,25 +1674,25 @@ function renderOverview(acct,d){
       <div style="font-size:.67rem;color:var(--text3);margin:3px 0 10px;text-align:right">
         Train ${mod.train_rows!=null?(+mod.train_rows).toLocaleString():''} rows &#183; WF ${mod.wf_n_folds??'?'} folds &#183; Avg prec ${mod.wf_precision_avg!=null?(+mod.wf_precision_avg*100).toFixed(1)+'%':'&#8212;'}
       </div>
-      <div style="font-size:.67rem;color:var(--text3);margin:-4px 0 10px;text-align:right">
+      <div style="font-size:.67rem;color:var(--text3);margin:-4px 0 10px;text-align:right" title="model=decision_threshold trong meta JSON | cfg=strategy.signal_threshold trong live config | risk=risk.min_confidence (execution guard) | effective=ngưỡng thực tế được dùng (= cfg)">
         Thr(model/cfg/risk/effective): ${fmt(thrModel,4)} / ${fmt(thrCfg,4)} / ${fmt(thrRisk,4)} / <b style="color:var(--yellow)">${fmt(thr,4)}</b>
       </div>
       <div style="font-size:.67rem;color:${bindingOk?'var(--green)':'var(--red)'};margin:-6px 0 8px;text-align:right">
-        Model binding: ${bindingOk?'OK':'MISMATCH'}${bindingMismatch.length?` (${bindingMismatch.join(', ')})`:''}
+        Model binding: ${bindingOk?'&#10003; OK':'&#9888; MISMATCH'}${!bindingOk&&bindingMismatch.length?`<br><span style="color:var(--text3)">Expected: ${(mod.binding_required?.model||'?').split('/').pop()}</span><br><span style="color:var(--text3)">Actual: ${(mod.binding_actual?.model||'?').split('/').pop()}</span>`:''}
       </div>
       <div class="dvd"><span>Backtest Summary</span></div>
       <div class="g4">
-        ${statBox('Return',pctR(bt.return_pct),(bt.return_pct||0)>=0?'win':'loss')}
-        ${statBox('Profit Factor',fmt(bt.profit_factor))}
-        ${statBox('Win Rate',pct(bt.win_rate))}
-        ${statBox('Max DD',pctR(bt.max_drawdown_pct),'loss')}
+        ${statBox('Return',pctR(bt.return_pct),(bt.return_pct||0)>=0?'win':'loss','','% lợi nhuận từ WF aggregate (avg 6 fold gần nhất). Concurrent sim, non-compound per fold.')}
+        ${statBox('Profit Factor',fmt(bt.profit_factor),'','','Gross profit / Gross loss qua toàn bộ WF. PF > 1.5 = tốt; PF > 2.0 = rất tốt.')}
+        ${statBox('Win Rate',pct(bt.win_rate),'','','% lệnh thắng trong toàn bộ WF concurrent sim. Combo133 ≈ 46-47%.')}
+        ${statBox('Max DD',pctR(bt.max_drawdown_pct),'loss','','Max Drawdown tệ nhất trong các fold WF. Fold 7 (Jul2024) là fold DD cao nhất.')}
       </div>
       <div class="dvd"><span>Walkforward Summary</span></div>
       <div class="g4">
-        ${statBox('Avg Precision',pct(wfAgg.avg_precision))}
-        ${statBox('Avg Win Rate',pct(wfSim.avg_win_rate ?? wfAgg.signal_win_rate),(toNum(wfSim.avg_win_rate ?? wfAgg.signal_win_rate)??0)>=0.5?'win':'loss')}
-        ${statBox('Avg PF',fmt(wfSim.avg_profit_factor))}
-        ${statBox('Avg Max DD',pctR(wfSim.avg_max_drawdown_pct),'loss')}
+        ${statBox('Avg Precision',pct(wfAgg.avg_precision),'','','Signal precision trung bình qua các fold: TP/(TP+FP) ≈ win rate. Combo133 ≈ 46.4%.')}
+        ${statBox('Avg Win Rate',pct(wfSim.avg_win_rate ?? wfAgg.signal_win_rate),(toNum(wfSim.avg_win_rate ?? wfAgg.signal_win_rate)??0)>=0.5?'win':'loss','','Win rate trung bình per-fold (27/28 folds profitable). Combo133 avg ≈ 45.3%.')}
+        ${statBox('Avg PF',fmt(wfSim.avg_profit_factor),'','','Profit factor trung bình per-fold. Combo133 avg ≈ 1.96.')}
+        ${statBox('Avg Max DD',pctR(wfSim.avg_max_drawdown_pct),'loss','','Max drawdown trung bình per-fold (mỗi fold reset $200). Combo133 avg ≈ 17.5%.')}
       </div>
       <div class="dvd"><span>Locked Benchmark</span></div>
       <div class="g4">
@@ -1427,7 +1717,7 @@ function renderOverview(acct,d){
 function renderTrading(acct,d){
   const s=d.status||{};const mod=d.model||{};const day=d.daily||{};
   const runtime=d.runtime||{};
-  const trades=d.recent_trades||[];const signals=d.recent_signals||[];
+  const trades=d.recent_trades||[];const signals=d.recent_signals||[];const journal=d.recent_journal||[];
   const signalRows=signals.slice(-State.signalLimit).reverse();
   const signalOutcomes=buildSignalOutcomes(signalRows, trades);
   const lastSig=signals.slice(-1)[0]||{};
@@ -1487,7 +1777,18 @@ function renderTrading(acct,d){
   const stratStrength=(stratScore==null?'No data':(Math.abs(stratScore)>=0.35?'Strong':Math.abs(stratScore)>=0.1?'Medium':'Weak'));
   const cbOk=!day.killed&&!(day.cooldown_bars>0);
   const posOk=(s.open_positions??0)<(s.max_positions??99);
-  const riskOk=cbOk&&posOk;
+  const riskConfOk=thrRisk==null||conf==null||conf>=thrRisk;
+  const riskOk=cbOk&&posOk&&riskConfOk;
+  const quality=computeTradeQualityScore({
+    timeFilterPass,
+    volatilityRegime:vr,
+    strategyScore:stratScore,
+    strategyMin:stratRequiredMin,
+    confidence:conf,
+    threshold:thr,
+    riskOk,
+    decisionPass:s.should_trade===true,
+  });
 
   function stepCard(icon,title,value,pass,sub){
     const cls=pass===true?'pass':pass===false?'fail':'warn';
@@ -1508,8 +1809,8 @@ function renderTrading(acct,d){
     [vrOk,           stepCard('&#127754;','Volatility',`<span class="vol-${Math.min(Math.max(vr,0),3)}">${vr>=0?vrNames[vr]:'-'}</span>`,vrOk,vr===0?'Low — caution':vr===2?'High ATR':vr===3?'Extreme':'')],
     [stratOk,        stepCard('&#128202;','Strategy',stratScore!=null?`<span class="${stratScore>0?'win':stratScore<0?'loss':'dim'}">${signed(stratScore,2)}</span>`:'&#8212;',stratOk,(stratScore!=null&&stratRequiredMin!=null)?`|score|=${Math.abs(stratScore).toFixed(2)} / min=${stratRequiredMin.toFixed(2)} (${stratStrength})`:stratStrength)],
     [confPass,       stepCard('&#129302;','ML Model',`${fmt(conf,4)}<br><span style="font-size:.6rem;color:var(--text3)">/ ${fmt(thr,4)}</span>`,confPass,confPass?'Above threshold':'Below threshold')],
-    [riskOk,         stepCard('&#128737;','Risk Guard',cbOk?`<span class="bdg bdg-ok">Clear</span>`:`<span class="bdg bdg-warn">${day.killed?'Killed':'Cooldown'}</span>`,riskOk,`Pos ${s.open_positions??0}/${s.max_positions??'?'} &#183; ${day.consecutive_losses||0} losses`)],
-    [s.should_trade, stepCard('&#9989;','Decision',s.should_trade?`<span style="color:${s.side?.toLowerCase()==='buy'?'var(--green)':'var(--red)'};font-size:.9rem;font-weight:900">${s.side?.toLowerCase()==='buy'?'&#9650;':'&#9660;'} ${(s.side||'').toUpperCase()}</span>`:`<span class="dim">BLOCKED</span>`,s.should_trade,'')]
+    [riskOk,         stepCard('&#128737;','Risk Guard',cbOk&&riskConfOk?`<span class="bdg bdg-ok">Clear</span>`:`<span class="bdg bdg-warn">${day.killed?'Killed':(!riskConfOk?'Conf gate':'Cooldown')}</span>`,riskOk,`Pos ${s.open_positions??0}/${s.max_positions??'?'} &#183; ${day.consecutive_losses||0} losses`+(!riskConfOk&&thrRisk!=null?` &#183; &#9888; conf ${fmt(conf,3)} &lt; risk.min_conf ${fmt(thrRisk,2)}`:''))],
+    [s.should_trade, stepCard('&#9989;','Decision',s.should_trade?`<span style="color:${s.side?.toLowerCase()==='buy'?'var(--green)':'var(--red)'};font-size:.9rem;font-weight:900">${s.side?.toLowerCase()==='buy'?'&#9650;':'&#9660;'} ${(s.side||'').toUpperCase()}</span>`:`<span class="dim">BLOCKED</span>`,s.should_trade,s.should_trade?`${(s.side||'').toUpperCase()} order ready`:(s.reason?`&#9888; ${(s.reason||'').length>70?(s.reason||'').slice(0,70)+'&#8230;':s.reason}`:'No entry condition met'))]
   ];
 
   const flowHTML=steps.map(([pass,card],i)=>`<div class="step-w">${card}${i<steps.length-1?stepArr(pass):''}</div>`).join('');
@@ -1564,6 +1865,26 @@ function renderTrading(acct,d){
     </tr>`;
   }).join('');
 
+  const journalRows=journal.slice(-State.signalLimit).reverse().map(j=>{
+    const jTime=pickTimeText(j.time, j.closed_at, j.close_time, j.ts);
+    const jResult=String(j.result||'').toUpperCase();
+    const jCls=jResult==='WIN'?'win':jResult==='LOSS'?'loss':(jResult==='BREAKEVEN'?'muted':'dim');
+    const jPnl=toNum(j.pnl);
+    const jOutcome=((j.outcome||'')+'').trim() || (
+      Array.isArray(j.loss_reasons) ? j.loss_reasons.join(' | ') : ''
+    );
+    return `<tr>
+      <td class="dim">${jTime}</td>
+      <td class="dim">${q(j.ticket)}</td>
+      <td>${badge(j.side)}</td>
+      <td class="${jCls}">${q(jResult||'N/A')}</td>
+      <td class="${clr(jPnl)}">${dol(jPnl)}</td>
+      <td class="dim reason-cell">${q(((j.entry_reason||'')+'').slice(0,120))}</td>
+      <td class="dim reason-cell">${q((jOutcome+'').slice(0,130))}</td>
+      <td class="dim reason-cell">${q(((j.lesson||'')+'').slice(0,130))}</td>
+    </tr>`;
+  }).join('');
+
   el(`sb-${acct}-trading`).innerHTML=`
   <div class="live-bar ${s.should_trade?'glow-green':'glow-red'}" style="margin-bottom:12px">
     <div class="lb-item">
@@ -1597,6 +1918,7 @@ function renderTrading(acct,d){
     </div>
     <div style="margin-left:auto;display:flex;gap:7px;align-items:center">
       <span class="${s.should_trade?'bdg bdg-ok':'bdg bdg-warn'}">${s.should_trade?'&#10003; TRADING':'&#10007; BLOCKED'}</span>
+      <span class="q-pill ${quality.cls}">Q ${quality.score}/100 · ${quality.label}</span>
       ${badge(s.side)}
     </div>
   </div>
@@ -1608,6 +1930,25 @@ function renderTrading(acct,d){
   <div class="card" style="margin-bottom:12px">
     <div class="card-ttl">&#9883; 6-Step Decision Pipeline</div>
     <div class="step-flow">${flowHTML}</div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-ttl">&#127919; Trade Quality Score (0-100)</div>
+    <div class="q-score-card">
+      <div class="q-main">
+        <div class="q-num ${quality.score>=70?'win':quality.score>=50?'muted':'loss'}">${quality.score}</div>
+        <div class="q-sub">Quality Score</div>
+        <div style="margin-top:10px"><span class="q-pill ${quality.cls}">${quality.label}</span></div>
+      </div>
+      <div class="q-grid">
+        <div class="q-step"><div class="q-step-k">Time Filter</div><div class="q-step-v">${quality.points.time}/15</div><div class="q-step-s">${timeFilterPass?'Pass':'Blocked'}</div></div>
+        <div class="q-step"><div class="q-step-k">Volatility</div><div class="q-step-v">${quality.points.volatility}/10</div><div class="q-step-s">${vr>=0?vrNames[vr]:'Unknown'}</div></div>
+        <div class="q-step"><div class="q-step-k">Strategy</div><div class="q-step-v">${quality.points.strategy}/25</div><div class="q-step-s">|S| ${fmt(Math.abs(stratScore??0),2)} / ${fmt(stratRequiredMin,2)}</div></div>
+        <div class="q-step"><div class="q-step-k">ML Model</div><div class="q-step-v">${quality.points.ml}/20</div><div class="q-step-s">${fmt(conf,3)} vs ${fmt(thr,3)}</div></div>
+        <div class="q-step"><div class="q-step-k">Risk Guard</div><div class="q-step-v">${quality.points.risk}/15</div><div class="q-step-s">${riskOk?'Clear':(!riskConfOk?`conf&lt;${fmt(thrRisk,2)}`:day.killed?'Killed':'Cooldown')}</div></div>
+        <div class="q-step"><div class="q-step-k">Decision</div><div class="q-step-v">${quality.points.decision}/15</div><div class="q-step-s">${s.should_trade?'Entry allowed':(s.reason?((s.reason||'').length>25?(s.reason||'').slice(0,25)+'…':s.reason):'No entry')}</div></div>
+      </div>
+    </div>
   </div>
 
   <div class="strat-g">
@@ -1671,6 +2012,14 @@ function renderTrading(acct,d){
         <tbody>${trRows||'<tr><td colspan="8" class="dim" style="text-align:center;padding:16px">No trades</td></tr>'}</tbody>
       </table></div>
     </div>
+  </div>
+
+  <div class="card" style="margin-top:12px">
+    <div class="card-ttl">&#128221; Auto Journal (${Math.min(journal.length,State.signalLimit)} shown / ${journal.length})</div>
+    <div class="table-wrap scroll-y"><table class="tbl">
+      <thead><tr><th>Time</th><th>Ticket</th><th>Side</th><th>Result</th><th>PnL</th><th>Entry Thesis</th><th>Outcome</th><th>Lesson</th></tr></thead>
+      <tbody>${journalRows||'<tr><td colspan="8" class="dim" style="text-align:center;padding:16px">No journal entries</td></tr>'}</tbody>
+    </table></div>
   </div>`;
 }
 
@@ -1678,12 +2027,85 @@ function renderTrading(acct,d){
 function renderPnl(acct,d){
   const trades=d.recent_trades||[];
   const series=d.pnl_series||{labels:[],values:[],individual:[]};
+  const explain=d.pnl_explain||{};
+  const matrix=d.regime_session_matrix||{};
+  const profiles=d.profile_presets||{};
   const W=trades.filter(t=>String(t.is_win||'').toLowerCase()==='true'||t.is_win===true||t.is_win===1||parseFloat(t.pnl??t.profit??0)>0).length;
   const L=trades.length-W;
   const wTrades=trades.filter(t=>String(t.is_win||'').toLowerCase()==='true'||t.is_win===true||parseFloat(t.pnl??t.profit??0)>0);
   const lTrades=trades.filter(t=>+(t.pnl??t.profit??0)<0);
   const avgWin=W>0?wTrades.reduce((a,t)=>a+parseFloat(t.pnl??t.profit??0),0)/W:0;
   const avgLoss=L>0&&lTrades.length>0?lTrades.reduce((a,t)=>a+parseFloat(t.pnl??t.profit??0),0)/lTrades.length:0;
+  const profileOrder=['conservative','balanced','aggressive'].filter(k=>profiles[k]);
+  if(!profileOrder.length){
+    profiles.balanced={
+      label:'Balanced',
+      description:'Baseline profile estimate is unavailable yet.',
+      estimated_trades_per_day:0,
+      estimated_dd_pct:0,
+      effective_threshold_est:toNum((d.model||{}).threshold_effective??(d.model||{}).threshold),
+    };
+    profileOrder.push('balanced');
+  }
+  const serverProfileMode=String(d.profile_active||'').toLowerCase();
+  let activeProfileMode=profiles[serverProfileMode]?serverProfileMode:(State.profileMode?.[acct]||'balanced');
+  if(!profiles[activeProfileMode]) activeProfileMode=profileOrder[0];
+  if(!State.profileMode) State.profileMode={acc1:'balanced',acc2:'balanced'};
+  State.profileMode[acct]=activeProfileMode;
+  const activeProfile=profiles[activeProfileMode]||{};
+  const pfTxt=v=>v==null?'&#8212;':((+v)>=999?'&#8734;':fmt(v,2));
+  const isProfileApplying=!!(State.profileApplyBusy&&State.profileApplyBusy[acct]);
+  const applyingMode=(State.profileApplyMode&&State.profileApplyMode[acct])||'';
+  const profileBtns=profileOrder.map(mode=>{
+    const p=profiles[mode]||{};
+    const rawLabel=String(p.label||mode.toUpperCase());
+    const shownLabel=mode==='balanced'?`${rawLabel} (Base config)`:rawLabel;
+    const lbl=q(shownLabel);
+    const busy=isProfileApplying&&applyingMode===mode;
+    return `<button class="profile-btn ${activeProfileMode===mode?'active':''} ${busy?'busy':''}" data-profile="${mode}" ${isProfileApplying?'disabled':''}>${busy?'Applying...':lbl}</button>`;
+  }).join('');
+
+  const explainRows = rows => (rows||[]).map(row=>{
+    const net=toNum(row.net_pnl);
+    const wr=toNum(row.win_rate);
+    const pf=toNum(row.profit_factor);
+    return `<tr>
+      <td class="dim">${q(row.bucket)}</td>
+      <td class="dim">${row.trades??0}</td>
+      <td class="${(wr??0)>=0.5?'win':'loss'}">${wr==null?'&#8212;':pct(wr)}</td>
+      <td class="${clr(net)}">${dol(net)}</td>
+      <td class="dim">${pfTxt(pf)}</td>
+    </tr>`;
+  }).join('');
+  const sessionRows=explainRows(explain.session);
+  const regimeRows=explainRows(explain.regime);
+  const sideRows=explainRows(explain.side);
+  const matrixRows = payload => (payload?.rows||[]).map(row=>{
+    const net=toNum(row.net_pnl);
+    const wr=toNum(row.win_rate);
+    const pf=toNum(row.profit_factor);
+    const dd=toNum(row.max_drawdown_pct);
+    const recall=toNum(row.recall);
+    return `<tr>
+      <td class="dim">${q(row.session||'')}</td>
+      <td class="dim">${q(row.regime||'')}</td>
+      <td class="dim">${row.trades??0}</td>
+      <td class="${(wr??0)>=0.5?'win':'loss'}">${wr==null?'&#8212;':pct(wr)}</td>
+      <td class="${(pf??0)>=1?'win':'loss'}">${pf==null?'&#8212;':(pf>=999?'&#8734;':fmt(pf,2))}</td>
+      <td class="${(dd??0)>20?'loss':(dd??0)>10?'muted':'win'}">${dd==null?'&#8212;':fmt(dd,2)+'%'}</td>
+      <td class="${(recall??0)>=0.5?'win':'muted'}">${recall==null?'&#8212;':pct(recall)}</td>
+      <td class="${clr(net)}">${dol(net)}</td>
+    </tr>`;
+  }).join('');
+  const m7=matrixRows(matrix.rolling_7d);
+  const m30=matrixRows(matrix.rolling_30d);
+  const leaks7=(matrix.rolling_7d?.leakage_hotspots||[]).slice(0,3).map(r=>`${r.session}/${r.regime}: ${dol(r.net_pnl)}`).join(' · ');
+  const leaks30=(matrix.rolling_30d?.leakage_hotspots||[]).slice(0,3).map(r=>`${r.session}/${r.regime}: ${dol(r.net_pnl)}`).join(' · ');
+  const estTradesPerDay=toNum(activeProfile.estimated_trades_per_day);
+  const estDd=toNum(activeProfile.estimated_dd_pct);
+  const estThr=toNum(activeProfile.effective_threshold_est);
+  const ddCls=estDd==null?'dim':(estDd<=20?'win':estDd<=28?'muted':'loss');
+
   const trRows=trades.slice().reverse().map((t,i)=>{
     const pnl=t.pnl??t.profit??null;
     const cum=series.values[series.values.length-1-i];
@@ -1702,6 +2124,58 @@ function renderPnl(acct,d){
     ${statBox('Win Rate',pct(d.win_rate))}
     ${statBox('Avg Win','$'+avgWin.toFixed(2),'win')}
     ${statBox('Avg Loss','$'+Math.abs(avgLoss).toFixed(2),'loss')}
+  </div>
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-ttl">&#9881; One-Tap Profile (Runtime Apply)</div>
+    <div class="profile-row">${profileBtns}</div>
+    <div class="g4" style="margin-top:10px">
+      ${statBox('Profile',q(activeProfileMode==='balanced'?`${String(activeProfile.label||'Balanced')} (Base config)`:String(activeProfile.label||activeProfileMode.toUpperCase())))}
+      ${statBox('Est. DD',estDd!=null?`${fmt(estDd,2)}%`:'&#8212;',ddCls)}
+      ${statBox('Est. Trades/Day',estTradesPerDay!=null?fmt(estTradesPerDay,2):'&#8212;')}
+      ${statBox('Threshold Est.',estThr!=null?fmt(estThr,4):'&#8212;')}
+    </div>
+    <div class="ssub" style="margin-top:8px">${q(activeProfile.description||'Profile estimates are derived from recent trade behavior and runtime thresholds.')} Muốn quay về cấu hình cũ: chọn <b>Balanced (Base config)</b>.${isProfileApplying?' Applying runtime profile...':''}</div>
+  </div>
+  <div class="split-2" style="margin-bottom:12px">
+    <div class="card">
+      <div class="card-ttl">&#127766; P&amp;L Explain — Session</div>
+      <div class="table-wrap"><table class="tbl">
+        <thead><tr><th>Bucket</th><th>Trades</th><th>Win Rate</th><th>Net PnL</th><th>PF</th></tr></thead>
+        <tbody>${sessionRows||'<tr><td colspan="5" class="dim" style="text-align:center;padding:14px">No session data</td></tr>'}</tbody>
+      </table></div>
+    </div>
+    <div class="card">
+      <div class="card-ttl">&#127754; P&amp;L Explain — Regime</div>
+      <div class="table-wrap"><table class="tbl">
+        <thead><tr><th>Bucket</th><th>Trades</th><th>Win Rate</th><th>Net PnL</th><th>PF</th></tr></thead>
+        <tbody>${regimeRows||'<tr><td colspan="5" class="dim" style="text-align:center;padding:14px">No regime data</td></tr>'}</tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-ttl">&#8646; P&amp;L Explain — Side</div>
+    <div class="table-wrap"><table class="tbl">
+      <thead><tr><th>Bucket</th><th>Trades</th><th>Win Rate</th><th>Net PnL</th><th>PF</th></tr></thead>
+      <tbody>${sideRows||'<tr><td colspan="5" class="dim" style="text-align:center;padding:14px">No side data</td></tr>'}</tbody>
+    </table></div>
+  </div>
+  <div class="split-2" style="margin-bottom:12px">
+    <div class="card">
+      <div class="card-ttl">&#128202; Regime × Session Matrix — Rolling 7D</div>
+      <div class="table-wrap"><table class="tbl">
+        <thead><tr><th>Session</th><th>Regime</th><th>Trades</th><th>WR</th><th>PF</th><th>DD</th><th>Recall</th><th>Net</th></tr></thead>
+        <tbody>${m7||'<tr><td colspan="8" class="dim" style="text-align:center;padding:14px">No data for 7D</td></tr>'}</tbody>
+      </table></div>
+      <div class="ssub" style="margin-top:8px">Leak hotspots: ${q(leaks7||'None')}</div>
+    </div>
+    <div class="card">
+      <div class="card-ttl">&#128200; Regime × Session Matrix — Rolling 30D</div>
+      <div class="table-wrap"><table class="tbl">
+        <thead><tr><th>Session</th><th>Regime</th><th>Trades</th><th>WR</th><th>PF</th><th>DD</th><th>Recall</th><th>Net</th></tr></thead>
+        <tbody>${m30||'<tr><td colspan="8" class="dim" style="text-align:center;padding:14px">No data for 30D</td></tr>'}</tbody>
+      </table></div>
+      <div class="ssub" style="margin-top:8px">Leak hotspots: ${q(leaks30||'None')}</div>
+    </div>
   </div>
   <div class="card" style="margin-bottom:12px">
     <div class="card-ttl">Live Equity Curve</div>
@@ -1841,6 +2315,9 @@ const State={
   data:null,
   acct:'acc1',
   sec:{acc1:'overview',acc2:'overview'},
+  profileMode:{acc1:'balanced',acc2:'balanced'},
+  profileApplyBusy:{acc1:false,acc2:false},
+  profileApplyMode:{acc1:'',acc2:''},
   signalLimit:10,
   mood:'matrix',
   compact:false,
@@ -1900,8 +2377,127 @@ function updateUI(data){
   const ts=(data.ts||'').replace('T',' ').slice(0,19)+' UTC';
   ['pc-ts','mob-ts'].forEach(id=>{ const e=el(id); if(e) e.textContent=ts; });
   _checkAlerts(data);
+  // Update sidebar SC labels dynamically from runtime config
+  ['acc1','acc2'].forEach(a=>{
+    const rt=(data?.accounts?.[a]?.runtime)||{};
+    const sc=toNum(rt.sideway_min_confidence);
+    const modelName=a==='acc1'?'COMBO133':'V14PP';
+    const subEl=el(`sb-acct-sub-${a}`);
+    if(subEl&&sc!=null) subEl.textContent=`${modelName} · sc=${sc.toFixed(2)}`;
+  });
   ['acc1','acc2'].forEach(a=>{ if((data.accounts||{})[a]) switchSection(a,State.sec[a]); });
   renderSunnyDeck();
+}
+
+async function _fetchDashboardNow(){
+  const r=await fetch('/api/v1/dashboard',{cache:'no-store'});
+  let payload=null;
+  try{ payload=await r.json(); }catch(_){ payload=null; }
+  if(!r.ok){
+    const detail=(payload&&payload.detail)?String(payload.detail):`HTTP ${r.status}`;
+    throw new Error(detail);
+  }
+  updateUI(payload);
+  return payload;
+}
+
+let _profileModalResolver=null;
+function _closeProfileModal(ok){
+  const modal=el('profile-modal');
+  if(!modal) return;
+  modal.classList.remove('show');
+  modal.setAttribute('aria-hidden','true');
+  document.body.classList.remove('modal-open');
+  const resolve=_profileModalResolver;
+  _profileModalResolver=null;
+  if(resolve) resolve(!!ok);
+}
+
+function showProfileConfirmModal(ctx){
+  const modal=el('profile-modal');
+  if(!modal){
+    const fallbackText=[
+      `Xác nhận áp dụng profile ${String(ctx.label||ctx.mode||'').toUpperCase()} cho ${String(ctx.account||'').toUpperCase()}?`,
+      `Est. DD: ${ctx.estDdText||'n/a'}`,
+      `Est. Trades/Day: ${ctx.estTradesText||'n/a'}`,
+      `Threshold Est.: ${ctx.estThresholdText||'n/a'}`,
+      'Bot sẽ hot-reload runtime ngay và gửi Telegram xác nhận.'
+    ].join('\n');
+    return Promise.resolve(window.confirm(fallbackText));
+  }
+  const ttl=el('pm-title'); if(ttl) ttl.textContent=`Apply ${String(ctx.label||ctx.mode||'Profile')} cho ${String(ctx.account||'').toUpperCase()}?`;
+  const desc=el('pm-desc'); if(desc) desc.textContent=String(ctx.description||'Profile này sẽ đổi runtime config ngay, bot không cần restart.');
+  const vAcc=el('pm-v-account'); if(vAcc) vAcc.textContent=String(ctx.account||'').toUpperCase();
+  const vMode=el('pm-v-profile'); if(vMode) vMode.textContent=String(ctx.label||ctx.mode||'').toUpperCase();
+  const vDD=el('pm-v-dd'); if(vDD) vDD.textContent=String(ctx.estDdText||'n/a');
+  const vTpd=el('pm-v-trades'); if(vTpd) vTpd.textContent=String(ctx.estTradesText||'n/a');
+  const vThr=el('pm-v-threshold'); if(vThr) vThr.textContent=String(ctx.estThresholdText||'n/a');
+
+  modal.classList.add('show');
+  modal.setAttribute('aria-hidden','false');
+  document.body.classList.add('modal-open');
+
+  return new Promise(resolve=>{ _profileModalResolver=resolve; });
+}
+
+async function applyProfileOneTap(mode){
+  const acct=State.acct;
+  const d=State.data?.accounts?.[acct];
+  if(!d) return;
+  if(!State.profileApplyBusy) State.profileApplyBusy={acc1:false,acc2:false};
+  if(!State.profileApplyMode) State.profileApplyMode={acc1:'',acc2:''};
+  if(State.profileApplyBusy[acct]) return;
+
+  const profiles=d.profile_presets||{};
+  const preset=profiles[mode]||{};
+  const ddVal=toNum(preset.estimated_dd_pct);
+  const tradeVal=toNum(preset.estimated_trades_per_day);
+  const thrVal=toNum(preset.effective_threshold_est);
+  const profileLabel=mode==='balanced'?`${String(preset.label||mode)} (Base config)`:String(preset.label||mode);
+  const confirmed=await showProfileConfirmModal({
+    account:acct,
+    mode:mode,
+    label:profileLabel,
+    description:preset.description||'Đổi runtime profile ngay lập tức cho bot đang chạy.',
+    estDdText:ddVal!=null?`${fmt(ddVal,2)}%`:'n/a',
+    estTradesText:tradeVal!=null?fmt(tradeVal,2):'n/a',
+    estThresholdText:thrVal!=null?fmt(thrVal,4):'n/a',
+  });
+  if(!confirmed) return;
+
+  State.profileApplyBusy[acct]=true;
+  State.profileApplyMode[acct]=mode;
+  switchSection(acct,State.sec[acct]);
+
+  try{
+    const resp=await fetch('/api/v1/profile/apply',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        account:acct,
+        profile:mode,
+        source:'dashboard_ui',
+        requested_by:'local_user',
+      }),
+    });
+    let payload={};
+    try{ payload=await resp.json(); }catch(_){ payload={}; }
+    if(!resp.ok){
+      throw new Error(String(payload.detail||`HTTP ${resp.status}`));
+    }
+
+    const tg=payload.telegram_sent?'Telegram xác nhận đã gửi.':'Không gửi được Telegram (kiểm tra token/chat_id).';
+    showAlert('info',`Profile Applied [${acct.toUpperCase()}]`,`${mode.toUpperCase()} · ${tg}`,7000);
+    await _fetchDashboardNow();
+  }catch(err){
+    showAlert('danger',`Apply Failed [${acct.toUpperCase()}]`,String(err?.message||err),8000);
+  }finally{
+    State.profileApplyBusy[acct]=false;
+    State.profileApplyMode[acct]='';
+    if(State.data?.accounts?.[acct]){
+      switchSection(acct,State.sec[acct]);
+    }
+  }
 }
 
 function applyMood(mood){
@@ -1947,9 +2543,34 @@ document.addEventListener('click',e=>{
 });
 
 document.addEventListener('click',e=>{
-  const moodBtn=e.target.closest('[data-mood]');
-  if(moodBtn){
-    applyMood(moodBtn.dataset.mood);
+  if(e.target.closest('[data-profile-modal-confirm]')){
+    _closeProfileModal(true);
+    return;
+  }
+  if(e.target.closest('[data-profile-modal-close]')){
+    _closeProfileModal(false);
+    return;
+  }
+  if(e.target.id==='profile-modal'){
+    _closeProfileModal(false);
+  }
+});
+
+document.addEventListener('keydown',e=>{
+  if(e.key!=='Escape') return;
+  const modal=el('profile-modal');
+  if(modal&&modal.classList.contains('show')){
+    _closeProfileModal(false);
+  }
+});
+
+document.addEventListener('click',e=>{
+  const profileBtn=e.target.closest('[data-profile]');
+  if(profileBtn){
+    const mode=profileBtn.dataset.profile;
+    if(mode){
+      void applyProfileOneTap(mode);
+    }
     return;
   }
   const quickBtn=e.target.closest('.quick-btn');
@@ -2130,6 +2751,129 @@ document.body.classList.toggle('compact',State.compact);
 if(el('signal-limit-text')) el('signal-limit-text').textContent=`${State.signalLimit} rows`;
 if(el('signal-limit-bubble')) el('signal-limit-bubble').textContent=`${State.signalLimit} rows`;
 
+/* ═══ AUTO-TRADE CONFIRM MODAL ═══ */
+let _atModalResolver=null;
+function _closeAtModal(ok){
+  const modal=el('at-modal');
+  if(!modal) return;
+  modal.classList.remove('show');
+  modal.setAttribute('aria-hidden','true');
+  document.body.classList.remove('modal-open');
+  const resolve=_atModalResolver;
+  _atModalResolver=null;
+  if(resolve) resolve(!!ok);
+}
+function showAutoTradeConfirmModal(acct,enabled){
+  const modal=el('at-modal');
+  if(!modal) return Promise.resolve(window.confirm(`${enabled?'BẬT':'TẮT'} Auto Trade cho ${acct.toUpperCase()}?`));
+  const titleEl=el('at-modal-title');
+  const descEl=el('at-modal-desc');
+  const acctEl=el('at-modal-acct');
+  const actionEl=el('at-modal-action');
+  if(titleEl) titleEl.textContent=`${enabled?'Bật':'Tắt'} Auto Trade — ${acct.toUpperCase()}?`;
+  if(descEl) descEl.textContent=enabled
+    ?'Bot sẽ tự động đặt lệnh khi có tín hiệu đủ điều kiện. Hành động này ảnh hưởng trực tiếp đến tài khoản thực.'
+    :'Bot sẽ DỪNG đặt lệnh mới. Các lệnh đang mở KHÔNG bị đóng.';
+  if(acctEl) acctEl.textContent=acct.toUpperCase();
+  if(actionEl){actionEl.textContent=enabled?'AUTO ON ✓':'AUTO OFF ✗';actionEl.style.color=enabled?'var(--green)':'var(--red)';}
+  modal.classList.add('show');
+  modal.setAttribute('aria-hidden','false');
+  document.body.classList.add('modal-open');
+  return new Promise(resolve=>{_atModalResolver=resolve;});
+}
+document.addEventListener('click',e=>{
+  if(e.target.closest('[data-at-modal-confirm]')){_closeAtModal(true);return;}
+  if(e.target.closest('[data-at-modal-close]')){_closeAtModal(false);return;}
+  if(e.target.id==='at-modal') _closeAtModal(false);
+});
+document.addEventListener('keydown',e=>{
+  if(e.key!=='Escape') return;
+  const modal=el('at-modal');
+  if(modal&&modal.classList.contains('show')) _closeAtModal(false);
+});
+
+/* ═══ AUTO-TRADE TOGGLE ═══ */
+async function setAutoTrade(acct, enabled){
+  const confirmed=await showAutoTradeConfirmModal(acct,enabled);
+  if(!confirmed) return;
+  const btnOn=el(`btn-at-${acct}-on`);
+  const btnOff=el(`btn-at-${acct}-off`);
+  if(btnOn) btnOn.disabled=true;
+  if(btnOff) btnOff.disabled=true;
+  try{
+    const r=await fetch(`/api/v1/auto-trade/${acct}?enabled=${enabled}`,{method:'POST'});
+    const d=await r.json();
+    if(!r.ok) throw new Error(d.detail||`HTTP ${r.status}`);
+    showAlert('info',`Auto Trade ${enabled?'ON':'OFF'} [${acct.toUpperCase()}]`,`Updated. Telegram: ${d.telegram_sent?'✓ sent':'not sent'}`,5000);
+    if(btnOn) btnOn.classList.toggle('active',enabled===true);
+    if(btnOff) btnOff.classList.toggle('active',enabled===false);
+    const atEl=el('auto-trade-status');
+    if(atEl){
+      const prev=atEl.textContent;
+      const re=new RegExp(acct.toUpperCase()+':\\S+');
+      atEl.textContent=prev.replace(re,`${acct.toUpperCase()}:${enabled?'ON':'OFF'}`);
+    }
+  }catch(err){
+    showAlert('danger',`Auto Trade Failed [${acct.toUpperCase()}]`,String(err?.message||err),7000);
+  }finally{
+    if(btnOn) btnOn.disabled=false;
+    if(btnOff) btnOff.disabled=false;
+  }
+}
+
+/* ═══ KILL SWITCH RESET ═══ */
+async function resetKillSwitch(acct){
+  const btn=el(`btn-ks-${acct}`);
+  if(btn) btn.disabled=true;
+  try{
+    const r=await fetch(`/api/v1/reset-kill-switch/${acct}`,{method:'POST'});
+    const d=await r.json();
+    if(!r.ok) throw new Error(d.detail||`HTTP ${r.status}`);
+    showAlert('info',`Kill Switch Reset [${acct.toUpperCase()}]`,`Consecutive losses → 0, Cooldown → 0. Telegram: ${d.telegram_sent?'✓ sent':'not sent'}`,6000);
+    if(btn){btn.classList.remove('active');btn.style.color='';}
+    const ksEl=el('ks-status');
+    if(ksEl){ksEl.textContent='Normal';ksEl.style.color='';}
+    await _fetchDashboardNow();
+  }catch(err){
+    showAlert('danger',`Kill Switch Reset Failed [${acct.toUpperCase()}]`,String(err?.message||err),7000);
+  }finally{
+    if(btn) btn.disabled=false;
+  }
+}
+
+/* ═══ TUNNEL URL → TELEGRAM ═══ */
+async function sendTunnelUrl(){
+  const btn=el('btn-tg-url');
+  const resultEl=el('tg-url-result');
+  if(btn) btn.disabled=true;
+  if(resultEl){resultEl.style.display='block';resultEl.textContent='Detecting tunnel URL…';}
+  try{
+    const r=await fetch('/api/v1/tunnel-url');
+    const d=await r.json();
+    if(!d.url){
+      if(resultEl){resultEl.textContent='No tunnel URL found in logs.';resultEl.style.color='var(--text3)';}
+      showAlert('warn','Tunnel URL','No trycloudflare.com URL found in outputs/.',4000);
+      return;
+    }
+    const dashUrl=`${d.url}/dashboard`;
+    if(resultEl){resultEl.textContent=`URL: ${dashUrl}`;resultEl.style.color='var(--green)';}
+    const msg=`📡 <b>Dashboard URL</b>\n${dashUrl}`;
+    const sr=await fetch('/api/v1/send-telegram',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({text:msg}),
+    });
+    const sd=await sr.json();
+    showAlert('info','Tunnel URL Detected',`${dashUrl} · ${sd.sent?`Sent to Telegram (${(sd.accounts||[]).join(', ')})`:'URL found, Telegram not configured'}`,9000);
+  }catch(err){
+    if(resultEl){resultEl.textContent='Error: '+String(err?.message||err);}
+    showAlert('danger','Tunnel URL Error',String(err?.message||err),6000);
+  }finally{
+    if(btn) btn.disabled=false;
+    setTimeout(()=>{if(resultEl)resultEl.style.display='none';},20000);
+  }
+}
+
 /* ═══ DATA TRANSPORT: WebSocket with HTTP polling fallback ═══ */
 let _pollTimer=null;
 function _startPoll(){
@@ -2170,6 +2914,70 @@ function _stopPoll(){if(_pollTimer){clearInterval(_pollTimer);_pollTimer=null;}}
 _fetchNews();
 setInterval(_fetchNews, 5 * 60 * 1000);
 </script>
+<div id="at-modal" class="pm-backdrop" aria-hidden="true">
+  <div class="pm-card" role="dialog" aria-modal="true">
+    <div class="pm-head">
+      <div class="pm-kicker">⚠ Xác nhận thao tác</div>
+      <button class="pm-x" type="button" data-at-modal-close>&times;</button>
+    </div>
+    <div class="pm-body">
+      <div id="at-modal-title" class="pm-title">Thay đổi trạng thái Auto Trade?</div>
+      <div id="at-modal-desc" class="pm-desc">Hành động này ảnh hưởng trực tiếp đến tài khoản thực. Xác nhận trước khi tiếp tục.</div>
+      <div class="pm-grid">
+        <div class="pm-box">
+          <div class="pm-lbl">Tài khoản</div>
+          <div id="at-modal-acct" class="pm-val">ACC1</div>
+        </div>
+        <div class="pm-box">
+          <div class="pm-lbl">Trạng thái mới</div>
+          <div id="at-modal-action" class="pm-val" style="color:var(--green)">AUTO ON ✓</div>
+        </div>
+      </div>
+    </div>
+    <div class="pm-foot">
+      <button class="pm-btn" type="button" data-at-modal-close>Hủy bỏ</button>
+      <button class="pm-btn ok" type="button" data-at-modal-confirm>Xác nhận</button>
+    </div>
+  </div>
+</div>
+<div id="profile-modal" class="pm-backdrop" aria-hidden="true">
+  <div class="pm-card" role="dialog" aria-modal="true" aria-labelledby="pm-title">
+    <div class="pm-head">
+      <div class="pm-kicker">Runtime Profile Apply</div>
+      <button class="pm-x" type="button" data-profile-modal-close>&times;</button>
+    </div>
+    <div class="pm-body">
+      <div id="pm-title" class="pm-title">Apply profile?</div>
+      <div id="pm-desc" class="pm-desc">This action will update runtime config and hot-reload bot immediately.</div>
+      <div class="pm-grid">
+        <div class="pm-box">
+          <div class="pm-lbl">Account</div>
+          <div id="pm-v-account" class="pm-val">ACC1</div>
+        </div>
+        <div class="pm-box">
+          <div class="pm-lbl">Profile</div>
+          <div id="pm-v-profile" class="pm-val">Balanced</div>
+        </div>
+        <div class="pm-box">
+          <div class="pm-lbl">Estimated DD</div>
+          <div id="pm-v-dd" class="pm-val">n/a</div>
+        </div>
+        <div class="pm-box">
+          <div class="pm-lbl">Estimated Trades/Day</div>
+          <div id="pm-v-trades" class="pm-val">n/a</div>
+        </div>
+        <div class="pm-box" style="grid-column:1/-1">
+          <div class="pm-lbl">Threshold Estimate</div>
+          <div id="pm-v-threshold" class="pm-val">n/a</div>
+        </div>
+      </div>
+    </div>
+    <div class="pm-foot">
+      <button class="pm-btn" type="button" data-profile-modal-close>Cancel</button>
+      <button class="pm-btn ok" type="button" data-profile-modal-confirm>Apply Profile</button>
+    </div>
+  </div>
+</div>
 <div id="toast-ctr"></div>
 </body>
 </html>

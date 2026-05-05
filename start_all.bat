@@ -95,7 +95,7 @@ docker ps --format "  {{.Names}}  {{.Status}}" 2>&1 >> %LOG%
 
 call :log ""
 call :log "=== SERVICE URLS ==="
-call :log "  Streamlit   : http://localhost:8501"
+call :log "  Dashboard   : http://localhost:8000/dashboard"
 call :log "  FastAPI     : http://localhost:8000/docs"
 call :log "  MLflow      : http://localhost:5000"
 call :log "  MinIO UI    : http://localhost:9001  (minioadmin / minioadmin123)"

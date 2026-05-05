@@ -508,3 +508,151 @@ def swing_failure_pattern(frame: pd.DataFrame, lookback: int = 20) -> pd.Series:
 
     return (bullish_sfp - bearish_sfp).fillna(0).astype(int)
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# v5 Indicators — Enhanced ICT & Wyckoff (missing concepts)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def breaker_block(frame: pd.DataFrame, lookback: int = 20) -> pd.Series:
+    """ICT Breaker Block: Order Block that FAILS and becomes opposite zone.
+    When a bullish OB fails (price breaks below it), the OB zone flips to resistance.
+    When a bearish OB fails (price breaks above it), the OB zone flips to support.
+    Returns: +1=bullish breaker (old bearish OB now support), -1=bearish breaker, 0=none."""
+    ob = order_block(frame, lookback)
+    close = frame["close"]
+    n = len(frame)
+    result = np.zeros(n, dtype=np.int8)
+    # Track recent OB zones
+    recent_bull_ob_low = np.full(n, np.nan)
+    recent_bear_ob_high = np.full(n, np.nan)
+    for i in range(1, n):
+        # Carry forward last OB level
+        recent_bull_ob_low[i] = recent_bull_ob_low[i - 1]
+        recent_bear_ob_high[i] = recent_bear_ob_high[i - 1]
+        if ob.iat[i] > 0:  # bullish OB formed
+            recent_bull_ob_low[i] = frame["low"].iat[i - 1]  # OB zone = previous candle low
+        elif ob.iat[i] < 0:  # bearish OB formed
+            recent_bear_ob_high[i] = frame["high"].iat[i - 1]
+        # Check for breaks: bullish OB fails → bearish breaker
+        if np.isfinite(recent_bull_ob_low[i]) and close.iat[i] < recent_bull_ob_low[i]:
+            result[i] = -1
+            recent_bull_ob_low[i] = np.nan  # consumed
+        # bearish OB fails → bullish breaker
+        if np.isfinite(recent_bear_ob_high[i]) and close.iat[i] > recent_bear_ob_high[i]:
+            result[i] = 1
+            recent_bear_ob_high[i] = np.nan
+    return pd.Series(result, index=frame.index)
+
+
+def silver_bullet_setup(frame: pd.DataFrame) -> pd.Series:
+    """ICT Silver Bullet: specific time windows with FVG + displacement.
+    Windows (UTC): 03:00-04:00 (Asian), 10:00-11:00 (London), 14:00-15:00 (NY).
+    Setup = inside Silver Bullet window + FVG present + displacement confirms.
+    Returns: +1=bullish SB setup, -1=bearish SB setup, 0=none."""
+    hours = pd.to_datetime(frame["time"], utc=True).dt.hour
+    in_sb_window = hours.isin([3, 10, 14])
+    fvg = fair_value_gap(frame, decay_bars=5)
+    disp = displacement(frame, atr_multiple=1.2)
+    # SB requires FVG + displacement in same direction during window
+    bullish = (in_sb_window & (fvg > 0.3) & (disp > 0)).astype(int)
+    bearish = (in_sb_window & (fvg < -0.3) & (disp < 0)).astype(int)
+    return (bullish - bearish).fillna(0).astype(int)
+
+
+def session_open_bias(frame: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
+    """London Open & NY PM session dynamics.
+    London Open (07-08 UTC): compares Asian range to determine breakout direction.
+    NY PM (13-14 UTC): compares London range to determine continuation/reversal.
+    Returns: (london_open_bias, ny_pm_bias) each +1/-1/0."""
+    hours = pd.to_datetime(frame["time"], utc=True).dt.hour
+    close = frame["close"]
+    high = frame["high"]
+    low = frame["low"]
+    n = len(frame)
+
+    london_bias = np.zeros(n, dtype=np.int8)
+    ny_bias = np.zeros(n, dtype=np.int8)
+
+    # Rolling session stats
+    asian_high = high.where(hours.between(0, 6)).ffill()
+    asian_low = low.where(hours.between(0, 6)).ffill()
+    london_high = high.where(hours.between(7, 12)).ffill()
+    london_low = low.where(hours.between(7, 12)).ffill()
+
+    # London Open: breakout above/below Asian range
+    at_london = hours.between(7, 8)
+    london_bias = np.where(
+        at_london & (close > asian_high), 1,
+        np.where(at_london & (close < asian_low), -1, 0)
+    )
+
+    # NY PM: breakout above/below London range
+    at_ny_pm = hours.between(13, 14)
+    ny_bias = np.where(
+        at_ny_pm & (close > london_high), 1,
+        np.where(at_ny_pm & (close < london_low), -1, 0)
+    )
+
+    return (
+        pd.Series(london_bias, index=frame.index).fillna(0).astype(int),
+        pd.Series(ny_bias, index=frame.index).fillna(0).astype(int),
+    )
+
+
+def reaccumulation_signal(frame: pd.DataFrame, lookback: int = 30) -> pd.Series:
+    """Wyckoff Re-accumulation/Re-distribution:
+    After a trend move, price consolidates (low volatility) then resumes.
+    Re-accumulation: uptrend → consolidation (ATR contracts) → spring-like bounce → continue up.
+    Re-distribution: downtrend → consolidation → upthrust-like rejection → continue down.
+    Returns: +1=re-accumulation (bullish continuation), -1=re-distribution, 0=none."""
+    close = frame["close"]
+    atr_val = atr(frame, 14)
+    atr_slow = atr_val.rolling(lookback).mean()
+    atr_ratio = (atr_val / atr_slow.replace(0, np.nan)).fillna(1.0)
+
+    # Trend detection: EMA direction
+    trend = np.sign(ema(close, 20) - ema(close, 50))
+
+    # Consolidation: ATR contracted (ratio < 0.7)
+    consolidating = atr_ratio < 0.70
+
+    # Spring/expansion breakout from consolidation
+    expansion = atr_ratio.diff() > 0.15  # volatility expanding again
+
+    # Re-accumulation: uptrend + consolidation + expansion breakout upward
+    reaccum = (
+        (trend > 0) &
+        consolidating.shift(1).fillna(False) &
+        expansion &
+        (close > close.shift(1))
+    ).astype(int)
+
+    # Re-distribution: downtrend + consolidation + expansion breakout downward
+    redist = (
+        (trend < 0) &
+        consolidating.shift(1).fillna(False) &
+        expansion &
+        (close < close.shift(1))
+    ).astype(int)
+
+    return (reaccum - redist).fillna(0).astype(int)
+
+
+def wyckoff_effort_result(frame: pd.DataFrame, lookback: int = 14) -> pd.Series:
+    """Wyckoff Effort vs Result: compares volume effort to price movement.
+    High effort (volume) + small result (price move) = absorption → reversal likely.
+    High effort + big result = momentum → continuation.
+    Returns: float -1 to +1. Positive = effort confirms result (momentum).
+    Negative = effort diverges from result (potential reversal)."""
+    vol = frame.get("tick_volume", frame.get("volume", pd.Series(0, index=frame.index)))
+    price_move = (frame["close"] - frame["open"]).abs()
+    avg_vol = vol.rolling(lookback).mean().replace(0, np.nan)
+    avg_move = price_move.rolling(lookback).mean().replace(0, np.nan)
+    vol_effort = (vol / avg_vol).fillna(1.0)
+    move_result = (price_move / avg_move).fillna(1.0)
+    # Effort matches result: momentum; effort diverges: absorption/reversal
+    direction = np.sign(frame["close"] - frame["open"])
+    harmony = (move_result / vol_effort.clip(lower=0.3)).clip(0, 3.0)
+    score = direction * np.tanh((harmony - 1.0) * 2.0)
+    return score.fillna(0).clip(-1, 1)
+

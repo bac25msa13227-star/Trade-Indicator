@@ -3,6 +3,12 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+try:
+    from numba import njit as _njit
+    _HAS_NUMBA = True
+except ImportError:
+    _HAS_NUMBA = False
+
 from xauusd_ai.config import Settings
 from xauusd_ai.data.news_features import attach_news_features
 from xauusd_ai.features.indicators import (
@@ -15,6 +21,9 @@ from xauusd_ai.features.indicators import (
     pullback_depth, atr_expansion, wick_rejection,
     volume_surge, close_position_in_range, macd_hist_acceleration,
     volume_delta_momentum, institutional_candle_score, swing_failure_pattern,
+    # v5: Enhanced ICT & Wyckoff
+    breaker_block, silver_bullet_setup, session_open_bias,
+    reaccumulation_signal, wyckoff_effort_result,
 )
 
 
@@ -41,6 +50,8 @@ FEATURE_COLUMNS = [
     "trend_alignment",
     "rsi",
     "macd_hist",
+    "atr",               # ATR absolute value (needed for slippage calculation)
+    "atr_mean",          # ATR rolling mean (for volatility normalization)
     "atr_ratio",
     "range_efficiency",
     "liquidity_sweep",
@@ -86,7 +97,15 @@ FEATURE_COLUMNS = [
     "vol_delta_momentum",   # Bookmap-inspired volume delta momentum
     "inst_candle_score",    # Institutional candle detection score -1..+1
     "swing_failure",        # ICT Swing Failure Pattern +1=bullish -1=bearish
-    # --- v5: Meta-features for cleaner execution timing (3) ---
+    # --- v5: Enhanced ICT concepts (3) ---
+    "h4_breaker_block",     # ICT Breaker Block: failed OB flips to opposite zone
+    "silver_bullet_setup",  # ICT Silver Bullet: FVG+displacement in SB windows
+    "london_open_bias",     # London Open session breakout direction
+    "ny_pm_bias",           # NY PM session continuation/reversal bias
+    # --- v5b: Enhanced Wyckoff concepts (2) ---
+    "reaccumulation",       # Wyckoff Re-accumulation/Re-distribution continuation
+    "effort_vs_result",     # Wyckoff effort vs result (volume/price divergence)
+    # --- v5c: Meta-features for cleaner execution timing (3) ---
     "trend_strength_score", # Trend quality from consensus + ADX + H4 premium/discount
     "pullback_quality",     # Pullback entry quality around 50% retracement + rejection
     "execution_quality",    # Breakout/continuation quality from candle structure + flow
@@ -105,6 +124,21 @@ def _build_date_mask(series: pd.Series, start: str | None, end: str | None) -> p
     return mask
 
 
+def get_label_lookahead_bars(settings: Settings) -> int:
+    """Return the maximum forward-look bars used by labeling logic.
+
+    Rows in the tail of a train split can leak into the test window when labels
+    require future bars (label_horizon / SLTP horizon). Callers should drop this
+    many rows from the end of train before fitting.
+    """
+    base_horizon = int(getattr(settings.training, "label_horizon", 1) or 1)
+    lookahead = max(base_horizon, 1)
+    if bool(getattr(settings.training, "use_sltp_label", True)):
+        sltp_horizon = int(getattr(settings.training, "sltp_label_max_horizon", lookahead) or lookahead)
+        lookahead = max(lookahead, sltp_horizon)
+    return max(lookahead, 1)
+
+
 def _enrich_execution_frame(settings: Settings, frame: pd.DataFrame) -> pd.DataFrame:
     enriched = frame.copy()
     enriched["returns"] = enriched["close"].pct_change().fillna(0)
@@ -117,11 +151,29 @@ def _enrich_execution_frame(settings: Settings, frame: pd.DataFrame) -> pd.DataF
     )
     enriched["macd_hist"] = macd_hist.fillna(0)
     enriched["atr"] = atr(enriched).bfill().fillna(0)
-    enriched["atr_ratio"] = (enriched["atr"] / enriched["close"]).fillna(0)
+    # ATR ratio: current ATR vs rolling mean (for volatility regime detection)
+    atr_mean = enriched["atr"].rolling(50, min_periods=10).mean().fillna(enriched["atr"])
+    enriched["atr_mean"] = atr_mean
+    enriched["atr_ratio"] = (enriched["atr"] / atr_mean.replace(0, np.nan)).fillna(1.0)
     enriched["range_efficiency"] = (
         (enriched["close"] - enriched["open"]).abs() / (enriched["high"] - enriched["low"]).replace(0, np.nan)
     ).fillna(0)
     enriched["tick_volume_zscore"] = zscore(enriched["tick_volume"], 20).fillna(0)
+    
+    # Spread estimation for XAUUSD (typical: 0.2-0.6 pips depending on session)
+    # Asian: 0.4-0.6, London/NY: 0.2-0.3 pips
+    hour = enriched["time"].dt.hour
+    base_spread = pd.Series(0.3, index=enriched.index)  # Default 0.3 pips
+    # Wider spread during Asian session (22:00-08:00 UTC) and low liquidity hours
+    asian_mask = (hour >= 22) | (hour < 8)
+    base_spread[asian_mask] = 0.5
+    # Tighter spread during London/NY overlap (13:00-16:00 UTC)
+    overlap_mask = (hour >= 13) & (hour < 16)
+    base_spread[overlap_mask] = 0.25
+    # Adjust for volatility: higher ATR = wider spread
+    volatility_factor = 1.0 + (enriched["atr_ratio"] - enriched["atr_ratio"].rolling(50).mean()) * 2.0
+    enriched["spread_points"] = (base_spread * volatility_factor.fillna(1.0)).clip(0.2, 1.0).fillna(0.3)
+    
     enriched["session_return"] = enriched["close"].pct_change(12).fillna(0)
     # NEW: Bollinger Band position
     bb_upper, bb_mid, bb_lower = bollinger_bands(enriched["close"], 20)
@@ -157,6 +209,8 @@ def _enrich_execution_frame(settings: Settings, frame: pd.DataFrame) -> pd.DataF
     enriched["vol_delta_momentum"] = volume_delta_momentum(enriched, fast=5, slow=20)
     enriched["inst_candle_score"] = institutional_candle_score(enriched, lookback=14)
     enriched["swing_failure"] = swing_failure_pattern(enriched, lookback=20)
+    # Volume imbalance: proxy for buy/sell pressure (close relative to range)
+    enriched["volume_imbalance"] = ((enriched["close"] - enriched["low"]) / (enriched["high"] - enriched["low"]).replace(0, np.nan) - 0.5).fillna(0)
     return enriched
 
 
@@ -191,10 +245,15 @@ def _merge_context(settings: Settings, frames: dict[str, pd.DataFrame]) -> pd.Da
         [1, -1],
         default=0,
     )
+    # ── Regime detection: use rolling atr_percentile (self-normalising)
+    # Raw atr_ratio depends on price level (gold $300→$5000) and timeframe (M5 vs M15),
+    # causing ~70%+ bars to be misclassified as "sideway" at current prices.
+    # atr_percentile = rolling 100-bar rank (0-1) → price-agnostic, timeframe-agnostic.
+    # Config thresholds are now interpreted as percentile cutoffs (e.g. 0.20 / 0.80).
     merged["volatility_regime"] = np.select(
         [
-            merged["atr_ratio"] <= settings.strategy.sideways_volatility_threshold,
-            merged["atr_ratio"] >= settings.strategy.strong_volatility_threshold,
+            merged["atr_percentile"] <= settings.strategy.sideways_volatility_threshold,
+            merged["atr_percentile"] >= settings.strategy.strong_volatility_threshold,
         ],
         [0, 2],
         default=1,
@@ -257,6 +316,23 @@ def _merge_context(settings: Settings, frames: dict[str, pd.DataFrame]) -> pd.Da
     # ── M15 time-based ICT entry features ─────────────────────────────
     merged["kill_zone_flag"]     = kill_zone(merged)
     merged["judas_swing_signal"] = judas_swing(merged)
+
+    # ── v5: Enhanced ICT features on M15 ─────────────────────────────
+    merged["silver_bullet_setup"] = silver_bullet_setup(merged)
+    london_bias, ny_bias = session_open_bias(merged)
+    merged["london_open_bias"] = london_bias
+    merged["ny_pm_bias"] = ny_bias
+    merged["reaccumulation"] = reaccumulation_signal(merged, lookback=30)
+    merged["effort_vs_result"] = wyckoff_effort_result(merged, lookback=14)
+
+    # ── v5: H4 Breaker Block (ICT structure timeframe) ───────────────
+    h4_frame["h4_breaker_block"] = breaker_block(h4_frame, lookback=20)
+    merged = pd.merge_asof(
+        merged.sort_values("time"),
+        h4_frame[["time", "h4_breaker_block"]].sort_values("time"),
+        on="time",
+    )
+    merged["h4_breaker_block"] = merged["h4_breaker_block"].fillna(0)
 
     # ── News awareness features (5 features, rule-based + ForexFactory) ──
     merged = attach_news_features(
@@ -349,6 +425,144 @@ def _expected_direction_from_context(dataset: pd.DataFrame) -> pd.Series:
     return expected.replace(0, 1)
 
 
+# ── Numba-accelerated SL/TP label & RR computation ──────────────────────────
+# These replace the Python for-loops with compiled machine code (50-100× faster)
+# while preserving EXACT numerical equivalence.
+if _HAS_NUMBA:
+    @_njit(cache=True)
+    def _sltp_label_numba(closes, highs, lows, opens_arr, atrs, directions,
+                           tp_levels, sl_levels, n, max_horizon):
+        labels = np.zeros(n, dtype=np.int8)
+        for i in range(n - max_horizon):
+            atr_val = atrs[i]
+            if not np.isfinite(atr_val) or atr_val <= 0.0:
+                continue
+            direction = directions[i]
+            tp = tp_levels[i]
+            sl = sl_levels[i]
+            tp_first = max_horizon + 1
+            sl_first = max_horizon + 1
+            if direction > 0:  # BUY
+                for j in range(max_horizon):
+                    idx = i + 1 + j
+                    if tp_first > max_horizon and highs[idx] >= tp:
+                        tp_first = j
+                    if sl_first > max_horizon and lows[idx] <= sl:
+                        sl_first = j
+                    if tp_first <= max_horizon and sl_first <= max_horizon:
+                        break
+            else:  # SELL
+                for j in range(max_horizon):
+                    idx = i + 1 + j
+                    if tp_first > max_horizon and lows[idx] <= tp:
+                        tp_first = j
+                    if sl_first > max_horizon and highs[idx] >= sl:
+                        sl_first = j
+                    if tp_first <= max_horizon and sl_first <= max_horizon:
+                        break
+            # Intra-bar tiebreaker
+            if tp_first == sl_first and tp_first < max_horizon + 1:
+                bar_idx = i + 1 + tp_first
+                if bar_idx < n:
+                    bar_bullish = closes[bar_idx] > opens_arr[bar_idx]
+                    if (direction > 0 and bar_bullish) or (direction < 0 and not bar_bullish):
+                        tp_first = sl_first + 1
+                    else:
+                        sl_first = tp_first + 1
+            if tp_first < sl_first:
+                labels[i] = 1
+        return labels
+
+    @_njit(cache=True)
+    def _sltp_realized_rr_numba(closes, highs, lows, opens_arr, atrs, directions,
+                                 slipped_closes, tp_levels, sl_levels,
+                                 actual_tp_rr, sl_mult, n, max_horizon):
+        rr_out = np.zeros(n, dtype=np.float64)
+        bars_out = np.full(n, max_horizon, dtype=np.int32)
+        peak_rr_out = np.zeros(n, dtype=np.float64)
+        for i in range(n - 1):
+            atr_val = atrs[i]
+            if not np.isfinite(atr_val) or atr_val <= 0.0:
+                continue
+            direction = directions[i]
+            if direction == 0.0:
+                continue
+            tp = tp_levels[i]
+            sl = sl_levels[i]
+            sl_distance = atr_val * sl_mult
+            end = min(i + max_horizon + 1, n)
+            horizon_len = end - (i + 1)
+            if horizon_len <= 0:
+                continue
+            tp_first = max_horizon + 1
+            sl_first = max_horizon + 1
+            if direction > 0:  # BUY
+                for j in range(horizon_len):
+                    idx = i + 1 + j
+                    if tp_first > max_horizon and highs[idx] >= tp:
+                        tp_first = j
+                    if sl_first > max_horizon and lows[idx] <= sl:
+                        sl_first = j
+                    if tp_first <= max_horizon and sl_first <= max_horizon:
+                        break
+            else:  # SELL
+                for j in range(horizon_len):
+                    idx = i + 1 + j
+                    if tp_first > max_horizon and lows[idx] <= tp:
+                        tp_first = j
+                    if sl_first > max_horizon and highs[idx] >= sl:
+                        sl_first = j
+                    if tp_first <= max_horizon and sl_first <= max_horizon:
+                        break
+            # Intra-bar tiebreaker
+            if tp_first == sl_first and tp_first < max_horizon + 1:
+                bar_idx = i + 1 + tp_first
+                if bar_idx < n:
+                    bar_bullish = closes[bar_idx] > opens_arr[bar_idx]
+                    if (direction > 0 and bar_bullish) or (direction < 0 and not bar_bullish):
+                        tp_first = sl_first + 1
+                    else:
+                        sl_first = tp_first + 1
+            # Peak RR (max favorable excursion before exit)
+            exit_bar_rel = min(min(tp_first, sl_first), horizon_len - 1)
+            if sl_distance > 0.0 and exit_bar_rel >= 0 and horizon_len > 0:
+                if direction > 0:
+                    best_price = highs[i + 1]
+                    for j in range(1, exit_bar_rel + 1):
+                        v = highs[i + 1 + j]
+                        if v > best_price:
+                            best_price = v
+                    mfe = best_price - slipped_closes[i]
+                else:
+                    best_price = lows[i + 1]
+                    for j in range(1, exit_bar_rel + 1):
+                        v = lows[i + 1 + j]
+                        if v < best_price:
+                            best_price = v
+                    mfe = slipped_closes[i] - best_price
+                peak_rr_out[i] = max(0.0, mfe / sl_distance)
+            # Outcome
+            if tp_first < sl_first:
+                rr_out[i] = actual_tp_rr
+                bars_out[i] = tp_first + 1
+            elif sl_first <= max_horizon:
+                rr_out[i] = -1.0
+                bars_out[i] = sl_first + 1
+            else:
+                # Timeout: partial RR from close at horizon
+                last_idx = min(i + max_horizon, n - 1)
+                price_change = (closes[last_idx] - closes[i]) * direction
+                if sl_distance > 0.0:
+                    partial_rr = price_change / sl_distance
+                    if partial_rr < -1.0:
+                        partial_rr = -1.0
+                    elif partial_rr > actual_tp_rr:
+                        partial_rr = actual_tp_rr
+                    rr_out[i] = partial_rr
+                bars_out[i] = min(max_horizon, n - 1 - i)
+        return rr_out, bars_out, peak_rr_out
+
+
 def _build_sltp_label(dataset: pd.DataFrame, settings: "Settings") -> pd.Series:
     """
     SL/TP Race label: for each row, simulate forward price action and check
@@ -365,13 +579,24 @@ def _build_sltp_label(dataset: pd.DataFrame, settings: "Settings") -> pd.Series:
     closes = dataset["close"].values.astype(float)
     highs = dataset["high"].values.astype(float)
     lows = dataset["low"].values.astype(float)
+    opens_arr = dataset["open"].values.astype(float)
     atrs = dataset["atr"].values.astype(float)
     directions = dataset["expected_direction"].values.astype(float)
 
-    tp_levels = closes + directions * atrs * tp_rr
-    sl_levels = closes - directions * atrs * sl_mult
+    entry_slip_frac = float(getattr(settings.risk, "entry_slippage_atr_frac", 0.0))
+    slipped_closes = closes + directions * atrs * entry_slip_frac
+    tp_levels = slipped_closes + directions * atrs * tp_rr
+    sl_levels = slipped_closes - directions * atrs * sl_mult
 
     n = len(dataset)
+
+    # ── Numba fast path (exact same logic, compiled to machine code) ──
+    if _HAS_NUMBA:
+        labels = _sltp_label_numba(closes, highs, lows, opens_arr, atrs, directions,
+                                    tp_levels, sl_levels, n, max_horizon)
+        return pd.Series(labels, index=dataset.index)
+
+    # ── Python fallback ──
     labels = np.zeros(n, dtype=np.int8)
 
     for i in range(n - max_horizon):
@@ -391,43 +616,77 @@ def _build_sltp_label(dataset: pd.DataFrame, settings: "Settings") -> pd.Series:
             sl_idx = np.where(future_h >= sl)[0]
         tp_first = tp_idx[0] if len(tp_idx) > 0 else max_horizon + 1
         sl_first = sl_idx[0] if len(sl_idx) > 0 else max_horizon + 1
+        # Intra-bar tiebreaker: when same bar hits both SL and TP,
+        # use candle body direction to infer price path sequence.
+        # Bullish bar (close > open): low prints before high → BUY SL sweeps first.
+        # Bearish bar (close < open): high prints before low → SELL SL sweeps first.
+        if tp_first == sl_first and tp_first < max_horizon + 1:
+            bar_idx = i + 1 + int(tp_first)
+            if bar_idx < n:
+                bar_bullish = closes[bar_idx] > opens_arr[bar_idx]
+                if (direction > 0 and bar_bullish) or (direction < 0 and not bar_bullish):
+                    tp_first = sl_first + 1  # SL wins
+                else:
+                    sl_first = tp_first + 1  # TP wins
         if tp_first < sl_first:
             labels[i] = 1
 
     return pd.Series(labels, index=dataset.index)
 
 
-def _compute_sltp_realized_rr(dataset: pd.DataFrame, settings: "Settings") -> tuple[pd.Series, pd.Series]:
+def _compute_sltp_realized_rr(dataset: pd.DataFrame, settings: "Settings") -> tuple[pd.Series, pd.Series, pd.Series]:
     """
-    SL/TP Race — compute realistic realized RR and holding bars for each row.
-    Uses identical TP/SL levels as _build_sltp_label().
+    SL/TP Race — compute realistic realized RR, holding bars, and peak RR for each row.
+    Uses the LIVE take_profit_rr for TP level (not label_tp_rr) so the sim matches
+    actual execution: TP at take_profit_rr × ATR, SL at stop_loss_atr_multiple × ATR.
+    Note: _build_sltp_label() still uses label_tp_rr (lower) to generate richer training
+    labels — this function is for sim execution realism only.
 
-    Returns: (realized_rr, bars_held)
+    Returns: (realized_rr, bars_held, peak_rr)
       - realized_rr: +actual_rr if TP hit first, -1.0 if SL hit first,
                      or partial RR at timeout
       - bars_held:   number of bars until exit (1-based, max=max_horizon)
+      - peak_rr:     max favorable excursion in R-multiples before exit (for trailing SL sim)
     """
     max_horizon = int(getattr(settings.training, "sltp_label_max_horizon", 32))
-    _label_rr = float(getattr(settings.training, "label_tp_rr", 0.0))
-    tp_rr_mult = _label_rr if _label_rr > 0 else float(settings.risk.take_profit_rr)
+    # Use live take_profit_rr (e.g. 3.5) — NOT label_tp_rr (e.g. 1.5) — so concurrent sim
+    # reflects actual trade execution: TP at 3.5×ATR, giving realized_rr = 3.5/1.5 = 2.33R.
+    tp_rr_mult = float(settings.risk.take_profit_rr)
     sl_mult = float(settings.risk.stop_loss_atr_multiple)
 
     closes = dataset["close"].values.astype(float)
     highs = dataset["high"].values.astype(float)
     lows = dataset["low"].values.astype(float)
+    opens_arr = dataset["open"].values.astype(float)
     atrs = dataset["atr"].values.astype(float)
     directions = dataset["expected_direction"].values.astype(float)
 
-    # Same levels as _build_sltp_label
-    tp_levels = closes + directions * atrs * tp_rr_mult
-    sl_levels = closes - directions * atrs * sl_mult
+    entry_slip_frac = float(getattr(settings.risk, "entry_slippage_atr_frac", 0.0))
+    # Same levels as _build_sltp_label (with entry slippage applied)
+    slipped_closes = closes + directions * atrs * entry_slip_frac
+    tp_levels = slipped_closes + directions * atrs * tp_rr_mult
+    sl_levels = slipped_closes - directions * atrs * sl_mult
 
     # Actual RR when TP is hit (in R-multiples where 1R = SL distance)
     actual_tp_rr = tp_rr_mult / sl_mult if sl_mult > 0 else tp_rr_mult
 
     n = len(dataset)
+
+    # ── Numba fast path (exact same logic, compiled to machine code) ──
+    if _HAS_NUMBA:
+        rr_out, bars_out, peak_rr_out = _sltp_realized_rr_numba(
+            closes, highs, lows, opens_arr, atrs, directions,
+            slipped_closes, tp_levels, sl_levels,
+            actual_tp_rr, sl_mult, n, max_horizon,
+        )
+        return (pd.Series(rr_out, index=dataset.index),
+                pd.Series(bars_out, index=dataset.index),
+                pd.Series(peak_rr_out, index=dataset.index))
+
+    # ── Python fallback ──
     rr_out = np.zeros(n, dtype=np.float64)
     bars_out = np.full(n, max_horizon, dtype=np.int32)
+    peak_rr_out = np.zeros(n, dtype=np.float64)
 
     for i in range(n - 1):
         atr_val = atrs[i]
@@ -453,6 +712,28 @@ def _compute_sltp_realized_rr(dataset: pd.DataFrame, settings: "Settings") -> tu
 
         tp_first = tp_idx[0] if len(tp_idx) > 0 else max_horizon + 1
         sl_first = sl_idx[0] if len(sl_idx) > 0 else max_horizon + 1
+        # Intra-bar tiebreaker: same logic as _build_sltp_label
+        if tp_first == sl_first and tp_first < max_horizon + 1:
+            bar_idx = i + 1 + int(tp_first)
+            if bar_idx < n:
+                bar_bullish = closes[bar_idx] > opens_arr[bar_idx]
+                if (direction > 0 and bar_bullish) or (direction < 0 and not bar_bullish):
+                    tp_first = sl_first + 1  # SL wins
+                else:
+                    sl_first = tp_first + 1  # TP wins
+
+        # Compute peak favorable excursion (in R-multiples) before exit
+        _exit_bar = min(int(min(tp_first, sl_first)), len(future_h) - 1) if len(future_h) > 0 else 0
+        if sl_distance > 0 and _exit_bar >= 0 and len(future_h) > 0:
+            _bars_to_check = future_h[:_exit_bar + 1]
+            _bars_to_check_l = future_l[:_exit_bar + 1]
+            if direction > 0:
+                _best_price = np.max(_bars_to_check) if len(_bars_to_check) > 0 else slipped_closes[i]
+                _mfe = (_best_price - slipped_closes[i]) * direction
+            else:
+                _best_price = np.min(_bars_to_check_l) if len(_bars_to_check_l) > 0 else slipped_closes[i]
+                _mfe = (slipped_closes[i] - _best_price)
+            peak_rr_out[i] = max(0.0, _mfe / sl_distance)
 
         if tp_first < sl_first:
             rr_out[i] = actual_tp_rr
@@ -467,7 +748,7 @@ def _compute_sltp_realized_rr(dataset: pd.DataFrame, settings: "Settings") -> tu
             rr_out[i] = float(np.clip(price_change / sl_distance, -1.0, actual_tp_rr)) if sl_distance > 0 else 0.0
             bars_out[i] = min(max_horizon, n - 1 - i)
 
-    return pd.Series(rr_out, index=dataset.index), pd.Series(bars_out, index=dataset.index)
+    return pd.Series(rr_out, index=dataset.index), pd.Series(bars_out, index=dataset.index), pd.Series(peak_rr_out, index=dataset.index)
 
 
 def _session_spread_multiplier(hours: pd.Series) -> pd.Series:
@@ -512,9 +793,10 @@ def prepare_training_dataset(settings: Settings, frames: dict[str, pd.DataFrame]
         dataset["target"] = np.where(directional_return > settings.training.min_return_threshold, 1, 0)
 
     # P0: Realistic realized_rr via SL/TP bar-by-bar race (replaces fixed-horizon)
-    sltp_rr, sltp_bars = _compute_sltp_realized_rr(dataset, settings)
+    sltp_rr, sltp_bars, sltp_peak_rr = _compute_sltp_realized_rr(dataset, settings)
     dataset["realized_rr"] = sltp_rr
     dataset["bars_held"] = sltp_bars
+    dataset["peak_rr"] = sltp_peak_rr
 
     # P1a: Session-aware spread multiplier
     _hours = pd.to_datetime(dataset["time"], utc=True).dt.hour
@@ -570,4 +852,10 @@ def build_live_feature_frame(settings: Settings, frames: dict[str, pd.DataFrame]
     merged = _merge_context(settings, frames)
     strategy_output = strategy.annotate_dataset(merged)
     dataset = merged.join(strategy_output)
-    return dataset.dropna(subset=FEATURE_COLUMNS).reset_index(drop=True)
+    dataset = dataset.dropna(subset=FEATURE_COLUMNS).reset_index(drop=True)
+    # Compute blended direction signal (same formula as WF dataset) so live bot
+    # uses 9-indicator consensus instead of raw strategy_score sign alone.
+    dataset["trade_side"] = np.where(
+        _expected_direction_from_context(dataset) > 0, "buy", "sell"
+    )
+    return dataset

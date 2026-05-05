@@ -20,7 +20,12 @@ from xauusd_ai.config import Settings, load_settings
 from xauusd_ai.data.market_data import MarketDataService
 from xauusd_ai.execution.mt5_executor import MT5Executor
 from xauusd_ai.execution.risk import RiskManager
-from xauusd_ai.features.dataset import build_live_feature_frame, prepare_training_dataset, build_merged_context
+from xauusd_ai.features.dataset import (
+    build_live_feature_frame,
+    build_merged_context,
+    get_label_lookahead_bars,
+    prepare_training_dataset,
+)
 from xauusd_ai.learning.self_learner import SelfLearner
 from xauusd_ai.model.trainer import ModelTrainer
 from xauusd_ai.notifications.telegram import TelegramNotifier
@@ -446,6 +451,7 @@ def run_walkforward(settings: Settings) -> None:
         candidate_settings.risk.min_confidence = min_confidence
         candidate_settings.training.label_horizon = label_horizon
         candidate_settings.training.min_return_threshold = return_threshold
+        label_lookahead = get_label_lookahead_bars(candidate_settings)
 
         trainer = ModelTrainer(candidate_settings)
         strategy = HybridStrategy(candidate_settings)
@@ -466,6 +472,13 @@ def run_walkforward(settings: Settings) -> None:
             test_end = train_end + test_size
             fold_train = dataset.iloc[fold_start:train_end].copy()
             fold_test = dataset.iloc[train_end:test_end].copy()
+
+            # Purge train tail to avoid train labels consuming bars from test range.
+            if label_lookahead > 0:
+                if len(fold_train) <= label_lookahead + 50:
+                    continue
+                fold_train = fold_train.iloc[:-label_lookahead].copy()
+
             if len(fold_train) < 200 or len(fold_test) < 50:
                 continue
 
@@ -728,12 +741,22 @@ def run_live_loop(settings: Settings) -> None:
     _config_mtime: float = _cp.stat().st_mtime if _cp and _cp.exists() else 0.0
     _tunnel_url_mtime: float = 0.0
     _tunnel_url_sent: str = ""  # track last URL sent to avoid duplicate notifications
+    _profile_base: dict[str, float | int] = {}
+    _runtime_profile_mode: str = "balanced"
+    _profile_override_mtime: float = 0.0
+    _auto_rollback_last_ts: float = 0.0
+    _auto_rollback_count: int = 0
+    _auto_rollback_last_reason: str = ""
+    _auto_rollback_last_from: str = ""
+    _data_health_last_alert_ts: dict[str, float] = {}
+    _last_data_health_report: dict[str, object] = {"active_alerts": [], "metrics": {}}
 
     def _maybe_reload_config() -> None:
         """Reload toggleable settings from YAML without restart."""
         nonlocal settings, _config_mtime, _exit_model, news_crawler
         nonlocal _market_gate_enabled, _market_stale_seconds
         nonlocal _market_preopen_alert_minutes_list, _market_preclose_alert_minutes_list
+        nonlocal _profile_base, _runtime_profile_mode
         if not _config_path or not Path(_config_path).exists():
             return
         try:
@@ -748,7 +771,12 @@ def run_live_loop(settings: Settings) -> None:
             settings.execution.dca.enabled = new_settings.execution.dca.enabled
             settings.execution.close_opposite_on_signal = new_settings.execution.close_opposite_on_signal
             settings.risk.risk_per_trade = new_settings.risk.risk_per_trade
+            settings.risk.min_confidence = new_settings.risk.min_confidence
             settings.risk.max_open_positions = new_settings.risk.max_open_positions
+            settings.risk.max_risk_fraction = new_settings.risk.max_risk_fraction
+            settings.risk.max_total_exposure_pct = new_settings.risk.max_total_exposure_pct
+            settings.risk.consecutive_loss_pause_count = new_settings.risk.consecutive_loss_pause_count
+            settings.risk.consecutive_loss_cooldown_bars = new_settings.risk.consecutive_loss_cooldown_bars
             settings.risk.take_profit_rr = new_settings.risk.take_profit_rr
             settings.risk.stop_loss_atr_multiple = new_settings.risk.stop_loss_atr_multiple
             settings.risk.reentry_guard_enabled = new_settings.risk.reentry_guard_enabled
@@ -756,6 +784,8 @@ def run_live_loop(settings: Settings) -> None:
             settings.risk.reentry_min_distance_atr = new_settings.risk.reentry_min_distance_atr
             settings.strategy.signal_threshold = new_settings.strategy.signal_threshold
             settings.strategy.min_strategy_score = new_settings.strategy.min_strategy_score
+            settings.strategy.sideway_min_confidence = new_settings.strategy.sideway_min_confidence
+            settings.strategy.volatile_min_confidence = new_settings.strategy.volatile_min_confidence
             settings.strategy.force_trade = new_settings.strategy.force_trade
             settings.strategy.blocked_hours_utc = new_settings.strategy.blocked_hours_utc
             settings.strategy.blocked_weekdays_utc = new_settings.strategy.blocked_weekdays_utc
@@ -765,6 +795,23 @@ def run_live_loop(settings: Settings) -> None:
             settings.market.market_preclose_alert_minutes = new_settings.market.market_preclose_alert_minutes
             settings.market.market_preopen_alert_minutes_list = new_settings.market.market_preopen_alert_minutes_list
             settings.market.market_preclose_alert_minutes_list = new_settings.market.market_preclose_alert_minutes_list
+            settings.admin.canary.enabled = new_settings.admin.canary.enabled
+            settings.admin.canary.volume_fraction = new_settings.admin.canary.volume_fraction
+            settings.admin.canary.min_lot = new_settings.admin.canary.min_lot
+            settings.admin.auto_rollback.enabled = new_settings.admin.auto_rollback.enabled
+            settings.admin.auto_rollback.rollback_profile = new_settings.admin.auto_rollback.rollback_profile
+            settings.admin.auto_rollback.daily_dd_trigger_pct = new_settings.admin.auto_rollback.daily_dd_trigger_pct
+            settings.admin.auto_rollback.consecutive_losses_trigger = new_settings.admin.auto_rollback.consecutive_losses_trigger
+            settings.admin.auto_rollback.cooldown_seconds = new_settings.admin.auto_rollback.cooldown_seconds
+            settings.admin.data_health.enabled = new_settings.admin.data_health.enabled
+            settings.admin.data_health.alert_cooldown_seconds = new_settings.admin.data_health.alert_cooldown_seconds
+            settings.admin.data_health.missing_bar_gap_factor = new_settings.admin.data_health.missing_bar_gap_factor
+            settings.admin.data_health.stale_tick_alert_seconds = new_settings.admin.data_health.stale_tick_alert_seconds
+            settings.admin.data_health.spread_spike_multiplier = new_settings.admin.data_health.spread_spike_multiplier
+            settings.admin.data_health.spread_spike_abs_points = new_settings.admin.data_health.spread_spike_abs_points
+            settings.admin.data_health.spread_lookback_bars = new_settings.admin.data_health.spread_lookback_bars
+            settings.admin.data_health.bridge_feed_divergence_points = new_settings.admin.data_health.bridge_feed_divergence_points
+            settings.admin.data_health.only_when_market_open = new_settings.admin.data_health.only_when_market_open
             _market_gate_enabled = bool(settings.market.enforce_market_open_gate)
             _market_stale_seconds = max(int(settings.market.market_tick_stale_seconds), 30)
             _market_preopen_alert_minutes_list = _normalize_alert_minutes(
@@ -798,6 +845,9 @@ def run_live_loop(settings: Settings) -> None:
             elif not new_settings.integrations.news.enabled:
                 news_crawler = None
             settings.integrations.news.enabled = new_settings.integrations.news.enabled
+            _profile_base = _capture_profile_base()
+            if _runtime_profile_mode != "balanced":
+                _apply_runtime_profile_mode(_runtime_profile_mode, source="config_reload", notify=False)
             LOGGER.info("Config hot-reloaded from %s", _config_path)
             notifier.send_message("🔄 <b>Config reloaded</b> — thay đổi đã áp dụng (không cần restart)")
         except Exception as exc:
@@ -836,6 +886,475 @@ def run_live_loop(settings: Settings) -> None:
     _ENTRY_SNAPSHOT_FILE = Path(f"outputs/entry_snapshot_tracker_{_state_suffix}.json")
     # Re-entry guard state after SL, per side.
     _REENTRY_GUARD_FILE = Path(f"outputs/reentry_guard_{_state_suffix}.json")
+    _PROFILE_OVERRIDE_FILE = Path(f"outputs/runtime_profile_override_{_state_suffix}.json")
+
+    def _capture_profile_base() -> dict[str, float | int]:
+        return {
+            "signal_threshold": float(settings.strategy.signal_threshold),
+            "risk_min_confidence": float(settings.risk.min_confidence),
+            "risk_per_trade": float(settings.risk.risk_per_trade),
+            "max_risk_fraction": float(settings.risk.max_risk_fraction),
+            "max_total_exposure_pct": float(settings.risk.max_total_exposure_pct),
+            "max_open_positions": int(settings.risk.max_open_positions),
+            "min_strategy_score": float(settings.strategy.min_strategy_score),
+            "sideway_min_confidence": float(settings.strategy.sideway_min_confidence),
+            "volatile_min_confidence": float(settings.strategy.volatile_min_confidence),
+            "cooldown_count": int(settings.risk.consecutive_loss_pause_count),
+            "cooldown_bars": int(settings.risk.consecutive_loss_cooldown_bars),
+        }
+
+    def _clamp(value: float, lo: float, hi: float) -> float:
+        return max(lo, min(hi, value))
+
+    def _apply_runtime_profile_mode(mode: str, source: str = "runtime_override", notify: bool = True) -> bool:
+        nonlocal _runtime_profile_mode
+        mode_norm = str(mode or "").strip().lower()
+        if mode_norm not in {"conservative", "balanced", "aggressive"}:
+            return False
+        if not _profile_base:
+            return False
+
+        base = _profile_base
+        if mode_norm == "balanced":
+            settings.strategy.signal_threshold = float(base["signal_threshold"])
+            settings.risk.min_confidence = float(base["risk_min_confidence"])
+            settings.risk.risk_per_trade = float(base["risk_per_trade"])
+            settings.risk.max_risk_fraction = float(base["max_risk_fraction"])
+            settings.risk.max_total_exposure_pct = float(base["max_total_exposure_pct"])
+            settings.risk.max_open_positions = int(base["max_open_positions"])
+            settings.strategy.min_strategy_score = float(base["min_strategy_score"])
+            settings.strategy.sideway_min_confidence = float(base["sideway_min_confidence"])
+            settings.strategy.volatile_min_confidence = float(base["volatile_min_confidence"])
+            settings.risk.consecutive_loss_pause_count = int(base["cooldown_count"])
+            settings.risk.consecutive_loss_cooldown_bars = int(base["cooldown_bars"])
+        else:
+            profile_map = {
+                "conservative": {
+                    "threshold_delta": 0.05,
+                    "min_conf_delta": 0.05,
+                    "risk_mult": 0.65,
+                    "max_risk_mult": 0.7,
+                    "exposure_mult": 0.72,
+                    "max_pos_delta": -1,
+                    "strategy_mult": 1.20,
+                    "side_conf_delta": 0.04,
+                    "vol_conf_delta": 0.04,
+                    "cooldown_mult": 1.35,
+                },
+                "aggressive": {
+                    "threshold_delta": -0.05,
+                    "min_conf_delta": -0.05,
+                    "risk_mult": 1.35,
+                    "max_risk_mult": 1.25,
+                    "exposure_mult": 1.30,
+                    "max_pos_delta": 1,
+                    "strategy_mult": 0.85,
+                    "side_conf_delta": -0.05,
+                    "vol_conf_delta": -0.04,
+                    "cooldown_mult": 0.75,
+                },
+            }
+            rule = profile_map[mode_norm]
+            settings.strategy.signal_threshold = _clamp(
+                float(base["signal_threshold"]) + float(rule["threshold_delta"]),
+                0.50,
+                0.99,
+            )
+            settings.risk.min_confidence = _clamp(
+                float(base["risk_min_confidence"]) + float(rule["min_conf_delta"]),
+                0.50,
+                0.99,
+            )
+            settings.risk.risk_per_trade = _clamp(
+                float(base["risk_per_trade"]) * float(rule["risk_mult"]),
+                0.001,
+                0.20,
+            )
+            settings.risk.max_risk_fraction = _clamp(
+                float(base["max_risk_fraction"]) * float(rule["max_risk_mult"]),
+                0.005,
+                0.35,
+            )
+            settings.risk.max_total_exposure_pct = _clamp(
+                float(base["max_total_exposure_pct"]) * float(rule["exposure_mult"]),
+                0.01,
+                0.80,
+            )
+            settings.risk.max_open_positions = max(
+                1,
+                int(round(float(base["max_open_positions"]) + float(rule["max_pos_delta"]))),
+            )
+            settings.strategy.min_strategy_score = _clamp(
+                float(base["min_strategy_score"]) * float(rule["strategy_mult"]),
+                0.01,
+                1.00,
+            )
+            settings.strategy.sideway_min_confidence = _clamp(
+                float(base["sideway_min_confidence"]) + float(rule["side_conf_delta"]),
+                0.50,
+                0.99,
+            )
+            settings.strategy.volatile_min_confidence = _clamp(
+                float(base["volatile_min_confidence"]) + float(rule["vol_conf_delta"]),
+                0.50,
+                0.99,
+            )
+            settings.risk.consecutive_loss_pause_count = max(
+                1,
+                int(round(float(base["cooldown_count"]) * float(rule["cooldown_mult"]))),
+            )
+            settings.risk.consecutive_loss_cooldown_bars = max(
+                1,
+                int(round(float(base["cooldown_bars"]) * float(rule["cooldown_mult"]))),
+            )
+
+        _runtime_profile_mode = mode_norm
+        LOGGER.info(
+            "Runtime profile applied (%s) source=%s | thr=%.4f risk_conf=%.4f risk_per_trade=%.4f max_pos=%d",
+            mode_norm,
+            source,
+            settings.strategy.signal_threshold,
+            settings.risk.min_confidence,
+            settings.risk.risk_per_trade,
+            settings.risk.max_open_positions,
+        )
+        if notify:
+            notifier.send_message(
+                "🧭 <b>Runtime profile applied</b>\n"
+                f"├ Profile: <b>{mode_norm.capitalize()}</b> (source: {html.escape(str(source))})\n"
+                f"├ Threshold: {settings.strategy.signal_threshold:.4f} | Min confidence: {settings.risk.min_confidence:.4f}\n"
+                f"├ Risk/trade: {settings.risk.risk_per_trade:.4f} | Max positions: {settings.risk.max_open_positions}\n"
+                "└ Hot-reload: applied without restarting bot."
+            )
+        return True
+
+    def _maybe_reload_profile_override() -> None:
+        nonlocal _profile_override_mtime
+        if not _PROFILE_OVERRIDE_FILE.exists():
+            return
+        try:
+            cur_mtime = _PROFILE_OVERRIDE_FILE.stat().st_mtime
+            if cur_mtime <= _profile_override_mtime:
+                return
+            _profile_override_mtime = cur_mtime
+            raw = json.loads(_PROFILE_OVERRIDE_FILE.read_text(encoding="utf-8"))
+            mode = str(raw.get("profile", "")).strip().lower()
+            source = str(raw.get("source", "api")).strip() or "api"
+            _apply_runtime_profile_mode(mode, source=source, notify=True)
+        except Exception as exc:
+            LOGGER.warning("Runtime profile override reload failed: %s", exc)
+
+    _profile_base = _capture_profile_base()
+    if _PROFILE_OVERRIDE_FILE.exists():
+        try:
+            _profile_override_mtime = _PROFILE_OVERRIDE_FILE.stat().st_mtime
+            _startup_raw = json.loads(_PROFILE_OVERRIDE_FILE.read_text(encoding="utf-8"))
+            _startup_mode = str(_startup_raw.get("profile", "")).strip().lower()
+            _startup_source = str(_startup_raw.get("source", "startup_override")).strip() or "startup_override"
+            _apply_runtime_profile_mode(_startup_mode, source=_startup_source, notify=True)
+        except Exception as _startup_profile_exc:
+            LOGGER.warning("Runtime profile startup load failed: %s", _startup_profile_exc)
+
+    def _persist_runtime_profile_override(mode: str, source: str) -> None:
+        nonlocal _profile_override_mtime
+        try:
+            _PROFILE_OVERRIDE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            tmp = _PROFILE_OVERRIDE_FILE.with_suffix(".tmp")
+            tmp.write_text(
+                json.dumps(
+                    {
+                        "account": _account_tag,
+                        "profile": mode,
+                        "source": source,
+                        "requested_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            tmp.replace(_PROFILE_OVERRIDE_FILE)
+            _profile_override_mtime = _PROFILE_OVERRIDE_FILE.stat().st_mtime
+        except Exception as exc:
+            LOGGER.warning("Persist runtime profile override failed: %s", exc)
+
+    def _timeframe_seconds(tf: str) -> int:
+        tf_norm = str(tf or "").strip().upper()
+        mapping = {
+            "M1": 60,
+            "M5": 300,
+            "M15": 900,
+            "M30": 1800,
+            "H1": 3600,
+            "H4": 14400,
+            "D1": 86400,
+        }
+        return int(mapping.get(tf_norm, 300))
+
+    def _clone_order_plan_with_volume(plan: object, volume: float) -> object:
+        return type(plan)(
+            symbol=plan.symbol,
+            side=plan.side,
+            volume=volume,
+            entry_price=plan.entry_price,
+            stop_loss=plan.stop_loss,
+            take_profit=plan.take_profit,
+            confidence=plan.confidence,
+            reason=plan.reason,
+        )
+
+    def _apply_canary_volume(plan: object) -> tuple[object, dict[str, object]]:
+        cfg = settings.admin.canary
+        if not bool(cfg.enabled):
+            return plan, {
+                "enabled": False,
+                "applied": False,
+                "volume_fraction": 1.0,
+                "original_volume": _safe_float(getattr(plan, "volume", 0.0), 0.0),
+                "effective_volume": _safe_float(getattr(plan, "volume", 0.0), 0.0),
+            }
+        fraction = _clamp(_safe_float(cfg.volume_fraction, 1.0), 0.01, 1.0)
+        original = _safe_float(getattr(plan, "volume", 0.0), 0.0)
+        if original <= 0:
+            return plan, {
+                "enabled": True,
+                "applied": False,
+                "volume_fraction": fraction,
+                "original_volume": original,
+                "effective_volume": original,
+            }
+        effective = round(original * fraction / 0.01) * 0.01
+        min_lot = max(_safe_float(cfg.min_lot, 0.01), 0.01)
+        effective = max(min_lot, min(original, effective))
+        applied = abs(effective - original) > 1e-9
+        if not applied:
+            return plan, {
+                "enabled": True,
+                "applied": False,
+                "volume_fraction": fraction,
+                "original_volume": original,
+                "effective_volume": effective,
+            }
+        plan_adj = _clone_order_plan_with_volume(plan, effective)
+        return plan_adj, {
+            "enabled": True,
+            "applied": True,
+            "volume_fraction": fraction,
+            "original_volume": original,
+            "effective_volume": effective,
+        }
+
+    def _compute_daily_dd_pct(balance: float) -> float:
+        if balance <= 0:
+            return 0.0
+        daily_loss = max(_safe_float(getattr(risk_manager, "_daily_loss", 0.0), 0.0), 0.0)
+        return max(0.0, (daily_loss / max(balance, 1e-6)) * 100.0)
+
+    def _maybe_auto_rollback(balance: float) -> None:
+        nonlocal _auto_rollback_last_ts, _auto_rollback_count, _auto_rollback_last_reason, _auto_rollback_last_from
+        cfg = settings.admin.auto_rollback
+        if not bool(cfg.enabled):
+            return
+        rollback_mode = str(cfg.rollback_profile or "balanced").strip().lower()
+        if rollback_mode not in {"conservative", "balanced", "aggressive"}:
+            rollback_mode = "balanced"
+        if _runtime_profile_mode == rollback_mode:
+            return
+
+        cooldown_sec = max(_safe_int(cfg.cooldown_seconds, 1800), 60)
+        now_ts = time.time()
+        if now_ts - _auto_rollback_last_ts < cooldown_sec:
+            return
+
+        reasons: list[str] = []
+        daily_dd_pct = _compute_daily_dd_pct(balance)
+        daily_dd_trigger = _safe_float(cfg.daily_dd_trigger_pct, 0.0)
+        if daily_dd_trigger and daily_dd_trigger > 0 and daily_dd_pct >= daily_dd_trigger:
+            reasons.append(f"daily_dd={daily_dd_pct:.2f}% >= {daily_dd_trigger:.2f}%")
+        consec_trigger = _safe_int(cfg.consecutive_losses_trigger, 0)
+        consec_losses = _safe_int(getattr(risk_manager, "_consecutive_losses", 0), 0)
+        if consec_trigger > 0 and consec_losses >= consec_trigger:
+            reasons.append(f"consecutive_losses={consec_losses} >= {consec_trigger}")
+        if not reasons:
+            return
+
+        reason_text = " | ".join(reasons)
+        from_mode = _runtime_profile_mode
+        applied = _apply_runtime_profile_mode(rollback_mode, source=f"auto_rollback:{reason_text}", notify=True)
+        if not applied:
+            return
+        _auto_rollback_last_ts = now_ts
+        _auto_rollback_count += 1
+        _auto_rollback_last_reason = reason_text
+        _auto_rollback_last_from = from_mode
+        _persist_runtime_profile_override(rollback_mode, source="auto_rollback")
+        notifier.send_message(
+            "🛑 <b>Auto Rollback Triggered</b>\n"
+            f"├ From profile: <b>{from_mode.capitalize()}</b>\n"
+            f"├ To profile: <b>{rollback_mode.capitalize()}</b>\n"
+            f"├ Trigger: {html.escape(reason_text)}\n"
+            f"└ Count: {_auto_rollback_count}"
+        )
+
+    def _emit_data_health_alert(key: str, title: str, detail: str, severity: str = "warn") -> None:
+        nonlocal _data_health_last_alert_ts
+        cfg = settings.admin.data_health
+        cooldown = max(_safe_int(cfg.alert_cooldown_seconds, 900), 30)
+        now_ts = time.time()
+        last_ts = _data_health_last_alert_ts.get(key, 0.0)
+        if now_ts - last_ts < cooldown:
+            return
+        _data_health_last_alert_ts[key] = now_ts
+        icon = "⚠️" if severity == "warn" else "🚨"
+        notifier.send_message(
+            f"{icon} <b>Data Health: {html.escape(title)}</b>\n"
+            f"└ {html.escape(detail)}"
+        )
+
+    def _build_data_health_report(
+        execution_frame: pd.DataFrame,
+        latest_row: pd.Series,
+        market_state: dict[str, object],
+        market_is_open: bool,
+    ) -> dict[str, object]:
+        cfg = settings.admin.data_health
+        report: dict[str, object] = {
+            "enabled": bool(cfg.enabled),
+            "active_alerts": [],
+            "metrics": {},
+        }
+        if not bool(cfg.enabled):
+            return report
+
+        alerts: list[dict[str, object]] = []
+        metrics: dict[str, object] = {}
+
+        # Missing bar detection
+        expected_gap = _timeframe_seconds(settings.market.execution_timeframe)
+        bar_gap_sec = 0.0
+        if len(execution_frame) >= 2:
+            try:
+                _t_last = pd.to_datetime(execution_frame.iloc[-1]["time"], utc=True)
+                _t_prev = pd.to_datetime(execution_frame.iloc[-2]["time"], utc=True)
+                bar_gap_sec = max((_t_last - _t_prev).total_seconds(), 0.0)
+            except Exception:
+                bar_gap_sec = 0.0
+        metrics["bar_gap_sec"] = round(bar_gap_sec, 2)
+        metrics["expected_bar_gap_sec"] = expected_gap
+        gap_factor = max(_safe_float(cfg.missing_bar_gap_factor, 1.8), 1.0)
+        if bar_gap_sec > expected_gap * gap_factor and (market_is_open or not bool(cfg.only_when_market_open)):
+            alerts.append(
+                {
+                    "key": "missing_bars",
+                    "title": "MISSING_BARS",
+                    "detail": f"bar gap {bar_gap_sec:.0f}s > expected {expected_gap}s × {gap_factor:.2f}",
+                    "severity": "warn",
+                }
+            )
+
+        # Stale tick detection
+        tick_age = _safe_float(market_state.get("tick_age_sec"), 0.0)
+        metrics["tick_age_sec"] = round(tick_age, 2)
+        stale_threshold = max(_safe_int(cfg.stale_tick_alert_seconds, 300), 30)
+        if tick_age >= stale_threshold and (market_is_open or not bool(cfg.only_when_market_open)):
+            alerts.append(
+                {
+                    "key": "stale_tick",
+                    "title": "STALE_TICK",
+                    "detail": f"tick age {tick_age:.0f}s >= {stale_threshold}s",
+                    "severity": "warn",
+                }
+            )
+
+        # Spread spike detection (uses feed spread_points)
+        spread_now = _safe_float(latest_row.get("spread_points"), 0.0)
+        spread_source: object = None
+        if isinstance(execution_frame, pd.DataFrame):
+            spread_source = execution_frame["spread_points"] if "spread_points" in execution_frame.columns else None
+        elif isinstance(execution_frame, pd.Series):
+            spread_source = execution_frame.get("spread_points")
+        else:
+            try:
+                spread_source = execution_frame.get("spread_points")  # type: ignore[attr-defined]
+            except Exception:
+                spread_source = None
+        spread_num = pd.to_numeric(spread_source, errors="coerce")
+        if isinstance(spread_num, pd.Series):
+            spread_col = spread_num.fillna(0.0)
+        else:
+            spread_scalar = _safe_float(spread_num, 0.0)
+            frame_len = 1
+            try:
+                frame_len = max(int(len(execution_frame)), 1)
+            except Exception:
+                frame_len = 1
+            spread_col = pd.Series([spread_scalar] * frame_len, dtype="float64")
+        lookback = max(_safe_int(cfg.spread_lookback_bars, 50), 5)
+        spread_base = float(spread_col.tail(lookback).median()) if not spread_col.empty else 0.0
+        spread_mult = max(_safe_float(cfg.spread_spike_multiplier, 2.5), 1.0)
+        spread_abs = max(_safe_float(cfg.spread_spike_abs_points, 1.5), 0.0)
+        spread_limit = max(spread_abs, spread_base * spread_mult)
+        metrics["spread_now"] = round(spread_now, 4)
+        metrics["spread_base"] = round(spread_base, 4)
+        metrics["spread_limit"] = round(spread_limit, 4)
+        if spread_now > spread_limit and spread_limit > 0:
+            alerts.append(
+                {
+                    "key": "spread_spike",
+                    "title": "SPREAD_SPIKE",
+                    "detail": f"spread {spread_now:.3f} > limit {spread_limit:.3f} (base {spread_base:.3f})",
+                    "severity": "warn",
+                }
+            )
+
+        # Bridge vs feed divergence
+        divergence_thr = max(_safe_float(cfg.bridge_feed_divergence_points, 1.5), 0.0)
+        bridge_bid = 0.0
+        bridge_ask = 0.0
+        bridge_error = ""
+        try:
+            tick = executor.get_tick(settings.market.symbol)
+            bridge_bid = _safe_float(tick.get("bid"), 0.0)
+            bridge_ask = _safe_float(tick.get("ask"), 0.0)
+            bridge_error = str(tick.get("error", "") or "")
+        except Exception as exc:
+            bridge_error = str(exc)
+        feed_close = _safe_float(latest_row.get("close"), 0.0)
+        bridge_mid = 0.0
+        if bridge_bid > 0 and bridge_ask > 0:
+            bridge_mid = (bridge_bid + bridge_ask) / 2.0
+        elif bridge_bid > 0:
+            bridge_mid = bridge_bid
+        elif bridge_ask > 0:
+            bridge_mid = bridge_ask
+        divergence = abs(bridge_mid - feed_close) if bridge_mid > 0 and feed_close > 0 else 0.0
+        metrics["bridge_mid"] = round(bridge_mid, 4) if bridge_mid > 0 else 0.0
+        metrics["feed_close"] = round(feed_close, 4) if feed_close > 0 else 0.0
+        metrics["bridge_feed_divergence"] = round(divergence, 4)
+        metrics["bridge_error"] = bridge_error
+        if (
+            divergence_thr > 0
+            and divergence >= divergence_thr
+            and (market_is_open or not bool(cfg.only_when_market_open))
+        ):
+            alerts.append(
+                {
+                    "key": "bridge_feed_divergence",
+                    "title": "BRIDGE_FEED_DIVERGENCE",
+                    "detail": f"|bridge-feed| {divergence:.3f} >= {divergence_thr:.3f}",
+                    "severity": "critical",
+                }
+            )
+
+        for alert in alerts:
+            _emit_data_health_alert(
+                key=str(alert.get("key", "health")),
+                title=str(alert.get("title", "DATA_HEALTH")),
+                detail=str(alert.get("detail", "")),
+                severity=str(alert.get("severity", "warn")),
+            )
+        report["active_alerts"] = alerts
+        report["metrics"] = metrics
+        return report
 
     def _load_rsi_tracker() -> dict[int, float]:
         try:
@@ -1051,6 +1570,7 @@ def run_live_loop(settings: Settings) -> None:
     # ── Live closed trades log ────────────────────────────────────────────────
     _live_trades_path = Path(settings.app.live_closed_trades_path)
     _live_trades_path.parent.mkdir(parents=True, exist_ok=True)
+    _trade_journal_path = _live_trades_path.with_name(f"trade_journal_{_state_suffix}.jsonl")
     _live_trades_header = "time,ticket,side,volume,open_price,close_price,profit,swap,commission,pnl,is_win,close_type,session_id\n"
     # Preserve history across restarts -- only write header for a brand-new file
     if not _live_trades_path.exists() or _live_trades_path.stat().st_size == 0:
@@ -1124,11 +1644,224 @@ def run_live_loop(settings: Settings) -> None:
             except Exception:
                 pass
 
+    def _shorten_text(value: object, limit: int = 160) -> str:
+        text = str(value or "").strip()
+        if len(text) <= limit:
+            return text
+        return text[: max(limit - 3, 0)].rstrip() + "..."
+
+    def _regime_label(value: object) -> str:
+        mapping = {
+            0: "sideway",
+            1: "normal",
+            2: "strong",
+            3: "extreme",
+        }
+        return mapping.get(_safe_int(value, 1), "unknown")
+
+    def _session_from_iso(ts_value: object) -> str:
+        ts_text = str(ts_value or "").strip()
+        if not ts_text:
+            return "unknown"
+        try:
+            parsed = datetime.datetime.fromisoformat(ts_text.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+            hour = parsed.astimezone(datetime.timezone.utc).hour
+        except Exception:
+            return "unknown"
+        if 0 <= hour < 7:
+            return "asian"
+        if 7 <= hour < 13:
+            return "london"
+        if 13 <= hour < 22:
+            return "new_york"
+        return "off_hours"
+
+    def _build_trade_journal_entry(
+        position: dict,
+        pnl: float,
+        is_win: bool,
+        close_type: str,
+        entry_snapshot: dict[str, object] | None,
+        loss_reasons: list[str] | None = None,
+        loss_features: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        snapshot = entry_snapshot or {}
+        feat = loss_features or {}
+        reasons = [str(r) for r in (loss_reasons or []) if str(r).strip()]
+        close_epoch = _safe_float(position.get("close_time"), time.time())
+        closed_at = datetime.datetime.fromtimestamp(close_epoch, tz=datetime.timezone.utc).isoformat()
+        regime_value = snapshot.get("volatility_regime", feat.get("volatility_regime"))
+        trend_alignment = snapshot.get("trend_alignment", feat.get("trend_alignment"))
+        strategy_score = snapshot.get("strategy_score", feat.get("strategy_score"))
+        ict_score = snapshot.get("ict_score", feat.get("ict_score"))
+        wyckoff_score = snapshot.get("wyckoff_score", feat.get("wyckoff_score"))
+        momentum_score = snapshot.get("momentum_score", feat.get("momentum_score"))
+        entry_reason = str(snapshot.get("reason") or position.get("comment") or "Signal entry (no detail)")
+
+        result_label = "FLAT"
+        if close_type == "SL" and pnl >= 0:
+            result_label = "BREAKEVEN"
+        elif is_win or pnl > 0:
+            result_label = "WIN"
+        elif pnl < 0:
+            result_label = "LOSS"
+
+        if result_label == "WIN":
+            if close_type == "TP":
+                outcome = "TP hit; market moved as expected."
+                outcome_vi = "Giá chạm TP; thị trường đi đúng hướng dự kiến."
+            else:
+                outcome = f"Closed positive via {close_type}."
+                outcome_vi = f"Đóng lệnh có lãi bằng {close_type}."
+            lesson = "Keep this setup profile and continue strict risk discipline."
+            lesson_vi = "Giữ nguyên kiểu setup này và tiếp tục kỷ luật quản trị rủi ro."
+        elif result_label == "BREAKEVEN":
+            outcome = "Protective SL secured breakeven/profit before reversal."
+            outcome_vi = "SL bảo vệ đã giữ hòa vốn/có lãi trước khi đảo chiều."
+            lesson = "Breakeven/trailing logic protected capital effectively."
+            lesson_vi = "Cơ chế hòa vốn/trailing SL đã bảo toàn vốn hiệu quả."
+        elif result_label == "LOSS":
+            if reasons:
+                outcome = " | ".join(reasons[:2])
+                _reason_vi_map = {
+                    "TREND_MISALIGNED": "Lệnh vào ngược hướng xu hướng",
+                    "REGIME_SIDEWAY": "Thị trường sideway dễ bị quét",
+                    "RSI_OVERBOUGHT": "Mua tại vùng quá mua",
+                    "RSI_OVERSOLD": "Bán tại vùng quá bán",
+                    "DAILY_BIAS_BEARISH": "Bias ngày nghiêng giảm",
+                    "DAILY_BIAS_BULLISH": "Bias ngày nghiêng tăng",
+                    "ORDER_FLOW_SELL": "Dòng lệnh nghiêng bán",
+                    "ORDER_FLOW_BUY": "Dòng lệnh nghiêng mua",
+                }
+                outcome_vi = " | ".join(_reason_vi_map.get(code, code) for code in reasons[:2])
+            elif close_type == "SL":
+                outcome = "SL hit before expected continuation."
+                outcome_vi = "Bị chạm SL trước khi giá tiếp diễn theo hướng kỳ vọng."
+            else:
+                outcome = f"Closed at loss via {close_type}."
+                outcome_vi = f"Đóng lệnh thua lỗ bằng {close_type}."
+            if reasons:
+                lesson = f"Avoid repeating: {reasons[0]}"
+                _reason_first_vi = {
+                    "TREND_MISALIGNED": "Không vào lệnh khi trend chưa đồng thuận.",
+                    "REGIME_SIDEWAY": "Giảm tần suất giao dịch trong sideway.",
+                    "RSI_OVERBOUGHT": "Không mua dưới trạng thái quá mua.",
+                    "RSI_OVERSOLD": "Không bán dưới trạng thái quá bán.",
+                    "DAILY_BIAS_BEARISH": "Cần đồng thuận với bias ngày.",
+                    "DAILY_BIAS_BULLISH": "Cần đồng thuận với bias ngày.",
+                    "ORDER_FLOW_SELL": "Cần lọc thêm order flow trước khi vào lệnh.",
+                    "ORDER_FLOW_BUY": "Cần lọc thêm order flow trước khi vào lệnh.",
+                }
+                lesson_vi = _reason_first_vi.get(reasons[0], f"Cảnh báo: tránh lặp lại lỗi {reasons[0]}.")
+            elif _safe_int(trend_alignment, 0) == 0:
+                lesson = "Require trend alignment before entry to reduce whipsaw losses."
+                lesson_vi = "Bắt buộc trend alignment trước khi vào để giảm bị quét."
+            elif _regime_label(regime_value) == "sideway":
+                lesson = "Sideway regime: reduce frequency or demand stronger confluence."
+                lesson_vi = "Pha sideway: giảm tần suất hoặc đợi xác nhận mạnh hơn."
+            else:
+                lesson = "Tighten execution quality before allowing the next entry."
+                lesson_vi = "Nâng chất lượng execution trước khi cho lệnh tiếp theo."
+        else:
+            outcome = f"Flat close via {close_type}."
+            outcome_vi = f"Đóng lệnh hòa vốn bằng {close_type}."
+            lesson = "No edge captured; wait for a cleaner setup."
+            lesson_vi = "Chưa có lợi thế rõ; chờ setup sạch hơn."
+
+        return {
+            "time": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "closed_at": closed_at,
+            "account": _state_suffix,
+            "ticket": _safe_int(position.get("ticket"), 0),
+            "side": str(position.get("side", "") or "").lower(),
+            "close_type": close_type,
+            "result": result_label,
+            "is_win": bool(result_label == "WIN"),
+            "pnl": float(pnl),
+            "entry_price": _safe_float(position.get("open_price"), 0.0),
+            "close_price": _safe_float(position.get("close_price"), 0.0),
+            "volume": _safe_float(position.get("volume"), 0.0),
+            "entry_time": snapshot.get("time"),
+            "entry_confidence": _safe_float(snapshot.get("confidence"), 0.0),
+            "entry_reason": entry_reason,
+            "outcome": outcome,
+            "outcome_vi": outcome_vi,
+            "lesson": lesson,
+            "lesson_vi": lesson_vi,
+            "loss_reasons": reasons,
+            "regime": _regime_label(regime_value),
+            "trend_alignment": _safe_int(trend_alignment, 0),
+            "strategy_score": _safe_float(strategy_score, 0.0),
+            "ict_score": _safe_float(ict_score, 0.0),
+            "wyckoff_score": _safe_float(wyckoff_score, 0.0),
+            "momentum_score": _safe_float(momentum_score, 0.0),
+            "session": _session_from_iso(closed_at),
+        }
+
+    def _append_trade_journal(entry: dict[str, object]) -> None:
+        try:
+            _trade_journal_path.parent.mkdir(parents=True, exist_ok=True)
+            with _trade_journal_path.open("a", encoding="utf-8") as file_handle:
+                file_handle.write(json.dumps(entry, ensure_ascii=False, default=str))
+                file_handle.write("\n")
+        except Exception as _journal_err:
+            LOGGER.warning("Failed to append trade journal: %s", _journal_err)
+
+    def _notify_trade_journal(entry: dict[str, object]) -> None:
+        try:
+            pnl_value = _safe_float(entry.get("pnl"), 0.0)
+            pnl_text = f"{'+' if pnl_value > 0 else ''}{pnl_value:.2f}$"
+            _side_raw = str(entry.get("side", "?")).strip().upper()
+            _side_vi = {"BUY": "Mua", "SELL": "Bán"}.get(_side_raw, _side_raw)
+            _result_raw = str(entry.get("result", "?")).strip().upper()
+            _result_vi = {
+                "WIN": "Thắng",
+                "LOSS": "Thua",
+                "BREAKEVEN": "Hòa",
+                "FLAT": "Hòa",
+            }.get(_result_raw, _result_raw)
+            notifier.send_message(
+                f"📝 <b>Auto Journal / Nhật ký lệnh #{_safe_int(entry.get('ticket'), 0)}</b> "
+                f"({_side_raw}/{_side_vi}) [{_result_raw}/{_result_vi}]\n"
+                f"├ P&amp;L / Lãi lỗ: <b>{pnl_text}</b> | Close / Đóng lệnh: {html.escape(str(entry.get('close_type', 'UNKNOWN')))}\n"
+                f"├ Entry thesis / Luận điểm vào lệnh: {html.escape(_shorten_text(entry.get('entry_reason'), 170))}\n"
+                f"├ Outcome / Kết quả: {html.escape(_shorten_text(entry.get('outcome_vi') or entry.get('outcome'), 120))}\n"
+                f"│ EN: {html.escape(_shorten_text(entry.get('outcome'), 120))}\n"
+                f"├ Lesson / Bài học: {html.escape(_shorten_text(entry.get('lesson_vi') or entry.get('lesson'), 120))}\n"
+                f"└ EN: {html.escape(_shorten_text(entry.get('lesson'), 120))}"
+            )
+        except Exception as _notify_err:
+            LOGGER.warning("Trade journal Telegram notify failed: %s", _notify_err)
+
+    def _record_trade_journal(
+        position: dict,
+        pnl: float,
+        is_win: bool,
+        close_type: str,
+        entry_snapshot: dict[str, object] | None,
+        loss_reasons: list[str] | None = None,
+        loss_features: dict[str, object] | None = None,
+    ) -> None:
+        _entry = _build_trade_journal_entry(
+            position=position,
+            pnl=pnl,
+            is_win=is_win,
+            close_type=close_type,
+            entry_snapshot=entry_snapshot,
+            loss_reasons=loss_reasons,
+            loss_features=loss_features,
+        )
+        _append_trade_journal(_entry)
+        _notify_trade_journal(_entry)
+
     last_seen_bar_time: pd.Timestamp | None = None
     last_learning_time: float = time.time()
     last_learning_bar_time: pd.Timestamp | None = None
     # Pre-load last logged bar time so we skip re-logging same candle after restart
     _last_logged_bar_time: pd.Timestamp | None = None
+    _last_traded_bar_time: pd.Timestamp | None = None  # per-bar dedup for Telegram+order
     if _signals_path.exists() and _signals_path.stat().st_size > 0:
         try:
             import csv as _scsv
@@ -1487,6 +2220,13 @@ def run_live_loop(settings: Settings) -> None:
                         f"\u2514 Profit: {pos.get('profit', 0):.2f}$ | Swap: {pos.get('swap', 0):.2f}$ | Comm: {pos.get('commission', 0):.2f}$"
                     )
                     _append_live_trade(pos, pnl, is_win=False, close_type="SL")
+                    _record_trade_journal(
+                        position=pos,
+                        pnl=pnl,
+                        is_win=False,
+                        close_type="SL",
+                        entry_snapshot=_entry_snapshot,
+                    )
                     _entry_rsi_tracker.pop(ticket, None)
                     _save_rsi_tracker(_entry_rsi_tracker)
                 elif pnl < 0:
@@ -1528,6 +2268,15 @@ def run_live_loop(settings: Settings) -> None:
                         f"\u2514 Nguyen nhan:\n{_reasons_text}"
                     )
                     _append_live_trade(pos, pnl, is_win=False, close_type=_close_type)
+                    _record_trade_journal(
+                        position=pos,
+                        pnl=pnl,
+                        is_win=False,
+                        close_type=_close_type,
+                        entry_snapshot=_entry_snapshot,
+                        loss_reasons=_reasons,
+                        loss_features=_feat,
+                    )
                     # Record loss for circuit breaker
                     risk_manager.record_trade_result(pnl, account_info.get("balance", 0.0) if 'account_info' in dir() else 0.0)
                     _entry_rsi_tracker.pop(ticket, None)
@@ -1542,6 +2291,13 @@ def run_live_loop(settings: Settings) -> None:
                         f"\u2514 Profit: {pos.get('profit', 0):.2f}$ | Swap: {pos.get('swap', 0):.2f}$ | Comm: {pos.get('commission', 0):.2f}$"
                     )
                     _append_live_trade(pos, pnl, is_win=True, close_type=_close_type)
+                    _record_trade_journal(
+                        position=pos,
+                        pnl=pnl,
+                        is_win=True,
+                        close_type=_close_type,
+                        entry_snapshot=_entry_snapshot,
+                    )
                     # Record win for circuit breaker (resets consecutive loss counter)
                     risk_manager.record_trade_result(pnl, account_info.get("balance", 0.0) if 'account_info' in dir() else 0.0)
                     _entry_rsi_tracker.pop(ticket, None)
@@ -1574,6 +2330,25 @@ def run_live_loop(settings: Settings) -> None:
         side = str(getattr(decision, "side", "") or "").strip().lower()
         if side not in {"buy", "sell"}:
             return True, "ok"
+
+        # ── Cross-side cooldown: block opposite-side flip after any recent SL ──
+        # Prevents whipsaw BUY-SL → SELL-SL → BUY-SL in sideway markets.
+        cross_cooldown_bars = max(_safe_int(getattr(settings.risk, "cross_side_reentry_cooldown_bars", 0), 0), 0)
+        if cross_cooldown_bars > 0:
+            opposite = "sell" if side == "buy" else "buy"
+            opp_marker = _reentry_guard_state.get(opposite)
+            if opp_marker:
+                opp_close_epoch = _safe_float(opp_marker.get("close_epoch"), 0.0)
+                if opp_close_epoch > 0:
+                    opp_close_ts = pd.to_datetime(opp_close_epoch, unit="s", utc=True, errors="coerce")
+                    if not pd.isna(opp_close_ts):
+                        opp_bars_since = int(max(0.0, (latest_bar_time - opp_close_ts).total_seconds()) // max(_exec_tf_secs, 1))
+                        if opp_bars_since < cross_cooldown_bars:
+                            return (
+                                False,
+                                f"REENTRY_GUARD: {side.upper()} flip blocked {opp_bars_since}/{cross_cooldown_bars} bars after {opposite.upper()} SL",
+                            )
+
         marker = _reentry_guard_state.get(side)
         if not marker:
             return True, "ok"
@@ -1699,7 +2474,7 @@ def run_live_loop(settings: Settings) -> None:
             try:
                 _tunnel_url = _tunnel_url_file.read_text(encoding="utf-8").strip()
                 if _tunnel_url:
-                    _dashboard_line = f"\n└ Dashboard: {_tunnel_url}"
+                    _dashboard_line = f"\n└ Dashboard: {_tunnel_url.rstrip('/')}/dashboard"
             except Exception:
                 pass
         notifier.send_message(
@@ -1713,6 +2488,7 @@ def run_live_loop(settings: Settings) -> None:
             try:
                 # ── Hot-reload config if YAML file changed ─────────────────────
                 _maybe_reload_config()
+                _maybe_reload_profile_override()
 
                 # ── Tunnel URL watcher: notify Telegram when URL changes ───────
                 _tuf = Path("outputs/tunnel_url.txt")
@@ -1726,7 +2502,7 @@ def run_live_loop(settings: Settings) -> None:
                                 _tunnel_url_sent = _new_url
                                 notifier.send_message(
                                     f"🌐 <b>Dashboard URL mới</b>\n"
-                                    f"└ {_new_url}"
+                                    f"└ {_new_url.rstrip('/')}/dashboard"
                                 )
                     except Exception as _tuf_err:
                         LOGGER.debug("Tunnel URL watcher error: %s", _tuf_err)
@@ -1766,6 +2542,7 @@ def run_live_loop(settings: Settings) -> None:
                 )
                 _notify_market_state(market_state)
                 market_is_open = bool(market_state.get("is_open", False))
+                _maybe_auto_rollback(account_balance)
 
                 # ── Self-learning (theo thời gian, mỗi X phút) ──────────────
                 if (
@@ -1802,6 +2579,13 @@ def run_live_loop(settings: Settings) -> None:
                 # Save fresh context for between-poll close checks
                 _last_row_ctx = latest_row
                 _last_frames_ctx = frames
+                _data_health_report = _build_data_health_report(
+                    execution_frame=execution_frame,
+                    latest_row=latest_row,
+                    market_state=market_state,
+                    market_is_open=market_is_open,
+                )
+                _last_data_health_report = _data_health_report
 
                 # â”€â”€ Loss Learning â€” phÃ¡t hiá»‡n vÃ  phÃ¢n tÃ­ch lá»‡nh thua â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 # -- Loss Learning: detect & notify closed trades immediately
@@ -2080,6 +2864,24 @@ def run_live_loop(settings: Settings) -> None:
 
                 # ── Anti re-entry guard after SL (same side) ───────────────────────────
                 if decision.should_trade and not settings.strategy.force_trade:
+                    # ── Circuit breaker (consecutive-loss cooldown / kill switch / daily loss) ──
+                    cb_blocked, cb_reason = risk_manager.is_circuit_breaker_active(account_balance)
+                    if cb_blocked:
+                        LOGGER.warning(
+                            "Circuit breaker BLOCKED: %s | side=%s conf=%.3f",
+                            cb_reason, decision.side, decision.confidence,
+                        )
+                        decision = decision.__class__(
+                            should_trade=False,
+                            side=decision.side,
+                            confidence=decision.confidence,
+                            reason=cb_reason,
+                            entry_price=decision.entry_price,
+                            stop_loss=decision.stop_loss,
+                            take_profit=decision.take_profit,
+                        )
+
+                if decision.should_trade and not settings.strategy.force_trade:
                     reentry_allowed, reentry_reason = _check_reentry_guard(
                         decision,
                         order_plan,
@@ -2215,6 +3017,21 @@ def run_live_loop(settings: Settings) -> None:
                     "market_minutes_to_next_open": market_state.get("minutes_to_next_open"),
                     "market_minutes_to_next_close": market_state.get("minutes_to_next_close"),
                     "signal_threshold": round(settings.strategy.signal_threshold, 4),
+                    "runtime_profile_mode": _runtime_profile_mode,
+                    "canary_enabled": bool(settings.admin.canary.enabled),
+                    "canary_volume_fraction": round(_safe_float(settings.admin.canary.volume_fraction, 1.0), 4),
+                    "auto_rollback_enabled": bool(settings.admin.auto_rollback.enabled),
+                    "auto_rollback_count": _auto_rollback_count,
+                    "auto_rollback_last_reason": _auto_rollback_last_reason,
+                    "auto_rollback_last_from": _auto_rollback_last_from,
+                    "auto_rollback_last_ts": datetime.datetime.fromtimestamp(
+                        _auto_rollback_last_ts,
+                        tz=datetime.timezone.utc,
+                    ).isoformat() if _auto_rollback_last_ts > 0 else None,
+                    "risk_daily_loss": round(_safe_float(getattr(risk_manager, "_daily_loss", 0.0), 0.0), 4),
+                    "risk_daily_dd_pct": round(_compute_daily_dd_pct(account_balance), 4),
+                    "risk_consecutive_losses": _safe_int(getattr(risk_manager, "_consecutive_losses", 0), 0),
+                    "data_health": _last_data_health_report,
                     "model_path": str(settings.app.model_path),
                     "model_meta_path": str(settings.app.model_meta_path),
                     "model_decision_threshold": round(
@@ -2222,6 +3039,9 @@ def run_live_loop(settings: Settings) -> None:
                         4,
                     ),
                     "model_mtime_utc": _model_mtime_utc,
+                    # Dashboard control fields
+                    "auto_trade_enabled": bool(settings.execution.auto_trade),
+                    "blocked_hours_utc": list(settings.strategy.blocked_hours_utc),
                 }
                 try:
                     _status_path.write_text(json.dumps(_status_payload, ensure_ascii=False), encoding="utf-8")
@@ -2251,103 +3071,148 @@ def run_live_loop(settings: Settings) -> None:
 
                 # ── Đặt lệnh thật ──────────────────────────────────────────────────────────
                 if decision.should_trade:
-                    # ── Rebase entry/SL/TP về giá real-time từ MT5 bridge ──────────────────
-                    # Nguyên nhân lệch: live_data_source=yfinance có delay ~15 phút.
-                    # live_row["close"] = bear M5 bar ~15 phút trước → lệch 10-20 USD.
-                    # Fetch tick thật từ MT5 bridge TRƯỚC khi gửi Telegram để notification
-                    # và lệnh thực tế khớp nhau.
-                    try:
-                        _rt_price = executor.get_current_price(order_plan.symbol, order_plan.side)
-                        if _rt_price and _rt_price > 0 and order_plan.entry_price > 0:
-                            _offset = abs(_rt_price - order_plan.entry_price)
-                            if _offset > 0.05:  # chỉ rebase khi lệch đáng kể (>0.05 USD)
-                                _sl_dist = abs(order_plan.entry_price - order_plan.stop_loss)
-                                _tp_dist = abs(order_plan.take_profit - order_plan.entry_price)
-                                if order_plan.side == "sell":
-                                    _rebased_sl = round(_rt_price + _sl_dist, 2)
-                                    _rebased_tp = round(_rt_price - _tp_dist, 2)
-                                else:
-                                    _rebased_sl = round(_rt_price - _sl_dist, 2)
-                                    _rebased_tp = round(_rt_price + _tp_dist, 2)
-                                LOGGER.info(
-                                    "Price rebase: yfinance=%.2f → mt5_tick=%.2f (offset=%.2f) | "
-                                    "SL %.2f→%.2f TP %.2f→%.2f",
-                                    order_plan.entry_price, _rt_price, _offset,
-                                    order_plan.stop_loss, _rebased_sl,
-                                    order_plan.take_profit, _rebased_tp,
-                                )
-                                from xauusd_ai.execution.risk import OrderPlan as _OP
-                                order_plan = _OP(
-                                    symbol=order_plan.symbol,
-                                    side=order_plan.side,
-                                    volume=order_plan.volume,
-                                    entry_price=_rt_price,
-                                    stop_loss=_rebased_sl,
-                                    take_profit=_rebased_tp,
-                                    confidence=order_plan.confidence,
-                                    reason=order_plan.reason,
-                                )
-                    except Exception as _rebase_err:
-                        LOGGER.warning("Price rebase failed (using yfinance price): %s", _rebase_err)
-
-                    try:
-                        notifier.send_signal(decision, order_plan)
-                    except Exception as _notify_err:
-                        LOGGER.warning("Telegram notification failed (order will still be placed): %s", _notify_err)
-                    if settings.execution.auto_trade:
-                        # ── Chốt lệnh ngược chiều đang lời trước khi vào lệnh mới ──
-                        if settings.execution.close_opposite_on_signal:
-                            try:
-                                _opposite = "sell" if decision.side == "buy" else "buy"
-                                _current_positions = executor.get_open_positions(
-                                    magic_number=settings.execution.magic_number
-                                )
-                                for _opos in _current_positions:
-                                    if _opos["side"] != _opposite:
-                                        continue
-                                    _opos_pnl = _opos["profit"] + _opos.get("swap", 0)
-                                    _min_profit = settings.execution.close_opposite_min_profit
-                                    if _opos_pnl >= _min_profit:
-                                        try:
-                                            executor.close_position(_opos["ticket"], _opos["volume"])
-                                            LOGGER.info(
-                                                "CloseOpposite: closed ticket=%d %s profit=%.2f | new signal=%s",
-                                                _opos["ticket"], _opos["side"], _opos_pnl, decision.side,
-                                            )
-                                            notifier.send_message(
-                                                f"🔄 <b>Chốt lệnh ngược chiều #{_opos['ticket']}</b> ({_opos['side'].upper()})\n"
-                                                f"├ P&L: +{_opos_pnl:.2f}$\n"
-                                                f"├ Entry: {_opos['open_price']:.3f} | Lot: {_opos['volume']:.2f}\n"
-                                                f"└ Tín hiệu mới: {decision.side.upper()} — chốt lời lệnh ngược chiều"
-                                            )
-                                        except Exception as _ce:
-                                            LOGGER.error("CloseOpposite failed ticket=%d: %s", _opos["ticket"], _ce)
-                            except Exception as _oe:
-                                LOGGER.error("CloseOpposite scan error: %s", _oe)
+                    _canary_report = {
+                        "enabled": bool(settings.admin.canary.enabled),
+                        "applied": False,
+                        "volume_fraction": _safe_float(settings.admin.canary.volume_fraction, 1.0),
+                        "original_volume": _safe_float(getattr(order_plan, "volume", 0.0), 0.0),
+                        "effective_volume": _safe_float(getattr(order_plan, "volume", 0.0), 0.0),
+                    }
+                    # ── Per-bar dedup: only the first poll per bar sends Telegram + places order ──
+                    # poll_seconds=60 → bot can poll the same 5-min bar up to 5 times; only the
+                    # first poll should act.  Subsequent polls skip both Telegram and order.
+                    _do_act_this_bar = latest_bar_time != _last_traded_bar_time
+                    if not _do_act_this_bar:
+                        LOGGER.debug(
+                            "Duplicate bar signal (bar_time=%s, conf=%.3f) — Telegram+order skipped",
+                            latest_bar_time, decision.confidence,
+                        )
+                    else:
+                        # ── Rebase entry/SL/TP về giá real-time MT5 tick ─────────────────────
+                        # live_row["close"] = giá đóng nến M5 trước đó (broker price).
+                        # Fetch tick thật từ MT5 TRƯỚC khi gửi Telegram để notification
+                        # và lệnh thực tế khớp nhau.
+                        try:
+                            _rt_price = executor.get_current_price(order_plan.symbol, order_plan.side)
+                            if _rt_price and _rt_price > 0 and order_plan.entry_price > 0:
+                                _offset = abs(_rt_price - order_plan.entry_price)
+                                if _offset > 0.05:  # chỉ rebase khi lệch đáng kể (>0.05 USD)
+                                    _sl_dist = abs(order_plan.entry_price - order_plan.stop_loss)
+                                    _tp_dist = abs(order_plan.take_profit - order_plan.entry_price)
+                                    if order_plan.side == "sell":
+                                        _rebased_sl = round(_rt_price + _sl_dist, 2)
+                                        _rebased_tp = round(_rt_price - _tp_dist, 2)
+                                    else:
+                                        _rebased_sl = round(_rt_price - _sl_dist, 2)
+                                        _rebased_tp = round(_rt_price + _tp_dist, 2)
+                                    LOGGER.info(
+                                        "Price rebase: bar_close=%.2f → mt5_tick=%.2f (offset=%.2f) | "
+                                        "SL %.2f→%.2f TP %.2f→%.2f",
+                                        order_plan.entry_price, _rt_price, _offset,
+                                        order_plan.stop_loss, _rebased_sl,
+                                        order_plan.take_profit, _rebased_tp,
+                                    )
+                                    from xauusd_ai.execution.risk import OrderPlan as _OP
+                                    order_plan = _OP(
+                                        symbol=order_plan.symbol,
+                                        side=order_plan.side,
+                                        volume=order_plan.volume,
+                                        entry_price=_rt_price,
+                                        stop_loss=_rebased_sl,
+                                        take_profit=_rebased_tp,
+                                        confidence=order_plan.confidence,
+                                        reason=order_plan.reason,
+                                    )
+                        except Exception as _rebase_err:
+                            LOGGER.warning("Price rebase failed (using bar close price): %s", _rebase_err)
 
                         try:
-                            result = executor.place_order(order_plan)
-                            LOGGER.info(
-                                "MT5 order placed: side=%s lot=%.2f bal=%.2f open=%d/%d | %s",
-                                order_plan.side, order_plan.volume,
-                                account_balance, open_positions + 1, max_allowed,
-                                result,
-                            )
-                            # Track RSI at entry for exit model position-state features
-                            _new_ticket = int(result.get("position", 0) or result.get("order", 0) or result.get("deal", 0))
-                            if _new_ticket:
-                                if "rsi" in latest_row.index:
-                                    _entry_rsi_tracker[_new_ticket] = float(latest_row.get("rsi", 50.0))
-                                    _save_rsi_tracker(_entry_rsi_tracker)
-                                _entry_snapshot_tracker[_new_ticket] = _build_entry_snapshot(
-                                    _latest_row_for_snapshot,
-                                    decision,
-                                    order_plan,
+                            order_plan, _canary_report = _apply_canary_volume(order_plan)
+                            if bool(_canary_report.get("applied")):
+                                LOGGER.info(
+                                    "Canary deploy volume applied: %.2f -> %.2f (fraction=%.3f)",
+                                    _safe_float(_canary_report.get("original_volume"), 0.0),
+                                    _safe_float(_canary_report.get("effective_volume"), 0.0),
+                                    _safe_float(_canary_report.get("volume_fraction"), 1.0),
                                 )
-                                _save_entry_snapshot_tracker(_entry_snapshot_tracker)
-                        except Exception as order_err:
-                            LOGGER.error("MT5 order failed: %s", order_err)
+                        except Exception as _canary_err:
+                            LOGGER.warning("Canary volume apply failed: %s", _canary_err)
+
+                        try:
+                            notifier.send_signal(decision, order_plan)
+                        except Exception as _notify_err:
+                            LOGGER.warning("Telegram notification failed (order will still be placed): %s", _notify_err)
+                        if settings.execution.auto_trade:
+                            # ── Chốt lệnh ngược chiều đang lời trước khi vào lệnh mới ──
+                            if settings.execution.close_opposite_on_signal:
+                                try:
+                                    _opposite = "sell" if decision.side == "buy" else "buy"
+                                    _current_positions = executor.get_open_positions(
+                                        magic_number=settings.execution.magic_number
+                                    )
+                                    for _opos in _current_positions:
+                                        if _opos["side"] != _opposite:
+                                            continue
+                                        _opos_pnl = _opos["profit"] + _opos.get("swap", 0)
+                                        _min_profit = settings.execution.close_opposite_min_profit
+                                        if _opos_pnl >= _min_profit:
+                                            try:
+                                                executor.close_position(_opos["ticket"], _opos["volume"])
+                                                LOGGER.info(
+                                                    "CloseOpposite: closed ticket=%d %s profit=%.2f | new signal=%s",
+                                                    _opos["ticket"], _opos["side"], _opos_pnl, decision.side,
+                                                )
+                                                notifier.send_message(
+                                                    f"🔄 <b>Chốt lệnh ngược chiều #{_opos['ticket']}</b> ({_opos['side'].upper()})\n"
+                                                    f"├ P&L: +{_opos_pnl:.2f}$\n"
+                                                    f"├ Entry: {_opos['open_price']:.3f} | Lot: {_opos['volume']:.2f}\n"
+                                                    f"└ Tín hiệu mới: {decision.side.upper()} — chốt lời lệnh ngược chiều"
+                                                )
+                                            except Exception as _ce:
+                                                LOGGER.error("CloseOpposite failed ticket=%d: %s", _opos["ticket"], _ce)
+                                except Exception as _oe:
+                                    LOGGER.error("CloseOpposite scan error: %s", _oe)
+
+                            try:
+                                result = executor.place_order(order_plan)
+                                _last_traded_bar_time = latest_bar_time
+                                LOGGER.info(
+                                    "MT5 order placed: side=%s lot=%.2f bal=%.2f open=%d/%d | %s",
+                                    order_plan.side, order_plan.volume,
+                                    account_balance, open_positions + 1, max_allowed,
+                                    result,
+                                )
+                                # Track RSI at entry for exit model position-state features
+                                _new_ticket = int(result.get("position", 0) or result.get("order", 0) or result.get("deal", 0))
+                                if _new_ticket:
+                                    if "rsi" in latest_row.index:
+                                        _entry_rsi_tracker[_new_ticket] = float(latest_row.get("rsi", 50.0))
+                                        _save_rsi_tracker(_entry_rsi_tracker)
+                                    _entry_snapshot_tracker[_new_ticket] = _build_entry_snapshot(
+                                        _latest_row_for_snapshot,
+                                        decision,
+                                        order_plan,
+                                    )
+                                    _save_entry_snapshot_tracker(_entry_snapshot_tracker)
+                            except Exception as order_err:
+                                LOGGER.error("MT5 order failed: %s", order_err)
+                                try:
+                                    notifier.send_message(
+                                        f"🚨 <b>ĐẶT LỆNH THẤT BẠI</b> [{settings.market.symbol}]\n"
+                                        f"├ Side: {order_plan.side.upper()} | Lot: {order_plan.volume:.2f}\n"
+                                        f"├ Entry: {order_plan.entry_price:.2f} | SL: {order_plan.stop_loss:.2f} | TP: {order_plan.take_profit:.2f}\n"
+                                        f"└ Lỗi: {order_err}"
+                                    )
+                                except Exception:
+                                    pass
                 else:
+                    _canary_report = {
+                        "enabled": bool(settings.admin.canary.enabled),
+                        "applied": False,
+                        "volume_fraction": _safe_float(settings.admin.canary.volume_fraction, 1.0),
+                        "original_volume": _safe_float(getattr(order_plan, "volume", 0.0), 0.0),
+                        "effective_volume": _safe_float(getattr(order_plan, "volume", 0.0), 0.0),
+                    }
                     LOGGER.info(
                         "No trade: %s | conf=%.3f | bal=%.2f open=%d/%d atr=%.2f",
                         decision.reason, decision.confidence, account_balance, open_positions, max_allowed, atr_value,

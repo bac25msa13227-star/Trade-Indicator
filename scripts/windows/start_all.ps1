@@ -37,29 +37,13 @@ if (Get-Process -Id $botProc.Id -ErrorAction SilentlyContinue) {
     Write-Host "      [WARN] Bot co the da crash. Kiem tra log." -ForegroundColor Red
 }
 
-# ── 3. Khoi dong Dashboard ───────────────────────────────
-Write-Host "`n[3/3] Khoi dong Dashboard (port 8501)..." -ForegroundColor Yellow
-$streamlitExe = if (Test-Path "$Root\.venv\Scripts\streamlit.exe") { "$Root\.venv\Scripts\streamlit.exe" } else { "python" }
-$streamlitArgs = if ($streamlitExe -eq "python") { "-m streamlit run src/xauusd_ai/dashboard/app.py --server.port 8501 --server.headless true" } else { "run src/xauusd_ai/dashboard/app.py --server.port 8501 --server.headless true" }
-$dashProc = Start-Process -FilePath $streamlitExe `
-    -ArgumentList $streamlitArgs `
-    -WorkingDirectory $Root -NoNewWindow -PassThru
-$waited = 0
-while (-not (Test-Port 8501) -and $waited -lt 20) { Start-Sleep -Seconds 1; $waited++ }
-if (Test-Port 8501) {
-    Write-Host "      Dashboard: http://localhost:8501  (PID $($dashProc.Id))" -ForegroundColor Green
-} else {
-    Write-Host "      [WARN] Dashboard chua san sang." -ForegroundColor Red
-}
-
-Write-Host ""
 Write-Host "================================================" -ForegroundColor Cyan
 Write-Host "  Tat ca da khoi dong!" -ForegroundColor Green
-Write-Host "  Dashboard : http://localhost:8501" -ForegroundColor Green
+Write-Host "  Dashboard : http://localhost:8000" -ForegroundColor Green
 Write-Host "================================================" -ForegroundColor Cyan
 
 # Mo browser
-Start-Process "http://localhost:8501"
+Start-Process "http://localhost:8000"
 $CFExe    = Join-Path $Root "cloudflared.exe"
 $OutDir   = Join-Path $Root "outputs"
 $UrlFile  = Join-Path $OutDir "tunnel_url.txt"
@@ -102,35 +86,16 @@ if (Get-Process -Id $botProc.Id -ErrorAction SilentlyContinue) {
     Write-Host "      [WARN] Bot co the da crash. Kiem tra log." -ForegroundColor Red
 }
 
-# ── 3. Khởi động Streamlit Dashboard ─────────────────────
-Write-Host "`n[3/3] Khoi dong Dashboard Streamlit (port 8501)..." -ForegroundColor Yellow
-$streamlitExe2 = if (Test-Path "$Root\.venv\Scripts\streamlit.exe") { "$Root\.venv\Scripts\streamlit.exe" } else { $Python }
-$dashArgs = if ($streamlitExe2 -eq $Python) { "-m streamlit run src/xauusd_ai/dashboard/app.py --server.port 8501 --server.headless true" } else { "run src/xauusd_ai/dashboard/app.py --server.port 8501 --server.headless true" }
-$dashProc = Start-Process -FilePath $streamlitExe2 -ArgumentList $dashArgs -WorkingDirectory $Root -NoNewWindow -PassThru
-# Doi streamlit san sang
-$maxWait = 20
-$waited  = 0
-Write-Host "      Dang doi Streamlit khoi dong..." -ForegroundColor Gray
-while (-not (Test-Port 8501) -and $waited -lt $maxWait) {
-    Start-Sleep -Seconds 1
-    $waited++
-}
-if (Test-Port 8501) {
-    Write-Host "      Dashboard dang chay: http://localhost:8501  (PID $($dashProc.Id))" -ForegroundColor Green
-} else {
-    Write-Host "      [WARN] Streamlit chua san sang sau ${maxWait}s." -ForegroundColor Red
-}
-
 # ── 4. Tạo Cloudflare Tunnel (public URL) ─────────────────
 Write-Host "`n[4/4] Tao Cloudflare Tunnel public URL..." -ForegroundColor Yellow
 if (-not (Test-Path $CFExe)) {
     Write-Host "      [WARN] Khong tim thay cloudflared.exe - bo qua tunnel" -ForegroundColor Red
-    Write-Host "      URL noi bo: http://localhost:8501" -ForegroundColor Cyan
+    Write-Host "      Dashboard WebSocket: http://localhost:8000/dashboard" -ForegroundColor Cyan
 } else {
     # Chạy cloudflared trong background, capture output vào file tạm
     $logFile = Join-Path $OutDir "tunnel.log"
     $null = Start-Process -FilePath $CFExe `
-        -ArgumentList "tunnel --url http://localhost:8501" `
+        -ArgumentList "tunnel --url http://localhost:8000" `
         -WorkingDirectory $Root `
         -RedirectStandardError $logFile `
         -NoNewWindow -PassThru
@@ -161,7 +126,7 @@ if (-not (Test-Path $CFExe)) {
         Start-Process $pubUrl
     } else {
         Write-Host "      Khong lay duoc URL. Kiem tra outputs\tunnel.log" -ForegroundColor Red
-        Write-Host "      Hoac chay thu cong: .\cloudflared.exe tunnel --url http://localhost:8501" -ForegroundColor Yellow
+        Write-Host "      Hoac chay thu cong: .\cloudflared.exe tunnel --url http://localhost:8000" -ForegroundColor Yellow
     }
 }
 
@@ -169,7 +134,7 @@ Write-Host ""
 Write-Host "================================================" -ForegroundColor Cyan
 Write-Host "  TOM TAT:" -ForegroundColor Cyan
 Write-Host "  Bot PID     : $($botProc.Id)" -ForegroundColor White
-Write-Host "  Dashboard   : http://localhost:8501" -ForegroundColor White
+Write-Host "  Dashboard   : http://localhost:8000" -ForegroundColor White
 if ($found) {
     Write-Host "  Public URL  : $pubUrl" -ForegroundColor Green
 }

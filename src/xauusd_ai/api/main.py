@@ -22,7 +22,7 @@ import logging
 import os
 import threading as _threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +59,14 @@ try:
 except ImportError:
     logger.warning("prometheus_client not installed — /metrics endpoint unavailable.")
 
+# Mount ChartWF integration router (read-only WF artefacts)
+try:
+    from xauusd_ai.api.routes_chartwf import router as _chartwf_router
+    app.include_router(_chartwf_router)
+    logger.info("ChartWF router mounted at /api/v1/chartwf/*")
+except Exception as _e:  # noqa: BLE001
+    logger.warning("ChartWF router not mounted: %s", _e)
+
 # ── Dashboard constants ───────────────────────────────────────────────────────
 
 _OUTPUTS = Path(os.getenv("OUTPUTS_PATH", "outputs"))
@@ -69,18 +77,20 @@ _LIVE_CFG_MAP: dict[str, Path] = {
 }
 _REQUIRED_MODEL_BINDINGS: dict[str, dict[str, str]] = {
     "acc1": {
-        "model": "outputs/acc1_breakthrough_net66590_dd3953_model.pkl",
-        "scaler": "outputs/acc1_breakthrough_net66590_dd3953_scaler.pkl",
-        "meta": "outputs/acc1_breakthrough_net66590_dd3953_model_meta.json",
+        "model": "outputs/acc1_combo133_202604_model.pkl",
+        "scaler": "outputs/acc1_combo133_202604_scaler.pkl",
+        "meta": "outputs/acc1_combo133_202604_meta.json",
     },
     "acc2": {
-        "model": "outputs/acc2_breakthrough_net21k_dd2333_model.pkl",
-        "scaler": "outputs/acc2_breakthrough_net21k_dd2333_scaler.pkl",
-        "meta": "outputs/acc2_breakthrough_net21k_dd2333_model_meta.json",
+        "model": "outputs/acc2_v14pp_202604_model.pkl",
+        "scaler": "outputs/acc2_v14pp_202604_scaler.pkl",
+        "meta": "outputs/acc2_v14pp_202604_meta.json",
     },
 }
 _BENCHMARK_VERIFY_FILE = Path(os.getenv("BENCHMARK_VERIFY_FILE", "outputs/wf_exact_recovery_verify_2016501.json"))
 _ACCOUNT_RUNTIME_CFG: dict[str, dict[str, Any]] = {}
+_PROFILE_MODES = {"conservative", "balanced", "aggressive"}
+_RUNTIME_PROFILE_OVERRIDE_TEMPLATE = "runtime_profile_override_{account}.json"
 
 _ACCOUNT_CFG: dict[str, dict[str, str]] = {
     "acc1": {
@@ -88,6 +98,7 @@ _ACCOUNT_CFG: dict[str, dict[str, str]] = {
         "status": "live_status_acc1.json",
         "trades": "live_closed_trades_acc1.csv",
         "trades_fallback": "live_closed_trades.csv",
+        "journal": "trade_journal_acc1.jsonl",
         "signals": "paper_trade_signals_acc1.csv",
         "meta": "acc1_live_model_meta.json",
         "wf": "walkforward_report_acc1.json",
@@ -101,6 +112,7 @@ _ACCOUNT_CFG: dict[str, dict[str, str]] = {
         "status": "live_status_acc2.json",
         "trades": "live_closed_trades_acc2.csv",
         "trades_fallback": "live_closed_trades_acc2.csv",
+        "journal": "trade_journal_acc2.jsonl",
         "signals": "paper_trade_signals_acc2.csv",
         "meta": "acc2_live_model_meta.json",
         "wf": "walkforward_report_acc2.json",
@@ -168,6 +180,31 @@ def _output_path(path_like: str | Path) -> Path:
     return _OUTPUTS / p
 
 
+def _runtime_profile_override_path(account: str) -> Path:
+    name = _RUNTIME_PROFILE_OVERRIDE_TEMPLATE.format(account=account.strip().lower())
+    return _output_path(name)
+
+
+def _safe_write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(_json.dumps(payload, ensure_ascii=False, default=str), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _read_runtime_profile_override(account: str) -> dict[str, Any]:
+    path = _runtime_profile_override_path(account)
+    raw = _safe_json(path)
+    if not isinstance(raw, dict):
+        return {}
+    profile = str(raw.get("profile", "")).strip().lower()
+    if profile not in _PROFILE_MODES:
+        return {}
+    raw["profile"] = profile
+    raw["path"] = str(path)
+    return raw
+
+
 def _path_matches_required(actual: str | Path, required: str | Path) -> bool:
     """Allow both exact relative paths and absolute paths ending with the required suffix."""
     actual_posix = Path(str(actual)).as_posix()
@@ -213,6 +250,10 @@ def _apply_live_config_overrides() -> None:
             _ACCOUNT_CFG[acct]["bt_trades"] = Path(app_cfg.backtest_trades_path).name
             _ACCOUNT_CFG[acct]["signals"] = Path(app_cfg.paper_trade_log_path).name
             _ACCOUNT_CFG[acct]["trades"] = Path(app_cfg.live_closed_trades_path).name
+            _account_suffix = Path(app_cfg.live_closed_trades_path).stem.replace("live_closed_trades_", "").strip("_") or acct
+            _ACCOUNT_CFG[acct]["journal"] = str(
+                Path(app_cfg.live_closed_trades_path).with_name(f"trade_journal_{_account_suffix}.jsonl")
+            )
 
             required_binding = _REQUIRED_MODEL_BINDINGS.get(acct, {})
             actual_binding = {
@@ -235,7 +276,9 @@ def _apply_live_config_overrides() -> None:
                 "model_binding_mismatch": mismatches,
                 "threshold_config": model_threshold_cfg,
                 "risk_min_confidence": risk_threshold,
-                "threshold_effective_config": max(model_threshold_cfg, risk_threshold),
+                # threshold_effective = strategy.signal_threshold (the ML gate).
+                # risk.min_confidence is a separate execution guard, not the signal threshold.
+                "threshold_effective_config": model_threshold_cfg,
                 "sideway_min_confidence": float(settings.strategy.sideway_min_confidence),
                 "volatile_min_confidence": float(settings.strategy.volatile_min_confidence),
                 "min_strategy_score": float(settings.strategy.min_strategy_score),
@@ -250,6 +293,23 @@ def _apply_live_config_overrides() -> None:
                 "max_drawdown_kill_pct": float(settings.risk.max_drawdown_kill_pct),
                 "consecutive_loss_pause_count": int(settings.risk.consecutive_loss_pause_count),
                 "consecutive_loss_cooldown_bars": int(settings.risk.consecutive_loss_cooldown_bars),
+                "admin_matrix_windows_days": [int(v) for v in settings.admin.regime_session_matrix_windows_days],
+                "canary_enabled": bool(settings.admin.canary.enabled),
+                "canary_volume_fraction": float(settings.admin.canary.volume_fraction),
+                "auto_rollback_enabled": bool(settings.admin.auto_rollback.enabled),
+                "auto_rollback_profile": str(settings.admin.auto_rollback.rollback_profile),
+                "auto_rollback_daily_dd_trigger_pct": float(settings.admin.auto_rollback.daily_dd_trigger_pct),
+                "auto_rollback_consecutive_losses_trigger": int(settings.admin.auto_rollback.consecutive_losses_trigger),
+                "auto_rollback_cooldown_seconds": int(settings.admin.auto_rollback.cooldown_seconds),
+                "data_health_enabled": bool(settings.admin.data_health.enabled),
+                "data_health_alert_cooldown_seconds": int(settings.admin.data_health.alert_cooldown_seconds),
+                "data_health_missing_bar_gap_factor": float(settings.admin.data_health.missing_bar_gap_factor),
+                "data_health_stale_tick_alert_seconds": int(settings.admin.data_health.stale_tick_alert_seconds),
+                "data_health_spread_spike_multiplier": float(settings.admin.data_health.spread_spike_multiplier),
+                "data_health_spread_spike_abs_points": float(settings.admin.data_health.spread_spike_abs_points),
+                "data_health_spread_lookback_bars": int(settings.admin.data_health.spread_lookback_bars),
+                "data_health_bridge_feed_divergence_points": float(settings.admin.data_health.bridge_feed_divergence_points),
+                "auto_trade_enabled": bool(settings.execution.auto_trade),
             }
         except Exception as exc:
             logger.warning("Could not apply live config override for %s from %s: %s", acct, cfg_path, exc)
@@ -431,6 +491,29 @@ def _safe_csv_tail(path: Path, n: int = 30, *, account: str | None = None) -> li
                     mapped = _normalize_trade_row(mapped)
             result.append({k: (v if v != "" else None) for k, v in mapped.items()})
         return result
+    except Exception:
+        return []
+
+
+def _safe_jsonl_tail(path: Path, n: int = 30) -> list[dict]:
+    try:
+        if not path.exists():
+            return []
+        from collections import deque as _deque
+
+        rows: _deque[dict] = _deque(maxlen=n)
+        with open(path, "r", encoding="utf-8", errors="replace") as file_handle:
+            for line in file_handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    payload = _json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(payload, dict):
+                    rows.append(payload)
+        return list(rows)
     except Exception:
         return []
 
@@ -661,6 +744,381 @@ def _build_pnl_series(trades: list[dict]) -> dict:
     return {"labels": labels, "values": values, "individual": individual}
 
 
+def _parse_trade_timestamp(value: Any) -> datetime | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, (int, float)):
+        ts = float(value)
+        if ts > 1e12:
+            ts /= 1000.0
+        elif ts < 1e9:
+            return None
+        try:
+            return datetime.fromtimestamp(ts, tz=timezone.utc)
+        except Exception:
+            return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.replace(".", "", 1).isdigit():
+        try:
+            return _parse_trade_timestamp(float(text))
+        except Exception:
+            return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _normalize_trade_side(value: Any) -> str:
+    raw = str(value or "").strip().lower()
+    if raw in {"buy", "long"}:
+        return "buy"
+    if raw in {"sell", "short"}:
+        return "sell"
+    return "unknown"
+
+
+def _session_bucket(ts: datetime | None) -> str:
+    if ts is None:
+        return "Unknown"
+    hour = int(ts.hour)
+    if 0 <= hour < 7:
+        return "Asian"
+    if 7 <= hour < 13:
+        return "London"
+    if 13 <= hour < 22:
+        return "New York"
+    return "Off-hours"
+
+
+def _regime_bucket(value: Any) -> str:
+    regime = _as_int(value)
+    if regime == 0:
+        return "sideway"
+    if regime == 1:
+        return "normal"
+    if regime == 2:
+        return "strong"
+    return "unknown"
+
+
+def _summarize_group(items: list[dict[str, Any]]) -> dict[str, Any]:
+    trades = len(items)
+    net_pnl = 0.0
+    gross_profit = 0.0
+    gross_loss = 0.0
+    wins = 0
+    losses = 0
+    for item in items:
+        pnl = _as_float(item.get("pnl")) or 0.0
+        net_pnl += pnl
+        if pnl > 0:
+            wins += 1
+            gross_profit += pnl
+        elif pnl < 0:
+            losses += 1
+            gross_loss += pnl
+    win_rate = (wins / trades) if trades > 0 else 0.0
+    pf = (gross_profit / abs(gross_loss)) if gross_loss < 0 else (None if gross_profit == 0 else 999.0)
+    return {
+        "trades": trades,
+        "wins": wins,
+        "losses": losses,
+        "win_rate": round(win_rate, 4),
+        "net_pnl": round(net_pnl, 2),
+        "gross_profit": round(gross_profit, 2),
+        "gross_loss": round(gross_loss, 2),
+        "profit_factor": None if pf is None else round(pf, 4),
+    }
+
+
+def _build_pnl_explain(trades: list[dict], signals: list[dict]) -> dict[str, list[dict[str, Any]]]:
+    if not trades:
+        empty_row = {
+            "trades": 0,
+            "wins": 0,
+            "losses": 0,
+            "win_rate": 0.0,
+            "net_pnl": 0.0,
+            "gross_profit": 0.0,
+            "gross_loss": 0.0,
+            "profit_factor": None,
+        }
+        return {
+            "session": [{"bucket": key, **empty_row} for key in ("Asian", "London", "New York")],
+            "regime": [{"bucket": key, **empty_row} for key in ("sideway", "normal", "strong")],
+            "side": [{"bucket": key, **empty_row} for key in ("buy", "sell")],
+        }
+
+    signal_index: list[dict[str, Any]] = []
+    for sg in signals:
+        sg_ts = _parse_trade_timestamp(sg.get("time") or sg.get("ts") or sg.get("bar_time"))
+        if sg_ts is None:
+            continue
+        signal_index.append(
+            {
+                "ts": sg_ts,
+                "side": _normalize_trade_side(sg.get("direction") or sg.get("signal") or sg.get("side")),
+                "regime": _regime_bucket(sg.get("volatility_regime")),
+            }
+        )
+    signal_index.sort(key=lambda item: item["ts"])
+
+    max_link_age = timedelta(days=7)
+    enriched: list[dict[str, Any]] = []
+    for trade in trades:
+        ts = _parse_trade_timestamp(trade.get("time") or trade.get("close_time") or trade.get("ts") or trade.get("open_time"))
+        side = _normalize_trade_side(trade.get("side") or trade.get("direction"))
+        pnl = _as_float(trade.get("pnl") or trade.get("profit")) or 0.0
+        regime = "unknown"
+        if ts is not None and side != "unknown":
+            for sg in reversed(signal_index):
+                if sg["side"] not in {side, "unknown"}:
+                    continue
+                if sg["ts"] > ts:
+                    continue
+                if (ts - sg["ts"]) > max_link_age:
+                    break
+                regime = str(sg["regime"] or "unknown")
+                break
+        enriched.append(
+            {
+                "ts": ts,
+                "side": side,
+                "session": _session_bucket(ts),
+                "regime": regime,
+                "pnl": pnl,
+            }
+        )
+
+    def _build_dimension(
+        items: list[dict[str, Any]],
+        key: str,
+        order: tuple[str, ...],
+    ) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for bucket in order:
+            grouped = [item for item in items if item.get(key) == bucket]
+            rows.append({"bucket": bucket, **_summarize_group(grouped)})
+        return rows
+
+    return {
+        "session": _build_dimension(enriched, "session", ("Asian", "London", "New York")),
+        "regime": _build_dimension(enriched, "regime", ("sideway", "normal", "strong")),
+        "side": _build_dimension(enriched, "side", ("buy", "sell")),
+    }
+
+
+def _estimate_profile_presets(
+    trades: list[dict],
+    runtime_cfg: dict[str, Any],
+    drawdown_pct: float | None,
+) -> dict[str, dict[str, Any]]:
+    parsed_times = [
+        _parse_trade_timestamp(item.get("time") or item.get("close_time") or item.get("ts") or item.get("open_time"))
+        for item in trades
+    ]
+    parsed_times = [ts for ts in parsed_times if ts is not None]
+    if parsed_times:
+        span_days = max((max(parsed_times) - min(parsed_times)).total_seconds() / 86400.0, 1.0)
+        base_trades_per_day = len(parsed_times) / span_days
+    else:
+        threshold_hint = _as_float(runtime_cfg.get("threshold_effective_config")) or 0.7
+        base_trades_per_day = max(0.8, (1.0 - threshold_hint) * 12.0)
+
+    kill_pct = _as_float(runtime_cfg.get("max_drawdown_kill_pct"))
+    if drawdown_pct is not None:
+        base_dd = float(drawdown_pct)
+    elif kill_pct is not None and kill_pct > 0:
+        base_dd = float(kill_pct * 100.0 * 0.75)
+    else:
+        base_dd = 18.0
+    base_dd = max(3.0, min(base_dd, 60.0))
+
+    threshold_eff = _as_float(runtime_cfg.get("threshold_effective_config"))
+    if threshold_eff is None:
+        threshold_eff = max(
+            _as_float(runtime_cfg.get("threshold_config")) or 0.0,
+            _as_float(runtime_cfg.get("risk_min_confidence")) or 0.0,
+        )
+    if threshold_eff <= 0:
+        threshold_eff = 0.7
+
+    def _profile(mult_trade: float, mult_dd: float, thr_delta: float, label: str, desc: str) -> dict[str, Any]:
+        return {
+            "label": label,
+            "description": desc,
+            "estimated_trades_per_day": round(base_trades_per_day * mult_trade, 2),
+            "estimated_dd_pct": round(max(1.0, min(80.0, base_dd * mult_dd)), 2),
+            "effective_threshold_est": round(min(0.99, max(0.5, threshold_eff + thr_delta)), 4),
+        }
+
+    return {
+        "conservative": _profile(
+            mult_trade=0.65,
+            mult_dd=0.72,
+            thr_delta=0.05,
+            label="Conservative",
+            desc="Lower frequency, tighter gate, prioritize capital defense.",
+        ),
+        "balanced": _profile(
+            mult_trade=1.00,
+            mult_dd=1.00,
+            thr_delta=0.00,
+            label="Balanced",
+            desc="Current baseline profile with balanced risk/reward.",
+        ),
+        "aggressive": _profile(
+            mult_trade=1.35,
+            mult_dd=1.28,
+            thr_delta=-0.05,
+            label="Aggressive",
+            desc="Higher activity and return potential with larger DD tolerance.",
+        ),
+    }
+
+
+def _is_truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value or "").strip().lower()
+    return text in {"1", "true", "yes", "y", "on"}
+
+
+def _max_drawdown_pct_from_pnls(items: list[dict[str, Any]]) -> float:
+    if not items:
+        return 0.0
+    ordered = sorted(items, key=lambda row: row.get("ts") or datetime.min.replace(tzinfo=timezone.utc))
+    equity = 0.0
+    peak = 0.0
+    max_dd = 0.0
+    for row in ordered:
+        pnl = _as_float(row.get("pnl")) or 0.0
+        equity += pnl
+        if equity > peak:
+            peak = equity
+        drawdown = max(0.0, peak - equity)
+        if drawdown > max_dd:
+            max_dd = drawdown
+    if peak <= 0:
+        return 0.0
+    return round((max_dd / peak) * 100.0, 4)
+
+
+def _build_regime_session_matrix(
+    trades: list[dict[str, Any]],
+    signals: list[dict[str, Any]],
+    windows_days: list[int] | None = None,
+) -> dict[str, Any]:
+    sessions = ("Asian", "London", "New York")
+    regimes = ("sideway", "normal", "strong")
+    windows = [int(w) for w in (windows_days or [7, 30]) if int(w) > 0]
+    if not windows:
+        windows = [7, 30]
+
+    signal_rows: list[dict[str, Any]] = []
+    for sg in signals:
+        sg_ts = _parse_trade_timestamp(sg.get("time") or sg.get("ts") or sg.get("bar_time"))
+        if sg_ts is None:
+            continue
+        signal_rows.append(
+            {
+                "ts": sg_ts,
+                "side": _normalize_trade_side(sg.get("direction") or sg.get("signal") or sg.get("side")),
+                "regime": _regime_bucket(sg.get("volatility_regime")),
+                "session": _session_bucket(sg_ts),
+                "should_trade": _is_truthy(sg.get("should_trade")),
+            }
+        )
+    signal_rows.sort(key=lambda item: item["ts"])
+
+    max_link_age = timedelta(days=7)
+    trade_rows: list[dict[str, Any]] = []
+    for tr in trades:
+        tr_ts = _parse_trade_timestamp(tr.get("time") or tr.get("close_time") or tr.get("ts") or tr.get("open_time"))
+        if tr_ts is None:
+            continue
+        tr_side = _normalize_trade_side(tr.get("side") or tr.get("direction"))
+        tr_pnl = _as_float(tr.get("pnl") or tr.get("profit")) or 0.0
+        regime = "unknown"
+        if tr_side != "unknown":
+            for sg in reversed(signal_rows):
+                if sg["side"] not in {tr_side, "unknown"}:
+                    continue
+                if sg["ts"] > tr_ts:
+                    continue
+                if (tr_ts - sg["ts"]) > max_link_age:
+                    break
+                regime = str(sg.get("regime") or "unknown")
+                break
+        trade_rows.append(
+            {
+                "ts": tr_ts,
+                "side": tr_side,
+                "pnl": tr_pnl,
+                "session": _session_bucket(tr_ts),
+                "regime": regime,
+            }
+        )
+
+    now_ref = datetime.now(timezone.utc)
+    ts_candidates = [row["ts"] for row in trade_rows if row.get("ts")] + [row["ts"] for row in signal_rows if row.get("ts")]
+    if ts_candidates:
+        now_ref = max(ts_candidates)
+
+    payload: dict[str, Any] = {"generated_at": now_ref.isoformat()}
+    for window in windows:
+        cutoff = now_ref - timedelta(days=int(window))
+        signals_cut = [sg for sg in signal_rows if sg["ts"] >= cutoff and bool(sg.get("should_trade"))]
+        trades_cut = [tr for tr in trade_rows if tr["ts"] >= cutoff]
+
+        signal_counts: dict[tuple[str, str], int] = {}
+        for sg in signals_cut:
+            key = (str(sg.get("session") or "Unknown"), str(sg.get("regime") or "unknown"))
+            signal_counts[key] = signal_counts.get(key, 0) + 1
+
+        rows: list[dict[str, Any]] = []
+        for session in sessions:
+            for regime in regimes:
+                grouped = [tr for tr in trades_cut if tr.get("session") == session and tr.get("regime") == regime]
+                summary = _summarize_group(grouped)
+                signal_count = signal_counts.get((session, regime), 0)
+                recall = (summary["trades"] / signal_count) if signal_count > 0 else None
+                rows.append(
+                    {
+                        "session": session,
+                        "regime": regime,
+                        "trades": summary["trades"],
+                        "wins": summary["wins"],
+                        "losses": summary["losses"],
+                        "win_rate": summary["win_rate"],
+                        "profit_factor": summary["profit_factor"],
+                        "net_pnl": summary["net_pnl"],
+                        "max_drawdown_pct": _max_drawdown_pct_from_pnls(grouped),
+                        "signals_passed": signal_count,
+                        "recall": None if recall is None else round(recall, 4),
+                    }
+                )
+
+        leak_rows = sorted(
+            [row for row in rows if (row.get("net_pnl") or 0.0) < 0 or ((row.get("profit_factor") or 0.0) < 1.0 and row.get("trades", 0) > 0)],
+            key=lambda row: (row.get("net_pnl") or 0.0),
+        )
+        payload[f"rolling_{window}d"] = {
+            "window_days": int(window),
+            "rows": rows,
+            "leakage_hotspots": leak_rows[:6],
+            "total_trades": len(trades_cut),
+            "total_signals_passed": len(signals_cut),
+        }
+    return payload
+
+
 _dashboard_cache: dict = {}
 _dashboard_cache_ts: float = 0.0
 _dashboard_cache_lock = _threading.Lock()
@@ -668,10 +1126,21 @@ _DASHBOARD_CACHE_TTL = 30.0  # seconds — longer than build time to avoid thras
 
 # ── News constants & helpers ──────────────────────────────────────────────────
 
-_FF_NEWS_WEEK_URL  = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
-_FF_NEWS_MONTH_URL = "https://nfs.faireconomy.media/ff_calendar_thismonth.json"
-_NEWS_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; XAUBot/1.0)"}
-_NEWS_CACHE_TTL = 300.0   # 5 min in-memory cache for news
+_FF_NEWS_URLS = [
+    "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+    "https://cdn-nfs.faireconomy.media/ff_calendar_thisweek.json",
+    "https://nfs.faireconomy.media/ff_calendar_thismonth.json",
+    "https://cdn-nfs.faireconomy.media/ff_calendar_thismonth.json",
+]
+_NEWS_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.forexfactory.com/",
+    "Cache-Control": "no-cache",
+}
+_NEWS_CACHE_TTL = 300.0          # 5 min default
+_NEWS_CACHE_TTL_POST_EVENT = 90.0  # 90s after event fires (was 60s — less aggressive avoids 429)
 
 _NEWS_GOLD_DIR: dict[str, int] = {
     "Non-Farm Payroll": -1, "Nonfarm Payrolls": -1, "NF Payrolls": -1,
@@ -736,7 +1205,8 @@ def _compute_gold_impact(title: str, actual: str, forecast: str, previous: str, 
     act_f  = _parse_news_num(actual)
     for_f  = _parse_news_num(forecast)
     prev_f = _parse_news_num(previous)
-    released = act_f is not None
+    # released = any non-empty actual string (not just numeric — e.g. "RBNZ Rate Statement" has text actual)
+    released = bool(actual.strip())
 
     if not released:
         if base > 0:
@@ -791,40 +1261,106 @@ _news_cache_ts: float = 0.0
 _news_cache_lock = _threading.Lock()
 # Track sent Telegram alerts: "{event_id}_{milestone}"
 _news_alerted: set[str] = set()
+_news_last_event_ts: float = 0.0  # monotonic time when last _past fired (shorter TTL window)
+# Intraday accumulation: keyed by event id, reset each calendar day
+_news_seen_today: dict[str, dict] = {}
+_news_seen_date: str = ""  # "YYYY-MM-DD" — reset when date changes
 
 
 def _build_news_payload() -> dict[str, Any]:
-    """Return news calendar (5-min in-memory cache)."""
-    global _news_cache, _news_cache_ts
+    """Return news calendar with adaptive-TTL cache (shorter for 10 min after event fires).
+    Accumulates today's events in-memory so past items are never lost on re-fetch.
+    """
+    global _news_cache, _news_cache_ts, _news_seen_today, _news_seen_date
     now = time.monotonic()
+    # Use short TTL for 10 min after any event just-fired (_past branch)
+    effective_ttl = (
+        _NEWS_CACHE_TTL_POST_EVENT if now - _news_last_event_ts < 600
+        else _NEWS_CACHE_TTL
+    )
     with _news_cache_lock:
-        if _news_cache and now - _news_cache_ts < _NEWS_CACHE_TTL:
+        if _news_cache and now - _news_cache_ts < effective_ttl:
             return _news_cache
         result = _fetch_news_uncached()
-        _news_cache = result
-        _news_cache_ts = now
-        return result
+        # Merge new events into the intraday accumulator so past events are not lost
+        from datetime import datetime as _dt2, timezone as _tz2
+        today_str = _dt2.now(_tz2.utc).strftime("%Y-%m-%d")
+        if _news_seen_date != today_str:
+            _news_seen_today = {}
+            _news_seen_date = today_str
+        for ev in result.get("week", []):
+            ev_id = ev.get("id")
+            if ev_id:
+                # Always overwrite with latest (captures actual values as they are released)
+                _news_seen_today[ev_id] = ev
+        # Rebuild today list from accumulated set, not just the fresh fetch
+        if _news_seen_today:
+            all_seen = sorted(_news_seen_today.values(), key=lambda e: e.get("datetime_iso", ""))
+            from datetime import datetime as _dt3, timezone as _tz3
+            now_utc3 = _dt3.now(_tz3.utc)
+            for ev in all_seen:
+                try:
+                    ev_dt = _dt3.fromisoformat(ev["datetime_iso"])
+                    if ev_dt.tzinfo is None:
+                        ev_dt = ev_dt.replace(tzinfo=_tz3.utc)
+                    ev["minutes_until"] = round((ev_dt - now_utc3).total_seconds() / 60, 1)
+                except Exception:
+                    pass
+            result_today = [e for e in all_seen if e.get("is_today")]
+            result["today"] = result_today
+            # Also include all seen events in week list (merged with fresh week)
+            fresh_ids = {e.get("id") for e in result.get("week", [])}
+            extra = [e for e in _news_seen_today.values() if e.get("id") not in fresh_ids]
+            if extra:
+                merged_week = list(result.get("week", [])) + extra
+                merged_week.sort(key=lambda e: e.get("datetime_iso", ""))
+                result["week"] = merged_week
+        # Only replace cache if we got real data — don't overwrite with empty (FF rate-limit / timeout)
+        if result.get("week"):
+            _news_cache = result
+            _news_cache_ts = now
+        elif not _news_cache:
+            _news_cache = result  # no prior cache at all — store even if empty
+        return _news_cache
+
+
+# Bridge URLs for news proxy (Docker containers cannot reach ForexFactory directly — Cloudflare rate-limits Docker NAT IPs)
+_BRIDGE_NEWS_URLS = [
+    "http://host.docker.internal:5600/news",
+    "http://host.docker.internal:5601/news",
+]
+
+
+def _fetch_news_via_bridge() -> list | None:
+    """Fetch ForexFactory events via the Windows MT5 bridge (which has a clean host IP).
+    Falls back to second bridge if first is unavailable.
+    Returns list of raw events, or None on failure.
+    """
+    import requests as _req
+    for url in _BRIDGE_NEWS_URLS:
+        try:
+            r = _req.get(url, timeout=65)
+            if r.status_code == 200:
+                payload = r.json()
+                events = payload.get("events", [])
+                if events:
+                    logger.debug("News via bridge %s: %d events (cached=%s)", url, len(events), payload.get("cached"))
+                    return events
+        except Exception as exc:
+            logger.debug("Bridge news %s failed: %s", url, exc)
+    return None
 
 
 def _fetch_news_uncached() -> dict[str, Any]:
-    """Directly fetch ForexFactory JSON and process events."""
-    import requests as _req
+    """Fetch ForexFactory news via Windows bridge proxy (avoids Docker NAT Cloudflare rate-limit)."""
     from datetime import datetime as _dt, timezone as _tz
 
     now_utc = _dt.now(_tz.utc)
     today_date = now_utc.date()
 
-    raw_events: list[dict] = []
-    for url in [_FF_NEWS_WEEK_URL, _FF_NEWS_MONTH_URL]:
-        try:
-            r = _req.get(url, headers=_NEWS_HEADERS, timeout=15)
-            r.raise_for_status()
-            data = r.json()
-            if isinstance(data, list) and data:
-                raw_events = data
-                break
-        except Exception as exc:
-            logger.debug("News fetch from %s failed: %s", url, exc)
+    raw_events: list[dict] = _fetch_news_via_bridge() or []
+    if not raw_events:
+        logger.warning("All ForexFactory URLs failed — keeping stale cache")
 
     # Currencies that directly influence gold (skip exotic/irrelevant ones)
     _GOLD_CURRENCIES = {
@@ -952,6 +1488,7 @@ def _build_dashboard_payload_uncached() -> dict:
         if not trades_path.exists():
             trades_path = _output_path(cfg["trades_fallback"])
         trades = _safe_csv_tail(trades_path, 200, account=acct)
+        journal = _safe_jsonl_tail(_output_path(cfg["journal"]), 200) if cfg.get("journal") else []
         signals = _safe_csv_tail(_output_path(cfg["signals"]), 600, account=acct)
 
         bt_trades: list[dict[str, Any]] = []
@@ -983,6 +1520,14 @@ def _build_dashboard_payload_uncached() -> dict:
                 pass
         win_rate  = round(wins / len(trades), 4) if trades else 0.0
         total_pnl = round(total_pnl, 2)
+        pnl_explain = _build_pnl_explain(trades, signals)
+        profile_presets = _estimate_profile_presets(trades, runtime_cfg, dd)
+        matrix_windows = runtime_cfg.get("admin_matrix_windows_days") if isinstance(runtime_cfg, dict) else [7, 30]
+        matrix_payload = _build_regime_session_matrix(trades, signals, windows_days=matrix_windows)
+        profile_override = _read_runtime_profile_override(acct)
+        profile_active = str(profile_override.get("profile") or "balanced").strip().lower()
+        if profile_active not in _PROFILE_MODES:
+            profile_active = "balanced"
 
         # Walkforward folds
         wf_folds: list[dict] = []
@@ -1010,8 +1555,15 @@ def _build_dashboard_payload_uncached() -> dict:
         model_threshold = meta.get("threshold") or meta.get("decision_threshold")
         config_threshold = runtime_cfg.get("threshold_config")
         risk_min_conf = runtime_cfg.get("risk_min_confidence")
-        threshold_candidates = [v for v in (model_threshold, risk_min_conf) if isinstance(v, (int, float))]
-        threshold_effective = max(threshold_candidates) if threshold_candidates else None
+        # threshold_effective_config = strategy.signal_threshold (set in _apply_live_config_overrides).
+        # This is the ML signal gate: ACC1=0.62, ACC2=0.76 per LATEST_LIVE_GUIDE.md.
+        threshold_eff_cfg = runtime_cfg.get("threshold_effective_config")
+        threshold_candidates = [v for v in (model_threshold, config_threshold, risk_min_conf) if isinstance(v, (int, float))]
+        threshold_effective = (
+            float(threshold_eff_cfg)
+            if isinstance(threshold_eff_cfg, (int, float))
+            else (max(threshold_candidates) if threshold_candidates else None)
+        )
 
         accounts[acct] = {
             "label":   cfg["label"],
@@ -1060,10 +1612,16 @@ def _build_dashboard_payload_uncached() -> dict:
             "win_rate":       win_rate,
             "total_pnl":      total_pnl,
             "recent_trades":  trades[-50:],
+            "recent_journal": journal[-50:],
             "recent_signals": signals,
             "pnl_series":     _build_pnl_series(trades),
+            "pnl_explain":    pnl_explain,
+            "regime_session_matrix": matrix_payload,
+            "profile_presets": profile_presets,
+            "profile_active": profile_active,
             "runtime": runtime_cfg,
             "benchmark": benchmarks.get(acct, {}),
+            "auto_trade_enabled": runtime_cfg.get("auto_trade_enabled"),
         }
 
     return {
@@ -1137,6 +1695,13 @@ class PredictResponse(BaseModel):
     should_trade: bool
     side: str
     latency_ms: float
+
+
+class ApplyProfileRequest(BaseModel):
+    account: str
+    profile: str
+    source: str = "dashboard"
+    requested_by: str | None = None
 
 
 # ── Health check ──────────────────────────────────────────────────────────────
@@ -1322,6 +1887,195 @@ async def get_dashboard_snapshot() -> dict[str, Any]:
     return payload
 
 
+@app.post("/api/v1/profile/apply", tags=["dashboard"])
+async def apply_runtime_profile(req: ApplyProfileRequest) -> dict[str, Any]:
+    account = req.account.strip().lower()
+    profile = req.profile.strip().lower()
+    if account not in _ACCOUNT_CFG:
+        raise HTTPException(status_code=404, detail=f"Unknown account: {account}")
+    if profile not in _PROFILE_MODES:
+        raise HTTPException(status_code=422, detail=f"Invalid profile: {profile}")
+
+    now_utc = datetime.now(timezone.utc).isoformat()
+    payload = {
+        "account": account,
+        "profile": profile,
+        "source": (req.source or "dashboard").strip()[:64],
+        "requested_by": (req.requested_by or "").strip()[:64] or None,
+        "requested_at_utc": now_utc,
+    }
+    override_path = _runtime_profile_override_path(account)
+    try:
+        _safe_write_json(override_path, payload)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Cannot write runtime profile override: {exc}") from exc
+
+    tg_message = (
+        f"🧭 <b>Profile Apply Request</b>\n"
+        f"Account: <b>{account.upper()}</b>\n"
+        f"Profile: <b>{profile.capitalize()}</b>\n"
+        f"Source: {payload['source']}\n"
+        f"Time (UTC): {now_utc}\n"
+        f"Bot will hot-reload this profile automatically."
+    )
+    telegram_sent = _tg_send_account(account, tg_message)
+
+    # Bust cache so dashboard reflects the requested profile quickly.
+    global _dashboard_cache_ts
+    _dashboard_cache_ts = 0.0
+
+    return {
+        "status": "accepted",
+        "account": account,
+        "profile": profile,
+        "override_path": str(override_path),
+        "telegram_sent": telegram_sent,
+        "requested_at_utc": now_utc,
+    }
+
+
+@app.post("/api/v1/reset-kill-switch/{acct_tag}", tags=["dashboard"])
+async def reset_kill_switch(acct_tag: str) -> dict[str, Any]:
+    """Manually reset the daily kill switch / circuit breaker for an account."""
+    acct = acct_tag.strip().lower()
+    if acct not in _ACCOUNT_CFG:
+        raise HTTPException(status_code=404, detail=f"Unknown account: {acct}")
+    cfg = _ACCOUNT_CFG[acct]
+    state_path = _OUTPUTS / cfg.get("daily", f"risk_daily_state_{acct}.json")
+
+    current_state: dict[str, Any] = {}
+    try:
+        if state_path.exists():
+            current_state = _json.loads(state_path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+
+    current_state["killed"] = False
+    current_state["consecutive_losses"] = 0
+    current_state["cooldown_bars"] = 0
+    current_state["daily_loss"] = 0.0
+    current_state["reset_by"] = "dashboard_manual"
+    now_utc = datetime.now(timezone.utc).isoformat()
+    current_state["reset_at_utc"] = now_utc
+
+    try:
+        _safe_write_json(state_path, current_state)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Cannot write kill switch state: {exc}") from exc
+
+    global _dashboard_cache_ts
+    _dashboard_cache_ts = 0.0
+
+    tg_msg = (
+        f"🔓 <b>Kill Switch Reset</b>\n"
+        f"Account: <b>{acct.upper()}</b>\n"
+        f"Action: Manual reset via dashboard\n"
+        f"Time (UTC): {now_utc}\n"
+        f"Consecutive losses → 0, Cooldown → 0"
+    )
+    telegram_sent = _tg_send_account(acct, tg_msg)
+
+    return {
+        "status": "reset",
+        "account": acct,
+        "telegram_sent": telegram_sent,
+        "reset_at_utc": now_utc,
+    }
+
+
+@app.post("/api/v1/auto-trade/{acct_tag}", tags=["dashboard"])
+async def set_auto_trade(acct_tag: str, enabled: bool = Query(...)) -> dict[str, Any]:
+    """Toggle auto_trade on/off for an account by patching the live YAML config."""
+    import re as _re
+    acct = acct_tag.strip().lower()
+    if acct not in _LIVE_CFG_MAP:
+        raise HTTPException(status_code=404, detail=f"Unknown account: {acct}")
+    cfg_path = _LIVE_CFG_MAP[acct]
+    if not cfg_path.exists():
+        raise HTTPException(status_code=404, detail=f"Config not found: {cfg_path}")
+
+    try:
+        text = cfg_path.read_text(encoding="utf-8")
+        new_val = "true" if enabled else "false"
+        # Use multiline anchor so commented-out lines (starting with #) are skipped
+        new_text, n = _re.subn(r'(?m)^([ \t]*auto_trade\s*:)\s*\S+', lambda m: m.group(1) + f" {new_val}", text)
+        if n == 0:
+            raise HTTPException(status_code=422, detail="auto_trade key not found in config YAML")
+        cfg_path.write_text(new_text, encoding="utf-8")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Cannot update config: {exc}") from exc
+
+    global _dashboard_cache_ts
+    _dashboard_cache_ts = 0.0
+    _apply_live_config_overrides()  # Refresh runtime config to pick up YAML change
+
+    now_utc = datetime.now(timezone.utc).isoformat()
+    tg_msg = (
+        f"{'🟢' if enabled else '🔴'} <b>Auto Trade {'Enabled' if enabled else 'Disabled'}</b>\n"
+        f"Account: <b>{acct.upper()}</b>\n"
+        f"Changed via: dashboard UI\n"
+        f"Time (UTC): {now_utc}"
+    )
+    telegram_sent = _tg_send_account(acct, tg_msg)
+
+    return {
+        "status": "updated",
+        "account": acct,
+        "auto_trade": enabled,
+        "telegram_sent": telegram_sent,
+        "updated_at_utc": now_utc,
+    }
+
+
+@app.get("/api/v1/tunnel-url", tags=["dashboard"])
+async def get_tunnel_url() -> dict[str, Any]:
+    """Return the current Cloudflare tunnel URL if available."""
+    import re as _re
+    candidates = [
+        _OUTPUTS / "tunnel_err.txt",
+        _OUTPUTS / "cloudflared.log",
+        _OUTPUTS / "tunnel.log",
+    ]
+    pattern = _re.compile(r'https://[a-z0-9\-]+\.trycloudflare\.com')
+    for f in candidates:
+        try:
+            if f.exists():
+                text = f.read_text(encoding="utf-8", errors="ignore")
+                m = pattern.search(text)
+                if m:
+                    return {"url": m.group(0), "source": f.name}
+        except Exception:
+            continue
+    return {"url": None, "source": None}
+
+
+class SendTelegramRequest(BaseModel):
+    text: str
+    account: str | None = None
+
+
+@app.post("/api/v1/send-telegram", tags=["dashboard"])
+async def send_telegram(req: SendTelegramRequest) -> dict[str, Any]:
+    """Send a Telegram message to one or all configured accounts."""
+    text = req.text.strip()[:4000]
+    if not text:
+        raise HTTPException(status_code=422, detail="text is empty")
+    if req.account:
+        acct = req.account.strip().lower()
+        if acct not in _LIVE_CFG_MAP:
+            raise HTTPException(status_code=404, detail=f"Unknown account: {acct}")
+        sent = _tg_send_account(acct, text)
+        return {"sent": sent, "accounts": [acct]}
+    else:
+        sent_list = []
+        for acct in _LIVE_CFG_MAP:
+            if _tg_send_account(acct, text):
+                sent_list.append(acct)
+        return {"sent": bool(sent_list), "accounts": sent_list}
+
+
 # ── WebSocket dashboard endpoint ─────────────────────────────────────────────
 
 @app.websocket("/ws/live")
@@ -1354,31 +2108,80 @@ async def serve_dashboard() -> FileResponse:
 # ── Telegram news alerter ─────────────────────────────────────────────────────
 
 def _tg_news_send(text: str) -> None:
-    """Send Telegram message for news alerts (tolerates missing credentials)."""
+    """Send Telegram news alert to ALL configured accounts."""
     import requests as _req
-    token   = os.getenv("TELEGRAM_BOT_TOKEN_ACC2") or os.getenv("TELEGRAM_BOT_TOKEN", "")
-    chat_id = os.getenv("TELEGRAM_CHAT_ID_ACC2")   or os.getenv("TELEGRAM_CHAT_ID", "")
+    # Collect (token, chat_id) pairs for every account in _LIVE_CFG_MAP
+    sent_tokens: set[str] = set()
+    for acct, cfg_path in _LIVE_CFG_MAP.items():
+        try:
+            s = load_settings(cfg_path)
+            token   = os.getenv(s.integrations.telegram.token_env, "")
+            chat_id = os.getenv(s.integrations.telegram.chat_id_env, "")
+        except Exception:
+            continue
+        if not token or not chat_id:
+            continue
+        # Avoid duplicate sends when two accounts share the same bot token
+        if token in sent_tokens:
+            continue
+        sent_tokens.add(token)
+        try:
+            resp = _req.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
+                timeout=10,
+            )
+            if not resp.ok:
+                _req.post(
+                    f"https://api.telegram.org/bot{token}/sendMessage",
+                    json={"chat_id": chat_id, "text": text},
+                    timeout=10,
+                )
+        except Exception as exc:
+            logger.debug("Telegram news alert send error (%s): %s", acct, exc)
+
+
+def _tg_send_account(account: str, text: str) -> bool:
+    """Send Telegram message for a specific account using that account's config env mapping."""
+    import requests as _req
+
+    acct = account.strip().lower()
+    cfg_path = _LIVE_CFG_MAP.get(acct)
+    if cfg_path is None:
+        return False
+    try:
+        settings = load_settings(cfg_path)
+    except Exception as exc:
+        logger.warning("Could not load settings for Telegram account send (%s): %s", acct, exc)
+        return False
+
+    token = os.getenv(settings.integrations.telegram.token_env, "")
+    chat_id = os.getenv(settings.integrations.telegram.chat_id_env, "")
     if not token or not chat_id:
-        return
+        return False
+
     try:
         resp = _req.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
             json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
             timeout=10,
         )
-        if not resp.ok:
-            # Retry without HTML parse mode
-            _req.post(
-                f"https://api.telegram.org/bot{token}/sendMessage",
-                json={"chat_id": chat_id, "text": text},
-                timeout=10,
-            )
+        if resp.ok:
+            return True
+        _req.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": text},
+            timeout=10,
+        )
+        return True
     except Exception as exc:
-        logger.debug("Telegram news alert send error: %s", exc)
+        logger.debug("Telegram account alert send error (%s): %s", acct, exc)
+        return False
 
 
 async def _news_alert_loop() -> None:
     """Background task: check every 60s and alert upcoming / just-released news."""
+    global _news_last_event_ts
     await asyncio.sleep(30)   # short delay after startup
     while True:
         try:
@@ -1391,24 +2194,48 @@ async def _news_alert_loop() -> None:
                 mins  = ev["minutes_until"]
                 rel   = ev["released"]
 
+                # ── Released with actual data ────────────────────────────────
                 if rel:
                     key = f"{eid}_released"
                     if key not in _news_alerted:
                         _news_alerted.add(key)
+                        _news_alerted.discard(f"{eid}_past")  # drop preliminary key
                         actual   = ev.get("actual")   or "—"
                         forecast = ev.get("forecast") or "—"
                         previous = ev.get("previous") or "—"
                         label    = ev.get("gold_label", "")
+                        icon     = "🔴" if ev["impact"] == "High" else "🟡"
                         msg = (
-                            f"📊 <b>{ev['event']}</b> — Đã phát hành!\n"
-                            f"🕐 {ev['time_utc']} UTC ({ev['date']})\n"
-                            f"⬅️ Trước: <b>{previous}</b> &nbsp; 🎯 Dự báo: <b>{forecast}</b> &nbsp; ✅ Thực tế: <b>{actual}</b>\n"
+                            f"📊 {icon} <b>{ev['event']}</b> — Đã phát hành!\n"
+                            f"📰 ({ev['currency']}) 🕐 {ev['time_utc']} UTC\n"
+                            f"⬅️ Trước: <b>{previous}</b>  🎯 Dự báo: <b>{forecast}</b>  ✅ Thực tế: <b>{actual}</b>\n"
                             f"🏅 Vàng: {label}"
+                        )
+                        logger.info("News alert RELEASED: %s %s actual=%s", ev['currency'], ev['event'], actual)
+                        await loop.run_in_executor(None, _tg_news_send, msg)
+
+                # ── Just passed — fire immediately even without actual ────────
+                elif -120 < mins <= 0:
+                    key = f"{eid}_past"
+                    if key not in _news_alerted:
+                        _news_alerted.add(key)
+                        _news_last_event_ts = time.monotonic()  # shorten cache TTL for next 10 min
+                        forecast = ev.get("forecast") or "—"
+                        previous = ev.get("previous") or "—"
+                        label    = ev.get("gold_label", "")
+                        icon     = "🔴" if ev["impact"] == "High" else "🟡"
+                        msg = (
+                            f"{icon} <b>{ev['event']}</b> — Vừa phát hành!\n"
+                            f"📰 ({ev['currency']}) 🕐 {ev['time_utc']} UTC\n"
+                            f"🎯 Dự báo: <b>{forecast}</b>  ⬅️ Trước: <b>{previous}</b>\n"
+                            f"⏳ Đang chờ số liệu thực tế từ ForexFactory...\n"
+                            f"💡 {label}"
                         )
                         await loop.run_in_executor(None, _tg_news_send, msg)
 
+                # ── Upcoming — T-30, T-20, T-10, T-5 ────────────────────────
                 elif 0 < mins <= 32:
-                    for milestone, milestone_lbl in [(30, "30 phút"), (5, "5 phút")]:
+                    for milestone, milestone_lbl in [(30, "30 phút"), (20, "20 phút"), (10, "10 phút"), (5, "5 phút")]:
                         if mins <= (milestone + 2):
                             key = f"{eid}_{milestone}min"
                             if key not in _news_alerted:
@@ -1421,7 +2248,7 @@ async def _news_alert_loop() -> None:
                                     f"{icon} <b>Tin {ev['impact']} sắp ra — {milestone_lbl} nữa!</b>\n"
                                     f"📰 <b>{ev['event']}</b> ({ev['currency']})\n"
                                     f"🕐 {ev['time_utc']} UTC\n"
-                                    f"🎯 Dự báo: <b>{forecast}</b> &nbsp; ⬅️ Trước: <b>{previous}</b>\n"
+                                    f"🎯 Dự báo: <b>{forecast}</b>  ⬅️ Trước: <b>{previous}</b>\n"
                                     f"💡 {label}"
                                 )
                                 await loop.run_in_executor(None, _tg_news_send, msg)

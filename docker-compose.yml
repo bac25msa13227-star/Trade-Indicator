@@ -427,30 +427,30 @@ services:
     restart: unless-stopped
     command: tunnel --no-autoupdate --protocol http2 --url http://nginx:80
 
-  # ── FRONTEND: Streamlit Dashboard ────────────────────────────────────────
-  # Lệnh: docker compose up frontend --build -d
-  frontend:
-    build:
-      context: .
-      dockerfile: Dockerfile.frontend
-    image: xauusd-frontend:latest
+  # Watches cloudflared logs and writes the tunnel URL to outputs/tunnel_url.txt
+  # so bots and tunnel_notifier.py can pick it up automatically.
+  tunnel-watch:
+    image: alpine:3.19
+    container_name: xauusd-tunnel-watch
     depends_on:
-      - api
-      - postgres
-    env_file: .env
-    environment:
-      FASTAPI_URL: http://api:8000
-      POSTGRES_HOST: postgres
-      POSTGRES_USER: ${POSTGRES_USER:-trader}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trader_secret}
-      POSTGRES_DB: ${POSTGRES_DB:-tradedb}
-    volumes:
-      - ./configs:/app/configs
-      - ./outputs:/app/outputs
-      - ./src:/app/src
-    ports:
-      - "8501:8501"
+      - cloudflared
     restart: unless-stopped
+    volumes:
+      - ./outputs:/outputs
+      - /var/run/docker.sock:/var/run/docker.sock
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        apk add --no-cache docker-cli -q
+        echo "[tunnel-watch] Waiting for cloudflared logs..."
+        sleep 10
+        docker logs -f xauusd-cloudflared 2>&1 | \
+        grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' | \
+        while read url; do
+          echo "$$url" > /outputs/tunnel_url.txt
+          echo "[tunnel-watch] URL written: $$url"
+        done
+
 
   # ── Healthwatch: monitors live bots and sends Telegram alerts ─────────────
   # Lệnh: docker compose up healthwatch -d
@@ -468,6 +468,58 @@ services:
     working_dir: /app
     restart: unless-stopped
     command: ["/bin/sh", "-c", "pip install requests -q && python scripts/healthwatch.py"]
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # MICROSERVICES
+  # ════════════════════════════════════════════════════════════════════════════
+
+  # ── WF Engine: Walk-Forward run management REST API (port 8801) ───────────
+  # Source: ../WFService/ (folder riêng)
+  # Lệnh: docker compose up wf-engine -d
+  wf-engine:
+    build:
+      context: ../WFService
+      dockerfile: Dockerfile
+    image: xauusd-wf-engine:latest
+    container_name: xauusd-wf-engine
+    environment:
+      TRADE_INDICATOR_ROOT: /trade_indicator
+    volumes:
+      - .:/trade_indicator          # toàn bộ Trade Indicator (scripts/configs/outputs/.venv)
+    ports:
+      - "8801:8801"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8801/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ── Bot Engine: Live bot container management REST API (port 8802) ────────
+  # Source: ../LiveBotService/ (folder riêng)
+  # Lệnh: docker compose up bot-engine -d
+  bot-engine:
+    build:
+      context: ../LiveBotService
+      dockerfile: Dockerfile
+    image: xauusd-bot-engine:latest
+    container_name: xauusd-bot-engine
+    environment:
+      TRADE_INDICATOR_ROOT: /trade_indicator
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./configs:/trade_indicator/configs
+      - ./outputs:/trade_indicator/outputs:ro
+    ports:
+      - "8802:8802"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8802/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
 
 volumes:
   postgres_data:

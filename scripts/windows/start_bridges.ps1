@@ -1,5 +1,5 @@
 # start_bridges.ps1 — Kill old bridges and restart both with correct MT5 terminal paths
-# ACC1: 103613837  / Exness-MT5Real15   -> port 5600  -> C:\Program Files\MetaTrader 5\terminal64.exe
+# ACC1: 270832477  / Exness-MT5Trial17  -> port 5600  -> C:\Program Files\MetaTrader 5\terminal64.exe
 # ACC2: 433326057  / Exness-MT5Trial7   -> port 5601  -> C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe
 
 $ROOT   = "C:\Users\Administrator\Documents\Trade-Indicator"
@@ -22,7 +22,7 @@ Kill-Port 5600
 Kill-Port 5601
 Start-Sleep 3
 
-Write-Host "=== Starting ACC1 bridge (port 5600 -> 103613837 / Exness-MT5Real15) ==="
+Write-Host "=== Starting ACC1 bridge (port 5600 -> 270832477 / Exness-MT5Trial17) ==="
 $proc1 = Start-Process cmd -ArgumentList "/c `"$ROOT\scripts\windows\bridge_acc1.bat`"" `
     -WorkingDirectory $ROOT -WindowStyle Normal -PassThru
 Write-Host "  ACC1 bridge PID=$($proc1.Id)"
@@ -40,8 +40,8 @@ Write-Host "=== Verifying bridges ==="
 try {
     $a1 = (Invoke-WebRequest 'http://localhost:5600/account' -UseBasicParsing -TimeoutSec 8).Content | ConvertFrom-Json
     Write-Host "PORT 5600: login=$($a1.login) server=$($a1.server) balance=$($a1.balance)"
-    if ([string]$a1.login -eq "103613837") { Write-Host "  [OK] ACC1 correct" }
-    else { Write-Host "  [WRONG] Expected 103613837, got $($a1.login)!" }
+    if ([string]$a1.login -eq "270832477") { Write-Host "  [OK] ACC1 correct" }
+    else { Write-Host "  [WRONG] Expected 270832477, got $($a1.login)!" }
 } catch { Write-Host "PORT 5600 error: $_" }
 
 try {

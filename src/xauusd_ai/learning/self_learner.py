@@ -253,6 +253,33 @@ class SelfLearner:
             LOGGER.error("SelfLearner.maybe_retrain error: %s", exc, exc_info=True)
             return None
 
+    def fetch_fresh_mt5(self, timeframe: str = "M15") -> pd.DataFrame:
+        """
+        Fetch data mới nhất từ MT5 broker trực tiếp.
+        Dùng khi live_data_source=mt5 thay thế yfinance.
+        """
+        try:
+            from xauusd_ai.data.market_data import MarketDataService
+            _svc = MarketDataService(self.settings)
+            max_bars = self._MAX_CACHE_BARS.get(timeframe, 10_000)
+            frame = _svc._fetch_rates_mt5(timeframe, max_bars)
+            if not frame.empty:
+                LOGGER.info(
+                    "SelfLearner: fetched %d rows from MT5 (%s)",
+                    len(frame), timeframe,
+                )
+            return frame
+        except Exception as exc:
+            LOGGER.warning("SelfLearner: MT5 fetch failed (%s): %s", timeframe, exc)
+            return pd.DataFrame()
+
+    def fetch_fresh_data(self, timeframe: str = "M15") -> pd.DataFrame:
+        """Fetch fresh data using configured live_data_source (mt5 or yfinance)."""
+        src = getattr(self.settings.market, "live_data_source", "yfinance")
+        if src == "mt5":
+            return self.fetch_fresh_mt5(timeframe)
+        return self.fetch_fresh_yfinance(timeframe)
+
     def fetch_fresh_yfinance(self, timeframe: str = "M15") -> pd.DataFrame:
         """
         Cào data mới nhất từ yfinance (XAUUSD=X).
@@ -303,7 +330,8 @@ class SelfLearner:
     # Internal helpers
     # ------------------------------------------------------------------
     # Maximum bars to keep per timeframe to prevent unbounded memory growth
-    _MAX_CACHE_BARS = {"M1": 5_000, "M5": 12_000, "M15": 10_000, "H1": 5_000, "H4": 3_000, "D1": 2_000}
+    # M5=35K matches WF train window (30K train + buffer for features)
+    _MAX_CACHE_BARS = {"M1": 10_000, "M5": 35_000, "M15": 20_000, "H1": 8_000, "H4": 5_000, "D1": 3_000}
 
     def _merge_with_cache(self, frames: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
         """
@@ -333,10 +361,10 @@ class SelfLearner:
                 merged[tf] = frame
             self._cached_frames[tf] = merged[tf]
 
-        # Mỗi 1 giờ cào thêm từ yfinance để bổ sung data mới nhất
+        # Mỗi 1 giờ cào thêm data mới nhất (MT5 hoặc yfinance theo live_data_source)
         exec_tf = self.settings.market.execution_timeframe
         if now - self._last_fetch_ts > 3600:
-            yf_frame = self.fetch_fresh_yfinance(exec_tf)
+            yf_frame = self.fetch_fresh_data(exec_tf)
             if not yf_frame.empty and exec_tf in merged:
                 combined = pd.concat([merged[exec_tf], yf_frame], ignore_index=True)
                 combined = (
@@ -368,12 +396,42 @@ class SelfLearner:
             "H4": "XAUUSDm_H4.csv",
             "D1": "XAUUSDm_D1.csv",
         }
+        _MAX_CSV_BYTES = 100 * 1024 * 1024  # Skip files >100 MB — too slow on startup
+        _BYTES_PER_ROW_ESTIMATE = 200       # Safe overestimate for MT5 CSV rows
+        _N_ROWS = 35_000
+
+        def _tail_read_csv(fp: Path) -> pd.DataFrame:
+            """Read only the last _N_ROWS from a large CSV via binary seek + StringIO."""
+            from io import StringIO as _SIO
+            seek_size = _N_ROWS * _BYTES_PER_ROW_ESTIMATE
+            fsize = fp.stat().st_size
+            with open(fp, "rb") as _f:
+                header_bytes = _f.readline()
+                header_start = len(header_bytes)
+                tail_start = max(header_start, fsize - seek_size)
+                _f.seek(tail_start)
+                tail_bytes = _f.read()
+            # Drop partial first line when we seeked into the middle of the file
+            if tail_start > header_start:
+                nl_pos = tail_bytes.find(b"\n")
+                if nl_pos >= 0:
+                    tail_bytes = tail_bytes[nl_pos + 1:]
+            combined = header_bytes + tail_bytes
+            return pd.read_csv(_SIO(combined.decode("utf-8", errors="replace")))
+
         for tf, fname in tf_file_map.items():
             fpath = csv_path / fname
             if not fpath.exists():
                 continue
             try:
-                df = pd.read_csv(fpath)
+                file_size = fpath.stat().st_size
+                if file_size > _MAX_CSV_BYTES:
+                    LOGGER.info(
+                        "SelfLearner preload: %s is %.0f MB, skipping (fetched live when needed)",
+                        fname, file_size / 1_048_576,
+                    )
+                    continue
+                df = _tail_read_csv(fpath)
                 # Normalize column names (MT5 CSVs use Title case: Open/High/Low/Close)
                 df.rename(columns={
                     "Open": "open", "High": "high", "Low": "low", "Close": "close",
@@ -383,8 +441,8 @@ class SelfLearner:
                 if "time" not in df.columns and df.index.name:
                     df = df.rename_axis("time").reset_index()
                 df["time"] = pd.to_datetime(df["time"], utc=True)
-                # Chỉ lấy 8000 hàng gần nhất để cân bằng data đủ/retrain vừa phải
-                df = df.sort_values("time").tail(8000).reset_index(drop=True)
+                # Lấy 35000 hàng gần nhất — match WF 30K train window
+                df = df.sort_values("time").tail(35_000).reset_index(drop=True)
                 if "tick_volume_delta" not in df.columns:
                     tv = df["tick_volume"] if "tick_volume" in df.columns else pd.Series(0, index=df.index)
                     df["tick_volume_delta"] = tv.diff().fillna(0)
