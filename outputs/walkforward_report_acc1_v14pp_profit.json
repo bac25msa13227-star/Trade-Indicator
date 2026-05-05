@@ -117,7 +117,7 @@
       "accuracy": 0.534,
       "n_signals": 3149,
       "signal_rate": 0.5248,
-      "elapsed_s": 15.5,
+      "elapsed_s": 20.9,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -133,7 +133,10 @@
         "avg_concurrent_positions": 1.86,
         "position_tier_breakdown": {
           "<$500 (3 slots)": 63
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -152,7 +155,7 @@
       "accuracy": 0.5983,
       "n_signals": 2740,
       "signal_rate": 0.4567,
-      "elapsed_s": 15.2,
+      "elapsed_s": 18.1,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -169,7 +172,10 @@
         "position_tier_breakdown": {
           "<$500 (3 slots)": 119,
           "$500-$2k (5 slots)": 285
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -188,7 +194,7 @@
       "accuracy": 0.5005,
       "n_signals": 3308,
       "signal_rate": 0.5513,
-      "elapsed_s": 14.7,
+      "elapsed_s": 20.2,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -204,7 +210,10 @@
         "avg_concurrent_positions": 1.6,
         "position_tier_breakdown": {
           "<$500 (3 slots)": 48
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -223,7 +232,7 @@
       "accuracy": 0.6103,
       "n_signals": 2641,
       "signal_rate": 0.4402,
-      "elapsed_s": 14.5,
+      "elapsed_s": 20.2,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -240,7 +249,10 @@
         "position_tier_breakdown": {
           "<$500 (3 slots)": 122,
           "$500-$2k (5 slots)": 68
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -259,7 +271,7 @@
       "accuracy": 0.5648,
       "n_signals": 2797,
       "signal_rate": 0.4662,
-      "elapsed_s": 14.5,
+      "elapsed_s": 18.5,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -276,7 +288,10 @@
         "position_tier_breakdown": {
           "<$500 (3 slots)": 204,
           "$500-$2k (5 slots)": 145
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -295,7 +310,7 @@
       "accuracy": 0.5882,
       "n_signals": 2734,
       "signal_rate": 0.4557,
-      "elapsed_s": 15.2,
+      "elapsed_s": 18.7,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -312,7 +327,10 @@
         "position_tier_breakdown": {
           "<$500 (3 slots)": 92,
           "$500-$2k (5 slots)": 176
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -331,7 +349,7 @@
       "accuracy": 0.529,
       "n_signals": 3095,
       "signal_rate": 0.5158,
-      "elapsed_s": 14.2,
+      "elapsed_s": 18.0,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -349,7 +367,10 @@
           "<$500 (3 slots)": 108,
           "$500-$2k (5 slots)": 251,
           "$2k-$10k (8 slots)": 39
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -368,7 +389,7 @@
       "accuracy": 0.5498,
       "n_signals": 3057,
       "signal_rate": 0.5095,
-      "elapsed_s": 14.1,
+      "elapsed_s": 22.1,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -384,7 +405,10 @@
         "avg_concurrent_positions": 1.83,
         "position_tier_breakdown": {
           "<$500 (3 slots)": 115
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -403,7 +427,7 @@
       "accuracy": 0.562,
       "n_signals": 3030,
       "signal_rate": 0.505,
-      "elapsed_s": 14.3,
+      "elapsed_s": 21.1,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -420,7 +444,10 @@
         "position_tier_breakdown": {
           "<$500 (3 slots)": 37,
           "$500-$2k (5 slots)": 44
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -439,7 +466,7 @@
       "accuracy": 0.6317,
       "n_signals": 2283,
       "signal_rate": 0.3805,
-      "elapsed_s": 14.4,
+      "elapsed_s": 18.2,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -457,7 +484,10 @@
           "<$500 (3 slots)": 200,
           "$500-$2k (5 slots)": 54,
           "$2k-$10k (8 slots)": 47
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -476,7 +506,7 @@
       "accuracy": 0.673,
       "n_signals": 1610,
       "signal_rate": 0.2683,
-      "elapsed_s": 13.9,
+      "elapsed_s": 17.8,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -492,7 +522,10 @@
         "avg_concurrent_positions": 1.89,
         "position_tier_breakdown": {
           "<$500 (3 slots)": 190
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -511,7 +544,7 @@
       "accuracy": 0.547,
       "n_signals": 2947,
       "signal_rate": 0.4912,
-      "elapsed_s": 14.0,
+      "elapsed_s": 17.7,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -527,7 +560,10 @@
         "avg_concurrent_positions": 1.91,
         "position_tier_breakdown": {
           "<$500 (3 slots)": 117
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -546,7 +582,7 @@
       "accuracy": 0.5872,
       "n_signals": 2827,
       "signal_rate": 0.4712,
-      "elapsed_s": 15.7,
+      "elapsed_s": 17.5,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -564,7 +600,10 @@
           "<$500 (3 slots)": 173,
           "$500-$2k (5 slots)": 114,
           "$2k-$10k (8 slots)": 98
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -583,7 +622,7 @@
       "accuracy": 0.5238,
       "n_signals": 3060,
       "signal_rate": 0.51,
-      "elapsed_s": 14.0,
+      "elapsed_s": 18.5,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -600,7 +639,10 @@
         "position_tier_breakdown": {
           "<$500 (3 slots)": 157,
           "$500-$2k (5 slots)": 255
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -619,7 +661,7 @@
       "accuracy": 0.4842,
       "n_signals": 3543,
       "signal_rate": 0.5905,
-      "elapsed_s": 14.6,
+      "elapsed_s": 18.8,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -636,7 +678,10 @@
         "position_tier_breakdown": {
           "<$500 (3 slots)": 162,
           "$500-$2k (5 slots)": 62
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -655,7 +700,7 @@
       "accuracy": 0.6423,
       "n_signals": 2364,
       "signal_rate": 0.394,
-      "elapsed_s": 14.7,
+      "elapsed_s": 18.2,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -673,7 +718,10 @@
           "<$500 (3 slots)": 153,
           "$500-$2k (5 slots)": 95,
           "$2k-$10k (8 slots)": 70
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -692,7 +740,7 @@
       "accuracy": 0.6855,
       "n_signals": 1923,
       "signal_rate": 0.3205,
-      "elapsed_s": 14.3,
+      "elapsed_s": 17.7,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -710,7 +758,10 @@
           "<$500 (3 slots)": 93,
           "$500-$2k (5 slots)": 118,
           "$2k-$10k (8 slots)": 44
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -729,7 +780,7 @@
       "accuracy": 0.5558,
       "n_signals": 2947,
       "signal_rate": 0.4912,
-      "elapsed_s": 13.9,
+      "elapsed_s": 17.5,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -747,7 +798,10 @@
           "<$500 (3 slots)": 89,
           "$500-$2k (5 slots)": 65,
           "$2k-$10k (8 slots)": 245
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -766,7 +820,7 @@
       "accuracy": 0.5398,
       "n_signals": 3174,
       "signal_rate": 0.529,
-      "elapsed_s": 14.1,
+      "elapsed_s": 17.7,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -784,7 +838,10 @@
           "<$500 (3 slots)": 152,
           "$500-$2k (5 slots)": 204,
           "$2k-$10k (8 slots)": 17
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -803,7 +860,7 @@
       "accuracy": 0.5987,
       "n_signals": 2561,
       "signal_rate": 0.4268,
-      "elapsed_s": 14.0,
+      "elapsed_s": 16.2,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -820,7 +877,10 @@
         "position_tier_breakdown": {
           "<$500 (3 slots)": 87,
           "$500-$2k (5 slots)": 243
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -839,7 +899,7 @@
       "accuracy": 0.5322,
       "n_signals": 3307,
       "signal_rate": 0.5512,
-      "elapsed_s": 15.0,
+      "elapsed_s": 17.4,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -856,7 +916,10 @@
         "position_tier_breakdown": {
           "<$500 (3 slots)": 133,
           "$500-$2k (5 slots)": 158
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -875,7 +938,7 @@
       "accuracy": 0.5973,
       "n_signals": 2796,
       "signal_rate": 0.466,
-      "elapsed_s": 14.1,
+      "elapsed_s": 17.9,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -894,7 +957,10 @@
           "$500-$2k (5 slots)": 131,
           "$2k-$10k (8 slots)": 133,
           "$10k-$50k (10 slots)": 85
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -913,7 +979,7 @@
       "accuracy": 0.6507,
       "n_signals": 2356,
       "signal_rate": 0.3927,
-      "elapsed_s": 14.3,
+      "elapsed_s": 18.1,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -931,7 +997,10 @@
           "<$500 (3 slots)": 75,
           "$500-$2k (5 slots)": 263,
           "$2k-$10k (8 slots)": 18
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -950,7 +1019,7 @@
       "accuracy": 0.681,
       "n_signals": 2112,
       "signal_rate": 0.352,
-      "elapsed_s": 13.7,
+      "elapsed_s": 19.2,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -967,7 +1036,10 @@
         "position_tier_breakdown": {
           "<$500 (3 slots)": 45,
           "$500-$2k (5 slots)": 150
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -986,7 +1058,7 @@
       "accuracy": 0.5312,
       "n_signals": 3134,
       "signal_rate": 0.5223,
-      "elapsed_s": 14.8,
+      "elapsed_s": 17.1,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -1003,7 +1075,10 @@
         "position_tier_breakdown": {
           "<$500 (3 slots)": 83,
           "$500-$2k (5 slots)": 329
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -1022,7 +1097,7 @@
       "accuracy": 0.6213,
       "n_signals": 2582,
       "signal_rate": 0.4303,
-      "elapsed_s": 14.4,
+      "elapsed_s": 18.5,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -1040,7 +1115,10 @@
           "<$500 (3 slots)": 105,
           "$500-$2k (5 slots)": 183,
           "$2k-$10k (8 slots)": 109
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -1059,7 +1137,7 @@
       "accuracy": 0.6173,
       "n_signals": 2494,
       "signal_rate": 0.4157,
-      "elapsed_s": 14.3,
+      "elapsed_s": 18.0,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -1077,7 +1155,10 @@
           "<$500 (3 slots)": 118,
           "$500-$2k (5 slots)": 212,
           "$2k-$10k (8 slots)": 45
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -1096,7 +1177,7 @@
       "accuracy": 0.7462,
       "n_signals": 1543,
       "signal_rate": 0.2572,
-      "elapsed_s": 13.9,
+      "elapsed_s": 19.9,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -1112,7 +1193,10 @@
         "avg_concurrent_positions": 1.94,
         "position_tier_breakdown": {
           "<$500 (3 slots)": 112
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -1131,7 +1215,7 @@
       "accuracy": 0.773,
       "n_signals": 893,
       "signal_rate": 0.1488,
-      "elapsed_s": 14.4,
+      "elapsed_s": 16.8,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -1147,7 +1231,10 @@
         "avg_concurrent_positions": 1.85,
         "position_tier_breakdown": {
           "<$500 (3 slots)": 66
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -1166,7 +1253,7 @@
       "accuracy": 0.366,
       "n_signals": 4510,
       "signal_rate": 0.7517,
-      "elapsed_s": 14.3,
+      "elapsed_s": 18.5,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -1182,7 +1269,10 @@
         "avg_concurrent_positions": 1.67,
         "position_tier_breakdown": {
           "<$500 (3 slots)": 9
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -1201,7 +1291,7 @@
       "accuracy": 0.4835,
       "n_signals": 3498,
       "signal_rate": 0.583,
-      "elapsed_s": 14.0,
+      "elapsed_s": 18.2,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -1219,7 +1309,10 @@
           "<$500 (3 slots)": 54,
           "$500-$2k (5 slots)": 230,
           "$2k-$10k (8 slots)": 160
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -1238,7 +1331,7 @@
       "accuracy": 0.5013,
       "n_signals": 3319,
       "signal_rate": 0.5532,
-      "elapsed_s": 14.3,
+      "elapsed_s": 20.2,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -1256,7 +1349,10 @@
           "<$500 (3 slots)": 58,
           "$500-$2k (5 slots)": 225,
           "$2k-$10k (8 slots)": 123
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -1275,7 +1371,7 @@
       "accuracy": 0.5245,
       "n_signals": 3257,
       "signal_rate": 0.5428,
-      "elapsed_s": 14.2,
+      "elapsed_s": 19.2,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -1293,7 +1389,10 @@
           "<$500 (3 slots)": 184,
           "$500-$2k (5 slots)": 248,
           "$2k-$10k (8 slots)": 8
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -1312,7 +1411,7 @@
       "accuracy": 0.6452,
       "n_signals": 2243,
       "signal_rate": 0.3738,
-      "elapsed_s": 14.0,
+      "elapsed_s": 18.3,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -1331,7 +1430,10 @@
           "$500-$2k (5 slots)": 138,
           "$2k-$10k (8 slots)": 65,
           "$10k-$50k (10 slots)": 38
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -1350,7 +1452,7 @@
       "accuracy": 0.7543,
       "n_signals": 1273,
       "signal_rate": 0.2122,
-      "elapsed_s": 15.1,
+      "elapsed_s": 18.2,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -1367,7 +1469,10 @@
         "position_tier_breakdown": {
           "<$500 (3 slots)": 90,
           "$500-$2k (5 slots)": 120
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -1386,7 +1491,7 @@
       "accuracy": 0.4955,
       "n_signals": 3408,
       "signal_rate": 0.568,
-      "elapsed_s": 14.3,
+      "elapsed_s": 19.4,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -1403,7 +1508,10 @@
         "position_tier_breakdown": {
           "<$500 (3 slots)": 142,
           "$500-$2k (5 slots)": 86
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -1422,7 +1530,7 @@
       "accuracy": 0.5987,
       "n_signals": 2596,
       "signal_rate": 0.4327,
-      "elapsed_s": 14.8,
+      "elapsed_s": 18.2,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -1440,7 +1548,10 @@
           "<$500 (3 slots)": 72,
           "$500-$2k (5 slots)": 195,
           "$2k-$10k (8 slots)": 114
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -1459,7 +1570,7 @@
       "accuracy": 0.8038,
       "n_signals": 764,
       "signal_rate": 0.1273,
-      "elapsed_s": 14.5,
+      "elapsed_s": 18.8,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -1476,7 +1587,10 @@
         "position_tier_breakdown": {
           "<$500 (3 slots)": 78,
           "$500-$2k (5 slots)": 48
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -1495,7 +1609,7 @@
       "accuracy": 0.6727,
       "n_signals": 2099,
       "signal_rate": 0.3498,
-      "elapsed_s": 14.8,
+      "elapsed_s": 19.4,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -1512,7 +1626,10 @@
         "position_tier_breakdown": {
           "<$500 (3 slots)": 68,
           "$500-$2k (5 slots)": 58
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -1531,7 +1648,7 @@
       "accuracy": 0.6217,
       "n_signals": 2325,
       "signal_rate": 0.3875,
-      "elapsed_s": 13.8,
+      "elapsed_s": 19.1,
       "rr_sweep": {},
       "concurrent_sim": {
         "starting_balance": 200.0,
@@ -1548,7 +1665,10 @@
         "position_tier_breakdown": {
           "<$500 (3 slots)": 22,
           "$500-$2k (5 slots)": 212
-        }
+        },
+        "sharpe_ratio": null,
+        "sortino_ratio": null,
+        "calmar_ratio": null
       }
     },
     {
@@ -1564,7 +1684,7 @@
       "n_signals": 978,
       "n_total": 1782,
       "signal_rate": 0.5488,
-      "elapsed_s": 14.4,
+      "elapsed_s": 18.7,
       "rr_sweep": {},
       "partial_fold": true,
       "concurrent_sim": {

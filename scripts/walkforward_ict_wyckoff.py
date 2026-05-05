@@ -648,9 +648,9 @@ while fold_start + TRAIN_BARS + TEST_BARS <= n_total:
         )
         
         # Add metrics to concurrent_sim dict (metrics will be None if insufficient data)
-        result["concurrent_sim"]["sharpe_ratio"] = metrics.get("sharpe_ratio") if metrics else None
-        result["concurrent_sim"]["sortino_ratio"] = metrics.get("sortino_ratio") if metrics else None
-        result["concurrent_sim"]["calmar_ratio"] = metrics.get("calmar_ratio") if metrics else None
+        result["concurrent_sim"]["sharpe_ratio"] = metrics.get("sharpe") if metrics else None
+        result["concurrent_sim"]["sortino_ratio"] = metrics.get("sortino") if metrics else None
+        result["concurrent_sim"]["calmar_ratio"] = metrics.get("calmar") if metrics else None
     else:
         # No trades in fold — set metrics to None
         result["concurrent_sim"]["sharpe_ratio"] = None
