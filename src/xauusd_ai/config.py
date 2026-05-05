@@ -187,6 +187,10 @@ class RiskSettings(StrictSettingsModel):
     spread_cost_rr: float = 0.10
     # slippage_rr:  slippage as fraction of 1R (entry+exit combined)
     slippage_rr: float = 0.05
+    # use_dynamic_slippage: enable ATR+spread+volume+session-based slippage calculation
+    #   True  → dynamic slippage per trade (realistic, varies 1-6 pips)
+    #   False → static slippage_rr applied uniformly (legacy behavior)
+    use_dynamic_slippage: bool = False
     # entry_slippage_atr_frac: shift SL/TP price LEVELS by ATR×frac against trade direction
     # Models MT5 tick fill differing from bar.close (live rebases preserving $ distances).
     # 0.07 ≈ $0.14 slippage for M5 XAUUSD ATR~$2. Reduces win rate ~1-3%.  0.0 = disabled.

@@ -50,6 +50,8 @@ FEATURE_COLUMNS = [
     "trend_alignment",
     "rsi",
     "macd_hist",
+    "atr",               # ATR absolute value (needed for slippage calculation)
+    "atr_mean",          # ATR rolling mean (for volatility normalization)
     "atr_ratio",
     "range_efficiency",
     "liquidity_sweep",
@@ -149,11 +151,29 @@ def _enrich_execution_frame(settings: Settings, frame: pd.DataFrame) -> pd.DataF
     )
     enriched["macd_hist"] = macd_hist.fillna(0)
     enriched["atr"] = atr(enriched).bfill().fillna(0)
-    enriched["atr_ratio"] = (enriched["atr"] / enriched["close"]).fillna(0)
+    # ATR ratio: current ATR vs rolling mean (for volatility regime detection)
+    atr_mean = enriched["atr"].rolling(50, min_periods=10).mean().fillna(enriched["atr"])
+    enriched["atr_mean"] = atr_mean
+    enriched["atr_ratio"] = (enriched["atr"] / atr_mean.replace(0, np.nan)).fillna(1.0)
     enriched["range_efficiency"] = (
         (enriched["close"] - enriched["open"]).abs() / (enriched["high"] - enriched["low"]).replace(0, np.nan)
     ).fillna(0)
     enriched["tick_volume_zscore"] = zscore(enriched["tick_volume"], 20).fillna(0)
+    
+    # Spread estimation for XAUUSD (typical: 0.2-0.6 pips depending on session)
+    # Asian: 0.4-0.6, London/NY: 0.2-0.3 pips
+    hour = enriched["time"].dt.hour
+    base_spread = pd.Series(0.3, index=enriched.index)  # Default 0.3 pips
+    # Wider spread during Asian session (22:00-08:00 UTC) and low liquidity hours
+    asian_mask = (hour >= 22) | (hour < 8)
+    base_spread[asian_mask] = 0.5
+    # Tighter spread during London/NY overlap (13:00-16:00 UTC)
+    overlap_mask = (hour >= 13) & (hour < 16)
+    base_spread[overlap_mask] = 0.25
+    # Adjust for volatility: higher ATR = wider spread
+    volatility_factor = 1.0 + (enriched["atr_ratio"] - enriched["atr_ratio"].rolling(50).mean()) * 2.0
+    enriched["spread_points"] = (base_spread * volatility_factor.fillna(1.0)).clip(0.2, 1.0).fillna(0.3)
+    
     enriched["session_return"] = enriched["close"].pct_change(12).fillna(0)
     # NEW: Bollinger Band position
     bb_upper, bb_mid, bb_lower = bollinger_bands(enriched["close"], 20)

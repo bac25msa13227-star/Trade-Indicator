@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import time as time_obj
 from pathlib import Path
 
 import pandas as pd
 
+from xauusd_ai.backtesting.slippage import calculate_slippage_rr, get_session_multiplier
 from xauusd_ai.config import Settings
 from xauusd_ai.execution.risk import RiskManager
 from xauusd_ai.strategies.hybrid import HybridStrategy
@@ -41,8 +43,9 @@ def simulate_prediction_backtest(
 
     # Friction components (fraction of 1R deducted per trade)
     _spread_rr = float(getattr(settings.risk, "spread_cost_rr", 0.10))
-    _slippage_rr = float(getattr(settings.risk, "slippage_rr", 0.05))
+    _slippage_rr = float(getattr(settings.risk, "slippage_rr", 0.05))  # Static fallback
     _commission_rr = float(getattr(settings.risk, "commission_rr", 0.02))
+    _use_dynamic_slippage = bool(getattr(settings.risk, "use_dynamic_slippage", False))
     friction_rr = _spread_rr + _slippage_rr + _commission_rr
     compound_cap = float(getattr(settings.risk, "compound_cap", 50.0))
     max_balance = start_bal * compound_cap if compound_cap > 0 else float("inf")
@@ -63,9 +66,50 @@ def simulate_prediction_backtest(
         effective_bal = balance if compound else start_bal
         if compound and compound_cap > 0 and effective_bal > max_balance:
             effective_bal = max_balance
-        # P1a: Session-aware friction
+        
+        # Calculate friction: spread + slippage + commission
         _sess_mult = float(getattr(row, 'session_spread_mult', 1.0))
-        _row_friction = _spread_rr * _sess_mult + _slippage_rr + _commission_rr
+        
+        # Dynamic slippage calculation (if enabled)
+        if _use_dynamic_slippage:
+            # Extract market conditions from row
+            _atr = float(getattr(row, 'atr', 0.5))  # Actual ATR value
+            _atr_mean = float(getattr(row, 'atr_mean', 0.5))  # ATR rolling mean
+            _spread_pips = float(getattr(row, 'spread_points', 0.3))  # Spread in pips
+            _volume_zscore = float(getattr(row, 'tick_volume_zscore', 0.0))
+            
+            # Convert volume z-score to volume ratio (z-score 0 = normal, +1 = high, -1 = low)
+            # volume_ratio: 1.0 = normal, >1 = high volume (less slippage), <1 = low volume (more slippage)
+            _volume_ratio = max(0.3, 1.0 + (_volume_zscore * 0.3))  # Scale z-score to ratio
+            
+            # Get session multiplier from row time
+            if hasattr(row, 'time') and hasattr(row.time, 'time'):
+                _session_mult = get_session_multiplier(row.time.time())
+            else:
+                _session_mult = 1.0  # Fallback
+            
+            # Calculate slippage using dynamic model
+            from xauusd_ai.backtesting.slippage import calculate_slippage_pips
+            _slippage_pips = calculate_slippage_pips(
+                atr=_atr,
+                atr_mean=_atr_mean,
+                spread_pips=_spread_pips,
+                volume_ratio=_volume_ratio,
+                session_multiplier=_session_mult,
+            )
+            
+            # Convert slippage pips to RR
+            _entry_price = float(row.close)
+            _sl_distance = abs(_entry_price * settings.risk.risk_per_trade * 0.01)  # Estimate SL distance
+            _sl_price = _entry_price - _sl_distance if row.trade_side == 1 else _entry_price + _sl_distance
+            _row_slippage_rr = calculate_slippage_rr(_slippage_pips, _entry_price, _sl_price)
+            
+            # Total friction with dynamic slippage
+            _row_friction = _spread_rr * _sess_mult + _row_slippage_rr + _commission_rr
+        else:
+            # Static slippage (original behavior)
+            _row_friction = _spread_rr * _sess_mult + _slippage_rr + _commission_rr
+        
         net_rr = row.realized_rr - _row_friction
         pnl = effective_bal * risk_fraction * net_rr
         balance_before = balance
