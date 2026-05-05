@@ -606,6 +606,23 @@ while fold_start + TRAIN_BARS + TEST_BARS <= n_total:
     fold_sim = simulate_dynamic_concurrent_backtest(fold_sim_df, _sim_settings, _fold_risk_mgr, m1_df=_m1_df)
     sim_r = fold_sim.report
     _compound_balance = STARTING_BALANCE if NO_COMPOUND else sim_r["ending_balance"]  # carry forward or reset
+    
+    # Build concurrent_sim result dict FIRST
+    result["concurrent_sim"] = {
+        "starting_balance":       _sim_settings.training.backtest_initial_balance,
+        "ending_balance":         sim_r["ending_balance"],
+        "return_pct":             sim_r["return_pct"],
+        "trades":                 sim_r["trades"],
+        "wins":                   sim_r["wins"],
+        "losses":                 sim_r["losses"],
+        "win_rate":               sim_r["win_rate"],
+        "profit_factor":          sim_r["profit_factor"],
+        "max_drawdown_pct":       sim_r["max_drawdown_pct"],
+        "max_concurrent_positions": sim_r["max_concurrent_positions"],
+        "avg_concurrent_positions": sim_r["avg_concurrent_positions"],
+        "position_tier_breakdown": sim_r["position_tier_breakdown"],
+    }
+    
     # Collect per-trade records for daily analysis
     if not fold_sim.trades.empty:
         _ft = fold_sim.trades.copy()
@@ -630,32 +647,16 @@ while fold_start + TRAIN_BARS + TEST_BARS <= n_total:
             risk_free_rate=risk_free_rate,
         )
         
-        # Store metrics in result (metrics will be None if insufficient data)
+        # Add metrics to concurrent_sim dict (metrics will be None if insufficient data)
         result["concurrent_sim"]["sharpe_ratio"] = metrics.get("sharpe_ratio") if metrics else None
         result["concurrent_sim"]["sortino_ratio"] = metrics.get("sortino_ratio") if metrics else None
         result["concurrent_sim"]["calmar_ratio"] = metrics.get("calmar_ratio") if metrics else None
-        result["concurrent_sim"]["max_drawdown_pct"] = sim_r["max_drawdown_pct"]  # Keep existing DD
-        result["concurrent_sim"]["total_return_pct"] = sim_r["return_pct"]  # Keep existing return
     else:
         # No trades in fold — set metrics to None
         result["concurrent_sim"]["sharpe_ratio"] = None
         result["concurrent_sim"]["sortino_ratio"] = None
         result["concurrent_sim"]["calmar_ratio"] = None
     
-    result["concurrent_sim"] = {
-        "starting_balance":       _sim_settings.training.backtest_initial_balance,
-        "ending_balance":         sim_r["ending_balance"],
-        "return_pct":             sim_r["return_pct"],
-        "trades":                 sim_r["trades"],
-        "wins":                   sim_r["wins"],
-        "losses":                 sim_r["losses"],
-        "win_rate":               sim_r["win_rate"],
-        "profit_factor":          sim_r["profit_factor"],
-        "max_drawdown_pct":       sim_r["max_drawdown_pct"],
-        "max_concurrent_positions": sim_r["max_concurrent_positions"],
-        "avg_concurrent_positions": sim_r["avg_concurrent_positions"],
-        "position_tier_breakdown": sim_r["position_tier_breakdown"],
-    }
     fold_results.append(result)
 
     # Progress line
