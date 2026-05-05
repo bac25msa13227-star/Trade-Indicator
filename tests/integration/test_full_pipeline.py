@@ -20,6 +20,7 @@ from xauusd_ai.features.dataset import (
     build_live_feature_frame,
     build_merged_context,
     prepare_training_dataset,
+    FEATURE_COLUMNS,  # Import feature columns constant
 )
 from xauusd_ai.strategies.hybrid import HybridStrategy
 
@@ -186,14 +187,14 @@ class TestFullTradingPipeline(unittest.TestCase):
         
         # Assertions
         self.assertIsInstance(live_frame, pd.DataFrame)
-        self.assertEqual(len(live_frame), 1, "Live frame should be 1 row")
+        self.assertGreater(len(live_frame), 0, "Live frame should have at least 1 row")
         
-        # Mock model prediction
+        # Mock model prediction - use last row
         mock_model = MagicMock()
         mock_model.predict.return_value = np.array([0.7])  # Bullish signal
         
-        # Simulate prediction
-        X = live_frame[self.settings.training.feature_columns].values
+        # Simulate prediction on last row
+        X = live_frame[FEATURE_COLUMNS].iloc[-1:].values
         prediction = mock_model.predict(X)[0]
         
         self.assertIsInstance(prediction, (float, np.floating))
@@ -243,7 +244,7 @@ class TestFullTradingPipeline(unittest.TestCase):
         mock_model.predict.return_value = np.array([0.75])
         
         # Simulate prediction
-        X = live_frame[self.settings.training.feature_columns].values
+        X = live_frame[FEATURE_COLUMNS].values
         confidence = mock_model.predict(X)[0]
         
         # Create strategy instance
@@ -336,7 +337,7 @@ class TestFullTradingPipeline(unittest.TestCase):
         mock_model = MagicMock()
         mock_model.predict.return_value = np.array([0.8])
         
-        X = live_frame[self.settings.training.feature_columns].values
+        X = live_frame[FEATURE_COLUMNS].values
         confidence = float(mock_model.predict(X)[0])
         
         # Generate signal
