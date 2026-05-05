@@ -314,6 +314,9 @@ class ExitModelSettings(StrictSettingsModel):
 
 
 class ExecutionSettings(StrictSettingsModel):
+    # Execution mode: "live" (real trading), "paper" (shadow mode), "backtest" (historical)
+    # Paper mode logs all signals and decisions without placing real orders
+    mode: str = "live"  # Options: live, paper, backtest
     auto_trade: bool = False
     deviation: int = 20
     magic_number: int = 20260309

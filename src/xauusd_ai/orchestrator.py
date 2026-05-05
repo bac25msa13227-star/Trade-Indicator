@@ -16,9 +16,11 @@ import pandas as pd
 from dotenv import load_dotenv
 
 from xauusd_ai.backtesting.engine import simulate_prediction_backtest, write_backtest_outputs
+from xauusd_ai.backtesting.slippage import calculate_slippage_pips, get_session_multiplier
 from xauusd_ai.config import Settings, load_settings
 from xauusd_ai.data.market_data import MarketDataService
 from xauusd_ai.execution.mt5_executor import MT5Executor
+from xauusd_ai.execution.paper_logger import PaperTradeLogger
 from xauusd_ai.execution.risk import RiskManager
 from xauusd_ai.features.dataset import (
     build_live_feature_frame,
@@ -616,14 +618,28 @@ def run_walkforward(settings: Settings) -> None:
 
 
 def run_paper_trade_loop(settings: Settings) -> None:
+    """
+    Paper trading loop với PaperTradeLogger integration.
+    
+    Features:
+    - Log signals với predicted slippage (dynamic slippage model)
+    - Track entry signals với market conditions (ATR, spread, volume, session)
+    - Backward compatible: vẫn log CSV như cũ
+    - Skip logging nếu should_trade = False
+    """
     data_service, trainer, strategy, notifier, _, risk_manager = _bootstrap(settings)
     model_ready = trainer.load_artifacts()
     if settings.training.retrain_on_startup or not model_ready:
         run_training(settings)
         trainer.load_artifacts()
 
+    # Initialize paper logger (mới)
+    paper_logger = PaperTradeLogger(output_path="outputs/paper_trades.jsonl")
+    
+    # Keep legacy CSV logging (backward compatibility)
     log_path = Path(settings.app.paper_trade_log_path)
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    
     loops = 0
     last_logged_time: str | None = None
 
@@ -632,10 +648,79 @@ def run_paper_trade_loop(settings: Settings) -> None:
         live_frame = build_live_feature_frame(settings, frames, strategy)
         latest_row = live_frame.iloc[-1]
         latest_time = str(latest_row["time"])
+        
         if latest_time != last_logged_time:
             signal = trainer.score_live_row(live_frame)
             decision = strategy.build_trade_decision(frames, latest_row, signal)
             order_plan = risk_manager.build_order_plan(decision, frames[settings.market.execution_timeframe].iloc[-1])
+            
+            # Extract market conditions cho slippage calculation
+            atr = float(latest_row.get("atr", 0.5))
+            atr_mean = float(latest_row.get("atr_mean", 0.5))
+            spread_pips = float(latest_row.get("spread_points", 0.3))
+            tick_volume_zscore = float(latest_row.get("tick_volume_zscore", 0.0))
+            
+            # Convert volume z-score to ratio (same logic as engine.py)
+            volume_ratio = max(0.3, 1.0 + (tick_volume_zscore * 0.3))
+            
+            # Get session multiplier
+            session_mult = get_session_multiplier(pd.to_datetime(latest_time).time())
+            
+            # Calculate predicted slippage (chỉ khi use_dynamic_slippage enabled)
+            use_dynamic = getattr(settings.risk, "use_dynamic_slippage", False)
+            if use_dynamic and decision.should_trade:
+                predicted_slippage_pips = calculate_slippage_pips(
+                    atr=atr,
+                    atr_mean=atr_mean,
+                    spread_pips=spread_pips,
+                    volume_ratio=volume_ratio,
+                    session_multiplier=session_mult,
+                )
+            else:
+                # Static slippage fallback (0.5 pips default)
+                predicted_slippage_pips = 0.5
+            
+            # Log với PaperTradeLogger (NEW)
+            if decision.should_trade:
+                # Build signal dict cho paper logger
+                signal_dict = {
+                    "side": decision.side,
+                    "entry_price": order_plan.entry_price,
+                    "stop_loss": order_plan.stop_loss,
+                    "take_profit": order_plan.take_profit,
+                    "probability": decision.confidence,
+                    "risk_fraction": settings.risk.risk_per_trade,
+                    "lot_size": 0.01,  # Placeholder (actual lot from risk_manager)
+                }
+                
+                market_data = {
+                    "atr": atr,
+                    "atr_mean": atr_mean,
+                    "spread_pips": spread_pips,
+                    "volume_ratio": volume_ratio,
+                    "session": "Asian" if session_mult == 1.5 else ("London" if session_mult == 1.0 else "NY"),
+                }
+                
+                # Log entry signal
+                trade_id = paper_logger.log_entry_signal(
+                    signal=signal_dict,
+                    predicted_slippage_pips=predicted_slippage_pips,
+                    market_data=market_data,
+                )
+                
+                LOGGER.info(
+                    f"Paper trade #{trade_id} logged: {decision.side} @ {order_plan.entry_price}, "
+                    f"slippage={predicted_slippage_pips:.2f} pips, session={market_data['session']}"
+                )
+            else:
+                # Log skip
+                paper_logger.log_skip(
+                    reason=decision.reason,
+                    signal={"confidence": decision.confidence},
+                    market_data={"atr": atr, "spread_pips": spread_pips},
+                )
+            
+            # Legacy CSV logging (KEEP for backward compatibility)
             volatility_regime = int(latest_row["volatility_regime"])
             ict_score = float(latest_row.get("ict_score", 0.0))
             wyckoff_score = float(latest_row.get("wyckoff_score", 0.0))
@@ -650,6 +735,7 @@ def run_paper_trade_loop(settings: Settings) -> None:
             regime_bias = 0.5 if volatility_regime == 0 else (1.2 if volatility_regime == 2 else 1.0)
             strategy_required_min = float(strategy.required_strategy_score(volatility_regime))
             strategy_gate_pass = int(abs(float(latest_row.get("strategy_score", 0.0))) >= strategy_required_min)
+            
             signal_row = pd.DataFrame(
                 [
                     {
@@ -674,6 +760,7 @@ def run_paper_trade_loop(settings: Settings) -> None:
                         "momentum_weight": momentum_weight,
                         "strategy_total_weight": strategy_total_weight,
                         "volatility_regime": volatility_regime,
+                        "predicted_slippage_pips": predicted_slippage_pips,  # ADD this
                     }
                 ]
             )

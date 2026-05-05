@@ -46,6 +46,7 @@ from xauusd_ai.features.dataset import (
     get_label_lookahead_bars,
     prepare_training_dataset,
 )
+from xauusd_ai.infra.advanced_metrics import calculate_all_metrics
 from xauusd_ai.strategies.hybrid import HybridStrategy
 
 import functools
@@ -612,6 +613,35 @@ while fold_start + TRAIN_BARS + TEST_BARS <= n_total:
         _ft["test_start"] = result.get("test_start", "")
         _ft["test_end"]   = result.get("test_end", "")
         sim_trade_log.append(_ft)
+        
+        # Calculate advanced performance metrics (Sharpe, Calmar, Sortino) from balance series
+        balance_series = _ft["balance_after"].tolist()
+        # Add starting balance at the beginning
+        balance_series.insert(0, _sim_settings.training.backtest_initial_balance)
+        
+        # XAUUSD trades on M15 timeframe with avg 8-12 bars hold → ~4-10 trades/day
+        # Use daily periods for annualization (252 trading days/year)
+        periods_per_year = 252  # Daily returns for annualization
+        risk_free_rate = 0.03   # 3% annual risk-free rate (US T-Bills)
+        
+        metrics = calculate_all_metrics(
+            balance_series=balance_series,
+            periods_per_year=periods_per_year,
+            risk_free_rate=risk_free_rate,
+        )
+        
+        # Store metrics in result (metrics will be None if insufficient data)
+        result["concurrent_sim"]["sharpe_ratio"] = metrics.get("sharpe_ratio") if metrics else None
+        result["concurrent_sim"]["sortino_ratio"] = metrics.get("sortino_ratio") if metrics else None
+        result["concurrent_sim"]["calmar_ratio"] = metrics.get("calmar_ratio") if metrics else None
+        result["concurrent_sim"]["max_drawdown_pct"] = sim_r["max_drawdown_pct"]  # Keep existing DD
+        result["concurrent_sim"]["total_return_pct"] = sim_r["return_pct"]  # Keep existing return
+    else:
+        # No trades in fold — set metrics to None
+        result["concurrent_sim"]["sharpe_ratio"] = None
+        result["concurrent_sim"]["sortino_ratio"] = None
+        result["concurrent_sim"]["calmar_ratio"] = None
+    
     result["concurrent_sim"] = {
         "starting_balance":       _sim_settings.training.backtest_initial_balance,
         "ending_balance":         sim_r["ending_balance"],
@@ -892,6 +922,26 @@ if _csims:
     print(f"     Return/fold    : {avg_sim_ret:+.2f}%  (${STARTING_BALANCE:.0f} start per fold)")
     print(f"     Max Drawdown   : {avg_sim_dd:.2f}%")
     print(f"     Avg concurrent : {avg_sim_pos:.1f} positions | Max concurrent: {max_sim_pos}")
+    
+    # Advanced metrics (Sharpe, Calmar, Sortino)
+    _sharpes = [c.get("sharpe_ratio") for c in _csims if c.get("sharpe_ratio") is not None]
+    _sortinos = [c.get("sortino_ratio") for c in _csims if c.get("sortino_ratio") is not None]
+    _calmars = [c.get("calmar_ratio") for c in _csims if c.get("calmar_ratio") is not None]
+    
+    if _sharpes:
+        avg_sharpe = float(np.mean(_sharpes))
+        avg_sortino = float(np.mean(_sortinos)) if _sortinos else 0.0
+        avg_calmar = float(np.mean(_calmars)) if _calmars else 0.0
+        
+        print()
+        print("  📈 Risk-Adjusted Performance Metrics:")
+        print(f"     Sharpe Ratio   : {avg_sharpe:.3f}  (>1.0 good, >2.0 excellent)")
+        print(f"     Sortino Ratio  : {avg_sortino:.3f}  (only penalizes downside risk)")
+        print(f"     Calmar Ratio   : {avg_calmar:.3f}  (return/max DD, >1.0 good)")
+        print(f"     Metrics folds  : {len(_sharpes)}/{len(_csims)}")
+    else:
+        print()
+        print("  ⚠️  Advanced metrics: Insufficient data (need ≥2 trades per fold)")
     print()
 
 # Overfitting check
