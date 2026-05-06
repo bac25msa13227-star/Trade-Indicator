@@ -91,6 +91,7 @@ _parser.add_argument("--fast", action="store_true", help="Faster training with �
 _parser.add_argument("--cache", action="store_true", help="Cache full dataset to parquet for faster reruns")
 _parser.add_argument("--no-rr-sweep", action="store_true", help="Skip RR sweep (faster, only run concurrent sim)")
 _parser.add_argument("--no-compound", action="store_true", help="Reset balance to $200 each fold (no compounding)")
+_parser.add_argument("--monthly-reset", action="store_true", help="Reset balance to $200 every 30 days (simulates monthly withdrawal)")
 _parser.add_argument("--test-bars", type=int, default=None, help="Override TEST_BARS (bars per fold test window)")
 _parser.add_argument("--step-bars", type=int, default=None, help="Override STEP_BARS (bars to slide per fold)")
 _parser.add_argument("--min-conf", type=float, default=None, help="Override min confidence threshold for signal filter (e.g. 0.70 to match combo133)")
@@ -108,6 +109,7 @@ _parser.add_argument("--min-profit", type=float, default=12.0, help="Minimum exp
 _known, _rest = _parser.parse_known_args()
 FAST_MODE = _known.fast
 NO_COMPOUND = _known.no_compound
+MONTHLY_RESET = _known.monthly_reset
 NO_CIRCUIT_BREAKER = _known.no_cb
 NO_TRAIL = _known.no_trail
 NO_DD_KILL = _known.no_dd_kill
@@ -165,7 +167,12 @@ print(f"  Features: {len(FEATURE_COLUMNS)}  (D1:1 H4:9 H1:3 M15:15 News:5 Struct
 print(f"  Train   : {TRAIN_BARS:,} bars (~1 yr M15)")
 print(f"  Test    : {TEST_BARS:,} bars (~3 mo M15)")
 print(f"  Step    : {STEP_BARS:,} bars (~3 mo slide)")
-print(f"  Balance : ${STARTING_BALANCE:.0f} khởi đầu | Rủi ro {RISK_PCT:.2%}/lệnh{' | NO-COMPOUND (reset $200/fold)' if NO_COMPOUND else ''}")
+reset_mode = ""
+if NO_COMPOUND:
+    reset_mode = " | NO-COMPOUND (reset $200/fold)"
+elif MONTHLY_RESET:
+    reset_mode = " | MONTHLY-RESET (reset $200 every 30 days)"
+print(f"  Balance : ${STARTING_BALANCE:.0f} khởi đầu | Rủi ro {RISK_PCT:.2%}/lệnh{reset_mode}")
 print(f"  RR Sweep: {'SKIP' if _known.no_rr_sweep else RR_SWEEP}")
 print(f"  PrecFloor:{PREC_FLOOR:.0%}  (win rate tối thiểu yêu cầu)")
 if FORCE_THRESHOLD is not None:
@@ -289,6 +296,10 @@ win_log = []   # for live-learning log (thắng/thua)
 sim_trade_log: list[pd.DataFrame] = []  # per-trade records from concurrent sim
 rr_equity_curves  = {rr: [STARTING_BALANCE] for rr in RR_SWEEP}  # cumulative equity per RR
 _compound_balance = STARTING_BALANCE  # running balance carried across folds
+
+# Monthly reset tracking (30 days = 2880 M15 bars)
+_monthly_reset_last_date = None  # Track last reset date
+_monthly_reset_interval_days = 30
 
 fold_idx = 0
 fold_start = 0
@@ -661,6 +672,31 @@ while fold_start + TRAIN_BARS + TEST_BARS <= n_total:
     fold_sim = simulate_dynamic_concurrent_backtest(fold_sim_df, _sim_settings, _fold_risk_mgr, m1_df=_m1_df)
     sim_r = fold_sim.report
     _compound_balance = STARTING_BALANCE if NO_COMPOUND else sim_r["ending_balance"]  # carry forward or reset
+    
+    # Monthly reset logic: reset balance to $200 every 30 days (simulates monthly withdrawal)
+    if MONTHLY_RESET and not NO_COMPOUND:
+        # Get fold end date
+        fold_end_date = pd.to_datetime(result.get("test_end"))
+        if fold_end_date is not None:
+            if _monthly_reset_last_date is None:
+                # First fold: initialize reset date
+                _monthly_reset_last_date = fold_end_date
+            else:
+                # Check if 30 days have passed
+                days_since_reset = (fold_end_date - _monthly_reset_last_date).days
+                if days_since_reset >= _monthly_reset_interval_days:
+                    # Reset balance to $200 (withdraw profits)
+                    _withdrawn = _compound_balance - STARTING_BALANCE
+                    _compound_balance = STARTING_BALANCE
+                    _monthly_reset_last_date = fold_end_date
+                    result["monthly_reset"] = {
+                        "reset_date": fold_end_date.strftime("%Y-%m-%d"),
+                        "balance_before_reset": sim_r["ending_balance"],
+                        "withdrawn_amount": _withdrawn,
+                        "balance_after_reset": _compound_balance,
+                        "days_since_last_reset": days_since_reset,
+                    }
+                    print(f"      💰 MONTHLY RESET: Withdrew ${_withdrawn:.2f}, reset balance to ${STARTING_BALANCE:.2f} (after {days_since_reset} days)")
     
     # Build concurrent_sim result dict FIRST
     result["concurrent_sim"] = {
