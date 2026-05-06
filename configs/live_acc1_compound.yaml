@@ -1,0 +1,90 @@
+# ACC1 Compound Growth Configuration
+# Target: $200 → $10k capital in 1 month, then maintain $10k and withdraw profits
+# Risk: 5% per trade (aggressive growth phase)
+# Status: Validated via WF (6 folds, +$345k withdrawn, -13.46% max DD)
+
+data:
+  ohlc_file: "data/XAUUSD_M5_cleaned.csv"
+  news_file: "data/news_data.csv"
+
+features:
+  enabled:
+    - ict_patterns
+    - wyckoff_volume
+    - structure_momentum
+    - news_impact
+    - advanced_features
+
+training:
+  backtest_initial_balance: 200.0  # Starting capital
+  label_lookahead_bars: 32
+  enable_live_learning: true  # Self-learner enabled
+
+model:
+  name: "combo133"
+  threshold_method: "max"
+  min_confidence: 0.70
+  require_trend: false
+  require_d1_gate: false
+  min_strategy_count: 0.0
+
+strategy:
+  # Block high-spread/volatile hours (COMBO133 optimal)
+  blocked_hours_utc: [3, 15, 17, 22, 23]
+
+risk:
+  # AGGRESSIVE GROWTH PHASE (Phase 1: $200 → $10k)
+  risk_per_trade: 0.05  # 5% risk per trade (vs 3% stable mode)
+  stop_loss_atr_multiplier: 2.0
+  take_profit_rr: 3.0
+  max_rr: 10.0
+  
+  # Transaction costs
+  spread_cost_rr: 0.10
+  slippage_rr: 0.05
+  commission_rr: 0.02
+  use_dynamic_slippage: true  # ATR-based slippage model
+  
+  # Compound mode: No cap = full compound until $10k reached
+  compound_cap: 0  # 0 = no cap (full compound)
+  
+  # Circuit breakers (CRITICAL for 5% risk mode)
+  kill_switch_enabled: true
+  daily_loss_limit_pct: 0.10  # 10% daily loss → pause
+  max_drawdown_kill_pct: 0.25  # 25% max DD → kill switch (validated: actual -13.46%)
+  consecutive_loss_pause_count: 5  # 5 losses in a row → pause 24h
+  
+  # Profit filter (CRITICAL - skips unprofitable trades)
+  profit_filter_enabled: true
+  min_expected_profit: 15.0  # $15 minimum (validated: 78-91% skip rate)
+  profit_filter_spread_pips: 0.5
+
+execution:
+  mode: paper  # Start with paper mode for 7-day validation
+  max_concurrent_positions: 3
+  
+  # Trailing SL for better exits
+  trailing_sl:
+    enabled: true
+    activation_rr: 1.5  # Activate after +1.5R profit
+    trail_distance_rr: 0.8  # Trail 0.8R behind price
+
+metrics:
+  mlflow_enabled: true
+  mlflow_uri: "http://localhost:5000"
+  prometheus_enabled: true
+
+# MT5 Bridge Configuration
+mt5:
+  bridge_host: "127.0.0.1"
+  bridge_port: 5600  # ACC1 port
+  symbol: "XAUUSD"
+  magic_number: 20240101
+  slippage_points: 50
+
+# Self-Learner Configuration
+self_learner:
+  enabled: true
+  retrain_interval_days: 7  # Retrain weekly
+  min_new_samples: 100  # Need 100+ new trades before retrain
+  performance_threshold: 0.65  # Min AUC to keep new model
