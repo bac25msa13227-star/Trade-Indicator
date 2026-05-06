@@ -44,6 +44,72 @@ src/xauusd_ai/
 - `--combo133`: flag bật tổ hợp 133 model configs
 - `--no-compound`: dùng fixed balance thay vì compound
 
+### Git Workflow (CRITICAL)
+
+**NEVER push directly to `main` branch!** Always use feature branches và pull requests.
+
+**Standard workflow:**
+```bash
+# 1. Create feature branch from main
+git checkout main
+git pull origin main
+git checkout -b feature/your-feature-name
+
+# 2. Make changes and commit
+git add <files>
+git commit -m "feat: description"
+
+# 3. Push to feature branch (NOT main!)
+git push origin feature/your-feature-name
+
+# 4. Create PR on GitHub
+# 5. Merge after review
+```
+
+**Branch naming conventions:**
+- `feature/` — New features (e.g., `feature/regime-detection`, `feature/profit-filter`)
+- `fix/` — Bug fixes (e.g., `fix/slippage-calculation`)
+- `refactor/` — Code refactoring (e.g., `refactor/orchestrator-cleanup`)
+- `test/` — Test improvements (e.g., `test/increase-coverage`)
+- `docs/` — Documentation (e.g., `docs/profit-filter-guide`)
+
+**Commit message format:**
+- `feat:` — New feature
+- `fix:` — Bug fix
+- `refactor:` — Code refactoring
+- `test:` — Test changes
+- `docs:` — Documentation
+- `perf:` — Performance improvement
+- `chore:` — Maintenance tasks
+
+**Before committing:**
+1. Run tests: `pytest tests/ -v`
+2. Check coverage: `pytest tests/ --cov=src/xauusd_ai --cov-report=term`
+3. Lint (if applicable): `ruff check src/`
+4. Verify no secrets: Check for hardcoded API keys, passwords
+
+**Protected branches:**
+- `main` — Production code, requires PR approval
+- `develop` — Integration branch (if using gitflow)
+
+**If you accidentally pushed to main:**
+```bash
+# Create feature branch from current main
+git checkout -b feature/fix-accidental-main-push
+
+# Reset main to before your commits (locally)
+git checkout main
+git reset --hard origin/main^N  # N = number of commits to undo
+
+# Force push feature branch (NOT main!)
+git checkout feature/fix-accidental-main-push
+git push origin feature/fix-accidental-main-push --force
+
+# Then create PR to merge feature branch back to main properly
+```
+
+**Exception:** Hotfixes for critical production bugs may push to `main` with approval.
+
 ---
 
 ## Tích hợp với ECC Agents
@@ -237,7 +303,13 @@ cd "$HOME/Documents/Thạc sĩ MSE/Trade Indicator"
 - Slippage model phải **tắt được** qua flag để so sánh với kết quả cũ
 - Không hardcode path — dùng `PYTHONPATH` và config YAML
 - Metric mới → log vào MLflow với tag `fold_id` và `config_name`
-- Sau khi implement xong → chạy `git add -A && git commit` vào WFService hoặc LiveBotService tương ứng
+- **Git workflow:**
+  - **ALWAYS** work on feature branches (`feature/`, `fix/`, `test/`, etc.)
+  - **NEVER** commit directly to `main` branch
+  - Create PR for review before merging
+  - Run tests before committing: `pytest tests/ -v`
+  - Format: `git commit -m "feat: description"` (conventional commits)
+  - Push to feature branch: `git push origin feature/your-branch`
 
 ---
 
