@@ -91,7 +91,7 @@ _parser.add_argument("--fast", action="store_true", help="Faster training with �
 _parser.add_argument("--cache", action="store_true", help="Cache full dataset to parquet for faster reruns")
 _parser.add_argument("--no-rr-sweep", action="store_true", help="Skip RR sweep (faster, only run concurrent sim)")
 _parser.add_argument("--no-compound", action="store_true", help="Reset balance to $200 each fold (no compounding)")
-_parser.add_argument("--monthly-reset", action="store_true", help="Reset balance to $200 every 30 days (simulates monthly withdrawal)")
+_parser.add_argument("--monthly-reset", action="store_true", help="Reset balance to $200 every 30 days (simulates monthly withdrawal). Recommended: use --test-bars 6000 (1 month) for accurate monthly resets, not 18000 (3 months).")
 _parser.add_argument("--test-bars", type=int, default=None, help="Override TEST_BARS (bars per fold test window)")
 _parser.add_argument("--step-bars", type=int, default=None, help="Override STEP_BARS (bars to slide per fold)")
 _parser.add_argument("--min-conf", type=float, default=None, help="Override min confidence threshold for signal filter (e.g. 0.70 to match combo133)")
@@ -674,29 +674,41 @@ while fold_start + TRAIN_BARS + TEST_BARS <= n_total:
     _compound_balance = STARTING_BALANCE if NO_COMPOUND else sim_r["ending_balance"]  # carry forward or reset
     
     # Monthly reset logic: reset balance to $200 every 30 days (simulates monthly withdrawal)
+    # NOTE: When using --monthly-reset, should use --test-bars 6000 (1 month) for accurate resets
     if MONTHLY_RESET and not NO_COMPOUND:
-        # Get fold end date
+        # Get fold start and end dates
+        fold_start_date = pd.to_datetime(result.get("test_start"))
         fold_end_date = pd.to_datetime(result.get("test_end"))
-        if fold_end_date is not None:
+        
+        if fold_start_date is not None and fold_end_date is not None:
+            # Calculate fold duration
+            fold_duration_days = (fold_end_date - fold_start_date).days
+            
+            # If this is first fold or 30+ days passed, reset
             if _monthly_reset_last_date is None:
-                # First fold: initialize reset date
-                _monthly_reset_last_date = fold_end_date
+                _monthly_reset_last_date = fold_start_date
+                _compound_balance = STARTING_BALANCE  # Start fresh
+                print(f"      🆕 FIRST MONTH: Starting with ${STARTING_BALANCE:.2f}")
             else:
-                # Check if 30 days have passed
                 days_since_reset = (fold_end_date - _monthly_reset_last_date).days
+                
+                # Reset if 30+ days passed
                 if days_since_reset >= _monthly_reset_interval_days:
-                    # Reset balance to $200 (withdraw profits)
                     _withdrawn = _compound_balance - STARTING_BALANCE
                     _compound_balance = STARTING_BALANCE
                     _monthly_reset_last_date = fold_end_date
+                    
                     result["monthly_reset"] = {
                         "reset_date": fold_end_date.strftime("%Y-%m-%d"),
                         "balance_before_reset": sim_r["ending_balance"],
                         "withdrawn_amount": _withdrawn,
                         "balance_after_reset": _compound_balance,
                         "days_since_last_reset": days_since_reset,
+                        "fold_duration_days": fold_duration_days,
                     }
-                    print(f"      💰 MONTHLY RESET: Withdrew ${_withdrawn:.2f}, reset balance to ${STARTING_BALANCE:.2f} (after {days_since_reset} days)")
+                    print(f"      💰 MONTHLY RESET: Withdrew ${_withdrawn:.2f}, reset balance to ${STARTING_BALANCE:.2f} (after {days_since_reset} days, fold was {fold_duration_days} days)")
+                else:
+                    print(f"      ⏳ {_monthly_reset_interval_days - days_since_reset} days until next reset (current balance: ${_compound_balance:.2f})")
     
     # Build concurrent_sim result dict FIRST
     result["concurrent_sim"] = {
