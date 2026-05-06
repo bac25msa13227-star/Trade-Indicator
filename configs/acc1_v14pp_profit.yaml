@@ -162,6 +162,14 @@ risk:
       risk_multiplier: 0.40
       weekdays_utc: [Tuesday, Wednesday, Thursday]
       hours_utc: [17, 18, 19, 20, 21]
+  # ── Entry Quality Filter ───────────────────────────────────────
+  entry_quality_filter_enabled: false        # DISABLED: Too strict, blocks too many trades (-86% profit)
+  entry_quality_min_score: 0.60             # Minimum 60% overall quality score
+  entry_quality_min_confirmations: 3        # Require 3/5 strong confirmations
+  # ── Dynamic Risk Scaling ───────────────────────────────────────
+  dynamic_risk_enabled: true                # Scale risk 2-5% based on confidence
+  dynamic_risk_min: 0.02                    # 2% min risk (low confidence <0.70)
+  dynamic_risk_max: 0.05                    # 5% max risk (high confidence >=0.85)
 
 execution:
   auto_trade: true

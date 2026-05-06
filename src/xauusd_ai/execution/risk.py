@@ -378,8 +378,26 @@ class RiskManager:
                     rf_base = self.settings.risk.risk_per_trade - ratio * (self.settings.risk.risk_per_trade - rf_floor)
                 # else: < 3% drawdown — full risk (rf_base unchanged)
 
-        capped_confidence = min(max(confidence, self.settings.risk.min_confidence), 0.95)
-        base_fraction = rf_base * (capped_confidence / self.settings.risk.min_confidence)
+        # Dynamic risk based on confidence (if enabled)
+        dynamic_risk_enabled = bool(getattr(self.settings.risk, "dynamic_risk_enabled", False))
+        if dynamic_risk_enabled:
+            from xauusd_ai.strategies.dynamic_risk import calculate_dynamic_risk
+            
+            min_risk = float(getattr(self.settings.risk, "dynamic_risk_min", 0.02))
+            max_risk = float(getattr(self.settings.risk, "dynamic_risk_max", 0.05))
+            
+            dynamic_risk, risk_reason = calculate_dynamic_risk(
+                base_risk=rf_base,
+                confidence=confidence,
+                min_risk=min_risk,
+                max_risk=max_risk,
+            )
+            base_fraction = dynamic_risk
+        else:
+            # Legacy: scale by confidence linearly
+            capped_confidence = min(max(confidence, self.settings.risk.min_confidence), 0.95)
+            base_fraction = rf_base * (capped_confidence / self.settings.risk.min_confidence)
+        
         regime_multiplier = self.settings.risk.normal_risk_multiplier
         if volatility_regime == 0:
             regime_multiplier = self.settings.risk.sideway_risk_multiplier

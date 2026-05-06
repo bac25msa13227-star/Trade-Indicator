@@ -267,6 +267,16 @@ class RiskSettings(StrictSettingsModel):
     profit_filter_enabled: bool = False
     min_expected_profit: float = 15.0      # Minimum expected profit per trade (USD)
     profit_filter_spread_pips: float = 0.5  # XAUUSD spread for profit calculation
+    # ── Entry Quality Filter ───────────────────────────────────────
+    # Require multiple confirmations (ICT+Wyckoff+Volume+Trend+Momentum) to improve win rate
+    entry_quality_filter_enabled: bool = False
+    entry_quality_min_score: float = 0.60          # Minimum overall quality score (0.0-1.0)
+    entry_quality_min_confirmations: int = 3       # Minimum strong confirmations (3/5 = 60%)
+    # ── Dynamic Risk Scaling ───────────────────────────────────────
+    # Scale risk per trade based on confidence (2-5% range vs fixed 3%)
+    dynamic_risk_enabled: bool = False
+    dynamic_risk_min: float = 0.02                 # Minimum risk for low confidence (<0.70)
+    dynamic_risk_max: float = 0.05                 # Maximum risk for high confidence (>=0.85)
     risk_throttle_rules: list[RiskThrottleRuleSettings] = Field(default_factory=list)
 
 
