@@ -103,6 +103,8 @@ _parser.add_argument("--force-threshold", type=float, default=None, help="Hardco
 _parser.add_argument("--risk-pct", type=float, default=None, help="Override risk_per_trade in config (e.g. 0.08 for 8%%)")
 _parser.add_argument("--blocked-hours", default=None, help="Comma-separated UTC hours to block trading (e.g. 3,15,17,22,23 to match show_combo133)")
 _parser.add_argument("--combo133", action="store_true", help="Apply all show_combo133 settings: min_conf=0.70, blocked=[3,15,17,22,23], require_trend=False, min_strat=0.0, d1_gate=False, fast mode")
+_parser.add_argument("--profit-filter", action="store_true", help="Enable profit filter to skip low-profit trades")
+_parser.add_argument("--min-profit", type=float, default=12.0, help="Minimum expected profit threshold (USD) for profit filter (default: 12.0)")
 _known, _rest = _parser.parse_known_args()
 FAST_MODE = _known.fast
 NO_COMPOUND = _known.no_compound
@@ -115,6 +117,8 @@ RISK_PCT_OVERRIDE = _known.risk_pct
 MAIN_THR_CAL = _known.main_thr_cal
 FORCE_THRESHOLD = _known.force_threshold
 COMBO133_MODE = _known.combo133
+PROFIT_FILTER_ENABLED = _known.profit_filter
+MIN_EXPECTED_PROFIT = _known.min_profit
 # Parse blocked hours: --blocked-hours 3,15,17,22,23 OR from --combo133
 _bh_raw = _known.blocked_hours
 BLOCKED_HOURS: list[int] | None = [int(x) for x in _bh_raw.split(",") if x.strip()] if _bh_raw else None
@@ -185,6 +189,8 @@ elif NO_DD_KILL:
     print(f"  CB mode : ⚠️  DD-Kill OFF (max_drawdown_kill_pct=0, daily_limit & pause active)")
 else:
     print(f"  CB mode : ✅ LIVE-equivalent (kill_switch_enabled=True)")
+if PROFIT_FILTER_ENABLED:
+    print(f"  Filter  : 💰 PROFIT FILTER (min_profit=${MIN_EXPECTED_PROFIT:.2f}, skips low-profit trades)")
 print()
 
 LABEL_LOOKAHEAD_BARS = get_label_lookahead_bars(settings)
@@ -573,6 +579,35 @@ while fold_start + TRAIN_BARS + TEST_BARS <= n_total:
         fold_sim_df["trade_side"] = np.where(fold_sim_df["strategy_score"] >= 0, "buy", "sell")
     else:
         fold_sim_df["trade_side"] = fold_sim_df.get("trade_side", pd.Series("buy", index=fold_sim_df.index))
+    
+    # ── PROFIT FILTER ───────────────────────────────────────────────────────
+    if PROFIT_FILTER_ENABLED:
+        # Estimate profit for each signal using prediction probability
+        # In real orchestrator, this would use _estimate_profit() method
+        # Here: simple heuristic based on probability
+        pip_value = 10.0
+        spread_cost_per_trade = 10.0  # $10 for 1.0 lot (2 × 0.5 pips × $10)
+        
+        # Estimate expected profit = probability × reward - (1-probability) × risk
+        # For simplicity: assume avg RR=1.5, risk=10 pips
+        avg_rr = 1.5
+        risk_pips = 10.0
+        
+        fold_sim_df["estimated_profit"] = (
+            fold_sim_df["probability"] * (avg_rr * risk_pips * pip_value)
+            - (1 - fold_sim_df["probability"]) * (risk_pips * pip_value)
+        )
+        
+        # Apply filter: skip trades with estimated profit < threshold
+        profit_mask = fold_sim_df["estimated_profit"] > MIN_EXPECTED_PROFIT
+        n_before_filter = len(fold_sim_df)
+        n_skipped = (~profit_mask).sum()
+        
+        fold_sim_df = fold_sim_df[profit_mask].copy()
+        
+        skip_rate = n_skipped / n_before_filter * 100 if n_before_filter > 0 else 0.0
+        print(f"  [PROFIT FILTER] Skipped {n_skipped}/{n_before_filter} signals ({skip_rate:.1f}%) with profit < ${MIN_EXPECTED_PROFIT:.2f}")
+    
     _sim_settings = settings_full.model_copy(deep=True)
     _sim_settings.training.backtest_initial_balance = _compound_balance  # compound across folds
     if MIN_CONF_OVERRIDE is not None:
