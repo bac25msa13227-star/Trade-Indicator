@@ -213,6 +213,95 @@ def calculate_daily_returns(balance_series: List[float]) -> List[float]:
     return returns.tolist()
 
 
+def calculate_turnover_adjusted_return(
+    trades: pd.DataFrame,
+    spread_pips: float = 0.5,
+    swap_per_lot_per_day: float = 0.15,
+    pip_value: float = 10.0,
+) -> Dict[str, float]:
+    """
+    Calculate net return after spread and swap costs (turnover-adjusted).
+    
+    This function quantifies the actual profitability after accounting for
+    trading costs that are ignored in raw P&L calculations:
+    - Spread cost: bid-ask spread paid on entry + exit (2× per trade)
+    - Swap cost: overnight financing fees for positions held multiple days
+    
+    Args:
+        trades: DataFrame with columns [pnl, lot_size, holding_bars, balance]
+        spread_pips: Average bid-ask spread in pips (default 0.5 for XAUUSD)
+        swap_per_lot_per_day: Overnight financing cost per lot (default 0.15)
+        pip_value: Dollar value per pip at 1.0 lot (default 10 for XAUUSD)
+    
+    Returns:
+        Dict with:
+            - gross_pnl: Total P&L before costs
+            - spread_cost: Total spread costs (entry + exit)
+            - swap_cost: Total overnight financing fees
+            - net_pnl: P&L after costs (gross - spread - swap)
+            - turnover_drag: Fraction of profit lost to costs
+            - net_return_pct: Net return as percentage of initial balance
+    
+    Example:
+        >>> trades = pd.DataFrame({
+        ...     'pnl': [50, -20, 30],
+        ...     'lot_size': [1.0, 1.0, 1.0],
+        ...     'holding_bars': [100, 50, 1440],  # 1 day = 1440 mins
+        ...     'balance': [10000, 10000, 10000]
+        ... })
+        >>> result = calculate_turnover_adjusted_return(trades)
+        >>> result['gross_pnl'] == 60.0
+        True
+        >>> result['net_pnl'] < result['gross_pnl']  # Net always less after costs
+        True
+    """
+    if len(trades) == 0:
+        return {
+            "gross_pnl": 0.0,
+            "spread_cost": 0.0,
+            "swap_cost": 0.0,
+            "net_pnl": 0.0,
+            "turnover_drag": 0.0,
+            "net_return_pct": 0.0,
+        }
+    
+    gross_pnl = float(trades['pnl'].sum())
+    
+    # Spread cost: Each trade pays spread on entry AND exit (2×)
+    spread_cost = 0.0
+    for _, row in trades.iterrows():
+        spread_cost += 2 * spread_pips * pip_value * row['lot_size']
+    
+    # Swap cost: Only for trades held overnight (>= 1440 minutes = 1 day)
+    swap_cost = 0.0
+    for _, row in trades.iterrows():
+        holding_days = int(row['holding_bars']) // 1440
+        swap_cost += swap_per_lot_per_day * row['lot_size'] * holding_days
+    
+    # Net P&L after costs
+    net_pnl = gross_pnl - spread_cost - swap_cost
+    
+    # Turnover drag: fraction of profit lost to transaction costs
+    # If gross P&L is negative or zero, set drag to 0 (avoid division issues)
+    if gross_pnl > 0:
+        turnover_drag = (spread_cost + swap_cost) / gross_pnl
+    else:
+        turnover_drag = 0.0
+    
+    # Net return percentage (relative to initial balance)
+    initial_balance = float(trades['balance'].iloc[0]) if len(trades) > 0 else 1.0
+    net_return_pct = net_pnl / initial_balance
+    
+    return {
+        "gross_pnl": gross_pnl,
+        "spread_cost": spread_cost,
+        "swap_cost": swap_cost,
+        "net_pnl": net_pnl,
+        "turnover_drag": turnover_drag,
+        "net_return_pct": net_return_pct,
+    }
+
+
 def calculate_all_metrics(
     balance_series: List[float],
     periods_per_year: int = 252,

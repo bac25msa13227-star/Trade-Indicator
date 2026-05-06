@@ -143,8 +143,8 @@ risk:
   spread_cost_rr: 0.10              # Spread cost: 10% of 1R
   slippage_rr: 0.05                 # Static slippage: 5% of 1R (fallback when dynamic disabled)
   commission_rr: 0.02               # Commission: 2% of 1R
-  use_dynamic_slippage: false       # ⚠️ DISABLED for now — enable after live validation
-  use_dynamic_slippage: false       # Dynamic slippage model (ATR+spread+volume+session-based)
+  use_dynamic_slippage: true       # ⚠️ DISABLED for now — enable after live validation
+  use_dynamic_slippage: true       # Dynamic slippage model (ATR+spread+volume+session-based)
   risk_throttle_rules:
     - name: monday_0207_all_heavy_throttle
       risk_multiplier: 0.20

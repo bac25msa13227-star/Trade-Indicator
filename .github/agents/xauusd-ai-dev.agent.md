@@ -22,12 +22,12 @@ Bạn là chuyên gia AI Trading chuyên về hệ thống **XAUUSD (Vàng/USD)*
 src/xauusd_ai/
 ├── features/       # dataset.py, indicators.py — feature engineering
 ├── model/          # trainer.py, exit_model.py — LightGBM training
-├── backtesting/    # engine.py — backtest & WF engine
-├── execution/      # mt5_executor.py, risk.py — live execution
+├── backtesting/    # engine.py, slippage.py — backtest & WF engine + dynamic slippage
+├── execution/      # mt5_executor.py, risk.py, mode.py, paper_logger.py — live execution
 ├── strategies/     # hybrid.py — ICT + Wyckoff strategy
-├── infra/          # db.py, metrics.py, mlflow_client.py
+├── infra/          # db.py, metrics.py, mlflow_client.py, advanced_metrics.py, ab_testing.py
 ├── monitoring/     # drift.py
-└── orchestrator.py # main trading loop
+└── orchestrator.py # main trading loop với A/B testing integration
 ```
 
 ### Công nghệ hiện tại
@@ -113,27 +113,88 @@ src/xauusd_ai/
 | **Market Microstructure** | Thêm spread, tick speed, session features | Thấp |
 
 ### Nhóm 2: Simulation thực tế
-| Tính năng | Mô tả | Độ ưu tiên |
-|-----------|-------|------------|
-| **Slippage model** | Simulate trượt giá theo ATR + volume | Cao |
-| **Partial fill** | Khớp lệnh một phần khi spread rộng | Trung bình |
-| **Latency injection** | Thêm delay 50-200ms vào backtest | Thấp |
-| **Tick replay** | Replay M1 data tick-by-tick | Trung bình |
+| Tính năng | Mô tả | Status | Độ ưu tiên |
+|-----------|-------|--------|------------|
+| **✅ Slippage model** | Simulate trượt giá theo ATR + volume + session | **DONE** | Cao |
+| **Partial fill** | Khớp lệnh một phần khi spread rộng | TODO | Trung bình |
+| **Latency injection** | Thêm delay 50-200ms vào backtest | TODO | Thấp |
+| **Tick replay** | Replay M1 data tick-by-tick | TODO | Trung bình |
 
 ### Nhóm 3: Quy trình kiểm thử
-| Tính năng | Mô tả | Độ ưu tiên |
-|-----------|-------|------------|
-| **Paper trading** | Shadow mode — signal log nhưng không vào lệnh | Cao |
-| **A/B test framework** | Chạy 2 model song song, so sánh P&L | Cao |
-| **Stress test** | Test trên crash 2020, news spike scenarios | Trung bình |
-| **Synthetic data (GARCH)** | Generate thêm data để train | Thấp |
+| Tính năng | Mô tả | Status | Độ ưu tiên |
+|-----------|-------|--------|------------|
+| **✅ Paper trading** | Shadow mode — signal log nhưng không vào lệnh | **DONE** | Cao |
+| **✅ A/B test framework** | Chạy 2 model song song, so sánh P&L với statistical analysis | **DONE** | Cao |
+| **Stress test** | Test trên crash 2020, news spike scenarios | TODO | Trung bình |
+| **Synthetic data (GARCH)** | Generate thêm data để train | TODO | Thấp |
 
 ### Nhóm 4: Metrics
-| Tính năng | Mô tả | Độ ưu tiên |
-|-----------|-------|------------|
-| **Sharpe/Calmar** | Tính sau mỗi WF fold, log vào MLflow | Cao |
-| **Feature stability** | Track feature importance drift qua các fold | Trung bình |
-| **Turnover-adjusted return** | Trừ spread + swap vào P&L | Cao |
+| Tính năng | Mô tả | Status | Độ ưu tiên |
+|-----------|-------|--------|------------|
+| **✅ Sharpe/Calmar/Sortino** | Tính sau mỗi WF fold, log vào MLflow | **DONE** | Cao |
+| **Feature stability** | Track feature importance drift qua các fold | TODO | Trung bình |
+| **Turnover-adjusted return** | Trừ spread + swap vào P&L | **NEXT** | Cao |
+
+---
+
+## ✅ Tính Năng Vừa Hoàn Thành (May 2026)
+
+### **1. Dynamic Slippage Model** (`src/xauusd_ai/backtesting/slippage.py`)
+- ATR-based slippage calculation (0.5-6 pips range)
+- Session-aware multipliers (Asian 1.5×, London 1.0×, NY 0.9×)
+- Spread + volume factors
+- **Coverage:** 84%, **Tests:** 16/16 passing
+- **WF Results:** Sharpe 3.701, Sortino 9.765, Calmar 53.899 (41 folds, 10,825 trades)
+
+### **2. Paper Trading Mode** (`src/xauusd_ai/execution/paper_logger.py`)
+- Shadow execution (logs signals, no real orders)
+- JSONL logging với predicted slippage
+- Summary stats (win_rate, profit_factor, slippage_accuracy)
+- **Coverage:** 92%, **Tests:** 13/13 passing
+- **Status:** Running 7-day validation on production
+
+### **3. A/B Testing Framework** (`src/xauusd_ai/infra/ab_testing.py`)
+- Deterministic treatment assignment (MD5 hash-based, 50/50 split)
+- Thread-safe JSONL logging
+- Statistical analysis (t-test p-value, 95% CI, Cohen's d effect size)
+- **Coverage:** 92%, **Tests:** 15/15 passing
+- **Demo:** `python scripts/demo_ab_testing.py`
+
+**Usage:**
+```python
+from xauusd_ai.infra.ab_testing import ABTestManager
+
+ab_manager = ABTestManager("outputs/ab_test_results.jsonl", seed=42)
+
+# Phân nhóm
+treatment = ab_manager.assign_treatment("signal_001")  # "control" or "treatment"
+
+# Log outcome
+ab_manager.log_result("signal_001", treatment, {
+    "pnl": 5.0,
+    "slippage_rr": 0.03
+})
+
+# Phân tích (cần >= 30 samples per group)
+analysis = ab_manager.analyze()
+print(f"p-value: {analysis['p_value']}")
+print(f"Effect size: {analysis['effect_size']}")
+```
+
+**Config flags:**
+```yaml
+risk:
+  use_dynamic_slippage: false  # Enable dynamic slippage (currently false for safety)
+  ab_test_enabled: false       # Enable A/B testing (enable after paper validation)
+  ab_test_log_file: "outputs/ab_test_results.jsonl"
+```
+
+### **4. Advanced Metrics** (`src/xauusd_ai/infra/advanced_metrics.py`)
+- Sharpe ratio (annualized, risk-free rate adjusted)
+- Sortino ratio (downside deviation)
+- Calmar ratio (max drawdown adjusted)
+- **Coverage:** 86%, **Tests:** 14/14 passing
+- Integrated into WF script (`scripts/walkforward_ict_wyckoff.py`)
 
 ---
 

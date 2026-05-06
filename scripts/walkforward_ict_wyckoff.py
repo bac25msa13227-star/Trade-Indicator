@@ -46,7 +46,7 @@ from xauusd_ai.features.dataset import (
     get_label_lookahead_bars,
     prepare_training_dataset,
 )
-from xauusd_ai.infra.advanced_metrics import calculate_all_metrics
+from xauusd_ai.infra.advanced_metrics import calculate_all_metrics, calculate_turnover_adjusted_return
 from xauusd_ai.strategies.hybrid import HybridStrategy
 
 import functools
@@ -651,11 +651,38 @@ while fold_start + TRAIN_BARS + TEST_BARS <= n_total:
         result["concurrent_sim"]["sharpe_ratio"] = metrics.get("sharpe") if metrics else None
         result["concurrent_sim"]["sortino_ratio"] = metrics.get("sortino") if metrics else None
         result["concurrent_sim"]["calmar_ratio"] = metrics.get("calmar") if metrics else None
+        
+        # Calculate turnover-adjusted return (spread + swap costs)
+        # Prepare trades DataFrame with required columns
+        turnover_trades = fold_sim.trades.copy()
+        turnover_trades["lot_size"] = 1.0  # Assume 1.0 lot for backtest
+        turnover_trades["holding_bars"] = 0  # Intraday trades (no overnight)
+        turnover_trades["balance"] = turnover_trades["balance_before"]  # Initial balance per trade
+        
+        turnover_metrics = calculate_turnover_adjusted_return(
+            turnover_trades[["pnl", "lot_size", "holding_bars", "balance"]],
+            spread_pips=0.5,      # XAUUSD typical spread
+            swap_per_lot_per_day=0.15,  # Overnight financing
+            pip_value=10.0,       # $10 per pip at 1.0 lot
+        )
+        
+        result["concurrent_sim"]["gross_pnl"] = turnover_metrics["gross_pnl"]
+        result["concurrent_sim"]["spread_cost"] = turnover_metrics["spread_cost"]
+        result["concurrent_sim"]["swap_cost"] = turnover_metrics["swap_cost"]
+        result["concurrent_sim"]["net_pnl"] = turnover_metrics["net_pnl"]
+        result["concurrent_sim"]["turnover_drag"] = turnover_metrics["turnover_drag"]
+        result["concurrent_sim"]["net_return_pct"] = turnover_metrics["net_return_pct"]
     else:
         # No trades in fold — set metrics to None
         result["concurrent_sim"]["sharpe_ratio"] = None
         result["concurrent_sim"]["sortino_ratio"] = None
         result["concurrent_sim"]["calmar_ratio"] = None
+        result["concurrent_sim"]["gross_pnl"] = None
+        result["concurrent_sim"]["spread_cost"] = None
+        result["concurrent_sim"]["swap_cost"] = None
+        result["concurrent_sim"]["net_pnl"] = None
+        result["concurrent_sim"]["turnover_drag"] = None
+        result["concurrent_sim"]["net_return_pct"] = None
     
     fold_results.append(result)
 
