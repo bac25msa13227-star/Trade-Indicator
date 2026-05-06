@@ -159,6 +159,10 @@ risk:
       risk_multiplier: 0.40
       weekdays_utc: [Tuesday, Wednesday, Thursday]
       hours_utc: [17, 18, 19, 20, 21]
+  # Profit filter — skip low-profit trades to reduce transaction costs
+  profit_filter_enabled: false       # Set true after paper validation
+  min_expected_profit: 15.0          # $15 minimum (spread $10 + 50% buffer)
+  profit_filter_spread_pips: 0.5     # XAUUSD typical spread
 
 execution:
   # Execution mode: "live" (real trading), "paper" (shadow mode), "backtest" (historical)

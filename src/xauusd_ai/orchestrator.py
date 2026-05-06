@@ -33,6 +33,7 @@ from xauusd_ai.learning.self_learner import SelfLearner
 from xauusd_ai.model.trainer import ModelTrainer
 from xauusd_ai.notifications.telegram import TelegramNotifier
 from xauusd_ai.strategies.hybrid import HybridStrategy
+from xauusd_ai.strategies.profit_filter import MinimumProfitFilter
 from xauusd_ai.visualization.reports import save_backtest_plots, save_training_plot
 
 
@@ -947,6 +948,13 @@ def run_live_loop(settings: Settings) -> None:
             settings.admin.data_health.spread_lookback_bars = new_settings.admin.data_health.spread_lookback_bars
             settings.admin.data_health.bridge_feed_divergence_points = new_settings.admin.data_health.bridge_feed_divergence_points
             settings.admin.data_health.only_when_market_open = new_settings.admin.data_health.only_when_market_open
+            # Profit filter hot-reload
+            settings.risk.profit_filter_enabled = new_settings.risk.profit_filter_enabled
+            settings.risk.min_expected_profit = new_settings.risk.min_expected_profit
+            settings.risk.profit_filter_spread_pips = new_settings.risk.profit_filter_spread_pips
+            profit_filter.enabled = settings.risk.profit_filter_enabled
+            profit_filter.min_expected_profit = settings.risk.min_expected_profit
+            profit_filter.spread_pips = settings.risk.profit_filter_spread_pips
             _market_gate_enabled = bool(settings.market.enforce_market_open_gate)
             _market_stale_seconds = max(int(settings.market.market_tick_stale_seconds), 30)
             _market_preopen_alert_minutes_list = _normalize_alert_minutes(
@@ -1013,6 +1021,19 @@ def run_live_loop(settings: Settings) -> None:
             LOGGER.error("ExitModel load error: %s", _em_err)
             _exit_model = None
 
+    # ── Profit Filter (transaction cost optimization) ────────────────────────
+    profit_filter = MinimumProfitFilter(
+        min_expected_profit=settings.risk.min_expected_profit,
+        spread_pips=settings.risk.profit_filter_spread_pips,
+        pip_value=10.0,  # $10 per pip for XAUUSD at 1.0 lot
+        enabled=settings.risk.profit_filter_enabled
+    )
+    LOGGER.info(
+        "Profit filter initialized: enabled=%s, min_profit=$%.2f",
+        profit_filter.enabled,
+        profit_filter.min_expected_profit
+    )
+
     _state_suffix = _account_tag or "default"
     # Tracks RSI value at the moment each order was placed: {ticket: rsi_at_entry}
     _RSI_TRACKER_FILE = Path(f"outputs/entry_rsi_tracker_{_state_suffix}.json")
@@ -1040,6 +1061,45 @@ def run_live_loop(settings: Settings) -> None:
 
     def _clamp(value: float, lo: float, hi: float) -> float:
         return max(lo, min(hi, value))
+
+    def _estimate_profit(
+        entry_price: float,
+        stop_loss: float,
+        take_profit: float,
+        confidence: float,
+        win_probability: float | None = None
+    ) -> float:
+        """
+        Estimate expected profit for a trade signal.
+        
+        Args:
+            entry_price: Entry price in USD
+            stop_loss: Stop loss price
+            take_profit: Take profit price
+            confidence: Model confidence (0-1)
+            win_probability: Win probability (if available)
+        
+        Returns:
+            Expected profit in USD for 1.0 lot
+        """
+        # Calculate pip distances
+        pip_value = 10.0  # $10 per pip for XAUUSD at 1.0 lot
+        sl_pips = abs(entry_price - stop_loss) / 0.01  # 1 pip = $0.01 for XAUUSD
+        tp_pips = abs(take_profit - entry_price) / 0.01
+        
+        # Calculate dollar amounts
+        potential_loss = sl_pips * pip_value
+        potential_gain = tp_pips * pip_value
+        
+        # Use win probability if available, otherwise use confidence as proxy
+        if win_probability is None:
+            # Empirical mapping: confidence 0.7 ≈ 40% win rate, 0.9 ≈ 60%
+            win_probability = max(0.35, min(0.65, (confidence - 0.5) * 2))
+        
+        # Expected value = P(win) × gain - P(loss) × loss
+        expected_profit = (win_probability * potential_gain) - ((1 - win_probability) * potential_loss)
+        
+        return expected_profit
 
     def _apply_runtime_profile_mode(mode: str, source: str = "runtime_override", notify: bool = True) -> bool:
         nonlocal _runtime_profile_mode
@@ -2996,6 +3056,42 @@ def run_live_loop(settings: Settings) -> None:
                     current_open_positions=open_positions,
                     volatility_regime=volatility_regime,
                 )
+
+                # ── Profit Filter (transaction cost optimization) ─────────────────────────
+                if decision.should_trade and profit_filter.enabled and not settings.strategy.force_trade:
+                    predicted_profit = _estimate_profit(
+                        entry_price=decision.entry_price or order_plan.entry_price,
+                        stop_loss=decision.stop_loss or order_plan.stop_loss,
+                        take_profit=decision.take_profit or order_plan.take_profit,
+                        confidence=decision.confidence,
+                        win_probability=None  # Use confidence as proxy
+                    )
+                    
+                    # Check if trade should be skipped
+                    should_skip, skip_reason = profit_filter.should_skip_trade(
+                        predicted_profit=predicted_profit,
+                        predicted_rr=abs((decision.take_profit - decision.entry_price) / 
+                                        (decision.entry_price - decision.stop_loss)) if decision.entry_price and decision.stop_loss and decision.take_profit else 2.0,
+                        lot_size=order_plan.volume
+                    )
+                    
+                    if should_skip:
+                        LOGGER.info(
+                            "PROFIT_FILTER BLOCKED: %s | entry=%.2f sl=%.2f tp=%.2f conf=%.2%% | predicted_profit=$%.2f",
+                            skip_reason,
+                            decision.entry_price, decision.stop_loss, decision.take_profit,
+                            decision.confidence * 100,
+                            predicted_profit
+                        )
+                        decision = decision.__class__(
+                            should_trade=False,
+                            side=decision.side,
+                            confidence=decision.confidence,
+                            reason=f"PROFIT_FILTER: {skip_reason}",
+                            entry_price=decision.entry_price,
+                            stop_loss=decision.stop_loss,
+                            take_profit=decision.take_profit,
+                        )
 
                 # ── Anti re-entry guard after SL (same side) ───────────────────────────
                 if decision.should_trade and not settings.strategy.force_trade:

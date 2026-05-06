@@ -262,6 +262,11 @@ class RiskSettings(StrictSettingsModel):
     #   XAUUSD avg absolute gap ~$3–$10. In expectation (50% adverse): ~-0.05 to -0.10R.
     #   0.0 = disabled (default for backward compat).
     weekend_gap_penalty_rr: float = 0.0
+    # ── Profit Filter ──────────────────────────────────────────────
+    # Filter out signals with expected profit < threshold to reduce transaction costs
+    profit_filter_enabled: bool = False
+    min_expected_profit: float = 15.0      # Minimum expected profit per trade (USD)
+    profit_filter_spread_pips: float = 0.5  # XAUUSD spread for profit calculation
     risk_throttle_rules: list[RiskThrottleRuleSettings] = Field(default_factory=list)
 
 
