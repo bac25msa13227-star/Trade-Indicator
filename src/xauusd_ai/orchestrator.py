@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 
 from xauusd_ai.backtesting.engine import simulate_prediction_backtest, write_backtest_outputs
 from xauusd_ai.backtesting.slippage import calculate_slippage_pips, get_session_multiplier
+from xauusd_ai.infra.ab_testing import ABTestManager
 from xauusd_ai.config import Settings, load_settings
 from xauusd_ai.data.market_data import MarketDataService
 from xauusd_ai.execution.mt5_executor import MT5Executor
@@ -636,6 +637,13 @@ def run_paper_trade_loop(settings: Settings) -> None:
     # Initialize paper logger (mới)
     paper_logger = PaperTradeLogger(output_path="outputs/paper_trades.jsonl")
     
+    # Initialize A/B test manager (nếu enabled)
+    ab_test_manager = None
+    if getattr(settings.risk, "ab_test_enabled", False):
+        ab_test_log_file = getattr(settings.risk, "ab_test_log_file", "outputs/ab_test_results.jsonl")
+        ab_test_manager = ABTestManager(log_file=ab_test_log_file, seed=42)
+        LOGGER.info(f"A/B testing enabled: log_file={ab_test_log_file}")
+    
     # Keep legacy CSV logging (backward compatibility)
     log_path = Path(settings.app.paper_trade_log_path)
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -666,9 +674,32 @@ def run_paper_trade_loop(settings: Settings) -> None:
             # Get session multiplier
             session_mult = get_session_multiplier(pd.to_datetime(latest_time).time())
             
-            # Calculate predicted slippage (chỉ khi use_dynamic_slippage enabled)
+            # Calculate predicted slippage với A/B testing support
             use_dynamic = getattr(settings.risk, "use_dynamic_slippage", False)
-            if use_dynamic and decision.should_trade:
+            ab_treatment = None  # Track treatment for A/B logging
+            
+            if ab_test_manager and decision.should_trade:
+                # A/B testing mode: assign treatment deterministically
+                signal_id = f"{latest_time}_{decision.side}"
+                ab_treatment = ab_test_manager.assign_treatment(signal_id)
+                
+                if ab_treatment == "control":
+                    # Control group: static slippage
+                    predicted_slippage_pips = 0.5
+                else:
+                    # Treatment group: dynamic slippage
+                    predicted_slippage_pips = calculate_slippage_pips(
+                        atr=atr,
+                        atr_mean=atr_mean,
+                        spread_pips=spread_pips,
+                        volume_ratio=volume_ratio,
+                        session_multiplier=session_mult,
+                    )
+                
+                LOGGER.info(f"A/B test: signal_id={signal_id}, treatment={ab_treatment}, slippage={predicted_slippage_pips:.2f} pips")
+            
+            elif use_dynamic and decision.should_trade:
+                # No A/B testing, but dynamic slippage enabled
                 predicted_slippage_pips = calculate_slippage_pips(
                     atr=atr,
                     atr_mean=atr_mean,
@@ -699,6 +730,7 @@ def run_paper_trade_loop(settings: Settings) -> None:
                     "spread_pips": spread_pips,
                     "volume_ratio": volume_ratio,
                     "session": "Asian" if session_mult == 1.5 else ("London" if session_mult == 1.0 else "NY"),
+                    "ab_treatment": ab_treatment,  # Track A/B treatment for this signal
                 }
                 
                 # Log entry signal
@@ -711,7 +743,23 @@ def run_paper_trade_loop(settings: Settings) -> None:
                 LOGGER.info(
                     f"Paper trade #{trade_id} logged: {decision.side} @ {order_plan.entry_price}, "
                     f"slippage={predicted_slippage_pips:.2f} pips, session={market_data['session']}"
+                    f"{', A/B=' + ab_treatment if ab_treatment else ''}"
                 )
+                
+                # TODO: A/B testing outcome logging (when trade closes)
+                # When live trading or full paper simulation with trade lifecycle:
+                # if ab_test_manager and ab_treatment:
+                #     signal_id = f"{latest_time}_{decision.side}"
+                #     ab_test_manager.log_result(
+                #         signal_id=signal_id,
+                #         treatment=ab_treatment,
+                #         outcome={
+                #             "pnl": realized_pnl,  # From closed trade
+                #             "entry_price": actual_entry_price,
+                #             "exit_price": actual_exit_price,
+                #             "slippage_rr": actual_slippage_rr,
+                #         }
+                #     )
             else:
                 # Log skip
                 paper_logger.log_skip(

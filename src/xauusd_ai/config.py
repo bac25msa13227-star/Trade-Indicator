@@ -191,6 +191,12 @@ class RiskSettings(StrictSettingsModel):
     #   True  → dynamic slippage per trade (realistic, varies 1-6 pips)
     #   False → static slippage_rr applied uniformly (legacy behavior)
     use_dynamic_slippage: bool = False
+    # ab_test_enabled: enable A/B testing framework (compare control vs treatment)
+    #   True  → randomly assign 50/50 to control (static) vs treatment (dynamic slippage)
+    #   False → use use_dynamic_slippage flag directly (no A/B test)
+    ab_test_enabled: bool = False
+    # ab_test_log_file: path to JSONL log file for A/B test results
+    ab_test_log_file: str = "outputs/ab_test_results.jsonl"
     # entry_slippage_atr_frac: shift SL/TP price LEVELS by ATR×frac against trade direction
     # Models MT5 tick fill differing from bar.close (live rebases preserving $ distances).
     # 0.07 ≈ $0.14 slippage for M5 XAUUSD ATR~$2. Reduces win rate ~1-3%.  0.0 = disabled.
