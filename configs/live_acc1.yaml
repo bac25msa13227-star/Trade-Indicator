@@ -168,7 +168,7 @@ execution:
   # Execution mode: "live" (real trading), "paper" (shadow mode), "backtest" (historical)
   # Paper mode logs all signals with predicted slippage but does NOT place real orders
   # Switch to "paper" for validation before enabling live trading
-  mode: live  # Options: live, paper, backtest
+  mode: paper  # Options: live, paper, backtest (✅ PAPER MODE for 7-day validation)
   auto_trade: true
   deviation: 20
   magic_number: 20260325            # Unique for acc1
