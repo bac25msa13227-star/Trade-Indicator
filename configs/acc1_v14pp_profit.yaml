@@ -174,8 +174,9 @@ execution:
   trailing_sl:
     enabled: true                    # SYNC with live
     breakeven_at_rr: 0.5
-    activation_rr: 1.0
-    trail_atr_multiple: 1.0
+    activation_rr: 1.0               # Start trailing at 1.0R (earlier activation for better protection)
+    trail_atr_multiple: 1.0          # Fallback (used when adaptive disabled)
+  adaptive_trailing_sl: true         # Adaptive trailing SL based on RR achieved
 
 training:
   use_ensemble: true

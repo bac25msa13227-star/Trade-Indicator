@@ -10,6 +10,11 @@ import pandas as pd
 from xauusd_ai.backtesting.slippage import calculate_slippage_rr, get_session_multiplier
 from xauusd_ai.config import Settings
 from xauusd_ai.execution.risk import RiskManager
+from xauusd_ai.strategies.adaptive_trailing_sl import (
+    calculate_adaptive_trail_distance,
+    calculate_current_rr,
+    should_use_adaptive_trailing,
+)
 from xauusd_ai.strategies.hybrid import HybridStrategy
 from xauusd_ai.visualization.reports import save_backtest_plots
 
@@ -204,6 +209,7 @@ def _simulate_trade_m1_trailing(
     m1_sorted_index: "pd.DatetimeIndex",
     trailing_cfg,
     friction_rr: float,
+    adaptive_enabled: bool = False,
 ) -> "float | None":
     """
     For LOSING TRADES ONLY: simulate M1 price path bar-by-bar to determine
@@ -267,11 +273,30 @@ def _simulate_trade_m1_trailing(
                    (direction < 0 and best_favorable <= be_price)
 
         if act_cond:
-            # Full trailing: SL trails trail_mult×1R behind best price
-            if direction > 0:
-                current_sl = max(current_sl, best_favorable - trail_mult * sl_distance)
+            # Full trailing: use adaptive distance if enabled, else fixed
+            if adaptive_enabled:
+                # Calculate current RR from best favorable price
+                current_rr = calculate_current_rr(
+                    entry_price=entry_price,
+                    current_price=best_favorable,
+                    sl_distance=sl_distance,
+                    direction=direction,
+                )
+                
+                # Get adaptive trail distance based on RR achieved
+                trail_distance = calculate_adaptive_trail_distance(
+                    current_rr=current_rr,
+                    atr=atr,
+                    sl_distance=sl_distance,
+                )
             else:
-                current_sl = min(current_sl, best_favorable + trail_mult * sl_distance)
+                # Fixed trail distance (traditional logic)
+                trail_distance = trail_mult * sl_distance
+            
+            if direction > 0:
+                current_sl = max(current_sl, best_favorable - trail_distance)
+            else:
+                current_sl = min(current_sl, best_favorable + trail_distance)
         elif be_cond:
             # Breakeven only
             if direction > 0:
@@ -390,6 +415,7 @@ def simulate_dynamic_concurrent_backtest(
     _trail_be_rr   = float(getattr(_trailing_cfg, 'breakeven_at_rr', 0.5)) if _trailing_cfg else 0.5
     _trail_act_rr  = float(getattr(_trailing_cfg, 'activation_rr', 1.0)) if _trailing_cfg else 1.0
     _trail_atr_mult = float(getattr(_trailing_cfg, 'trail_atr_multiple', 1.0)) if _trailing_cfg else 1.0
+    _adaptive_trailing_enabled = bool(getattr(settings.execution, 'adaptive_trailing_sl', False))
 
     # G12: Partial TP config
     _partial_tp_enabled = bool(getattr(settings.risk, 'partial_tp_enabled', False))
@@ -662,6 +688,7 @@ def simulate_dynamic_concurrent_backtest(
                     m1_sorted_index=_m1_sorted_index,
                     trailing_cfg=_trailing_cfg,
                     friction_rr=_row_friction,
+                    adaptive_enabled=_adaptive_trailing_enabled,
                 )
                 if _m1_net_rr is not None:
                     net_rr = _m1_net_rr

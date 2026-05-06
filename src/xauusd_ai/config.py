@@ -337,6 +337,7 @@ class ExecutionSettings(StrictSettingsModel):
     close_opposite_on_signal: bool = False  # Chốt lệnh ngược chiều đang lời khi có tín hiệu mới
     close_opposite_min_profit: float = 1.0  # Minimum profit ($) to close opposite position
     trailing_sl: TrailingSlSettings = Field(default_factory=TrailingSlSettings)
+    adaptive_trailing_sl: bool = False  # Enable adaptive trailing SL based on RR achieved
     dca: DcaSettings = Field(default_factory=DcaSettings)
     exit_model: ExitModelSettings = Field(default_factory=ExitModelSettings)
 
