@@ -92,6 +92,7 @@ _parser.add_argument("--cache", action="store_true", help="Cache full dataset to
 _parser.add_argument("--no-rr-sweep", action="store_true", help="Skip RR sweep (faster, only run concurrent sim)")
 _parser.add_argument("--no-compound", action="store_true", help="Reset balance to $200 each fold (no compounding)")
 _parser.add_argument("--monthly-reset", action="store_true", help="Reset balance to $200 every 30 days (simulates monthly withdrawal). Recommended: use --test-bars 6000 (1 month) for accurate monthly resets, not 18000 (3 months).")
+_parser.add_argument("--compound-target", type=float, default=0.0, help="Target balance for compounding. When balance reaches this target, withdraw excess and continue. E.g., 10000 = compound until $10k, then withdraw excess each fold. 0 = no target (full compound or use --monthly-reset).")
 _parser.add_argument("--test-bars", type=int, default=None, help="Override TEST_BARS (bars per fold test window)")
 _parser.add_argument("--step-bars", type=int, default=None, help="Override STEP_BARS (bars to slide per fold)")
 _parser.add_argument("--min-conf", type=float, default=None, help="Override min confidence threshold for signal filter (e.g. 0.70 to match combo133)")
@@ -110,6 +111,7 @@ _known, _rest = _parser.parse_known_args()
 FAST_MODE = _known.fast
 NO_COMPOUND = _known.no_compound
 MONTHLY_RESET = _known.monthly_reset
+COMPOUND_TARGET = _known.compound_target
 NO_CIRCUIT_BREAKER = _known.no_cb
 NO_TRAIL = _known.no_trail
 NO_DD_KILL = _known.no_dd_kill
@@ -172,6 +174,8 @@ if NO_COMPOUND:
     reset_mode = " | NO-COMPOUND (reset $200/fold)"
 elif MONTHLY_RESET:
     reset_mode = " | MONTHLY-RESET (reset $200 every 30 days)"
+elif COMPOUND_TARGET > 0:
+    reset_mode = f" | COMPOUND TARGET (compound until ${COMPOUND_TARGET:,.0f}, then withdraw excess)"
 print(f"  Balance : ${STARTING_BALANCE:.0f} khởi đầu | Rủi ro {RISK_PCT:.2%}/lệnh{reset_mode}")
 print(f"  RR Sweep: {'SKIP' if _known.no_rr_sweep else RR_SWEEP}")
 print(f"  PrecFloor:{PREC_FLOOR:.0%}  (win rate tối thiểu yêu cầu)")
@@ -709,6 +713,24 @@ while fold_start + TRAIN_BARS + TEST_BARS <= n_total:
                     print(f"      💰 MONTHLY RESET: Withdrew ${_withdrawn:.2f}, reset balance to ${STARTING_BALANCE:.2f} (after {days_since_reset} days, fold was {fold_duration_days} days)")
                 else:
                     print(f"      ⏳ {_monthly_reset_interval_days - days_since_reset} days until next reset (current balance: ${_compound_balance:.2f})")
+    
+    # Compound target logic: compound until target reached, then withdraw excess
+    if COMPOUND_TARGET > 0 and not NO_COMPOUND and not MONTHLY_RESET:
+        if _compound_balance > COMPOUND_TARGET:
+            _withdrawn = _compound_balance - COMPOUND_TARGET
+            _compound_balance = COMPOUND_TARGET
+            
+            result["compound_target_withdrawal"] = {
+                "target_balance": COMPOUND_TARGET,
+                "balance_before": sim_r["ending_balance"],
+                "withdrawn_amount": _withdrawn,
+                "balance_after": _compound_balance,
+                "fold_number": fold_idx,
+            }
+            print(f"      🎯 COMPOUND TARGET: Withdrew ${_withdrawn:,.2f}, maintain balance at ${COMPOUND_TARGET:,.2f} (target reached)")
+        else:
+            _remaining_to_target = COMPOUND_TARGET - _compound_balance
+            print(f"      📈 COMPOUNDING: Current ${_compound_balance:,.2f}, ${_remaining_to_target:,.2f} to target ${COMPOUND_TARGET:,.2f}")
     
     # Build concurrent_sim result dict FIRST
     result["concurrent_sim"] = {
