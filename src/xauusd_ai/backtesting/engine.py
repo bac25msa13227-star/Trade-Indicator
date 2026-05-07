@@ -197,7 +197,7 @@ def simulate_prediction_backtest(
     return SimulationResult(report=report, trades=trades_df)
 
 
-# ── M1 bar-by-bar trailing SL path simulator (for LOSING trades only) ────────
+# ── M1 bar-by-bar trailing SL path simulator (for ALL trades) ────────────────
 def _simulate_trade_m1_trailing(
     entry_time: "pd.Timestamp",
     entry_price: float,
@@ -212,15 +212,17 @@ def _simulate_trade_m1_trailing(
     adaptive_enabled: bool = False,
 ) -> "float | None":
     """
-    For LOSING TRADES ONLY: simulate M1 price path bar-by-bar to determine
-    whether trailing SL would have improved exit before the M5-confirmed SL hit.
+    Simulate M1 price path bar-by-bar to determine if trailing SL triggers
+    before the M5-confirmed exit (SL or TP).
 
-    The M5 dataset determines win/loss (realized_rr). This function only
-    improves the trailing SL EXIT PRICE for losing trades — it does NOT
-    override whether a trade was a win or loss (no re-running SL/TP race).
+    CRITICAL FIX: Now applies to ALL trades (winning + losing), matching live behavior.
+    
+    For LOSING trades: Check if trailing SL improves exit (reduces loss).
+    For WINNING trades: Check if trailing SL triggers BEFORE TP (cuts profit early).
 
-    Returns improved net_rr if trailing SL triggered above original SL,
-    or None if no improvement (caller keeps M5 heuristic result).
+    Returns:
+        - net_rr if trailing SL triggered (can be negative, zero, or positive)
+        - None if trailing SL did NOT trigger (caller keeps M5 heuristic result)
     """
     sl_distance = atr * sl_mult
     if sl_distance <= 0 or entry_time is None:
@@ -307,21 +309,25 @@ def _simulate_trade_m1_trailing(
         # SL hit check — always stop as soon as current_sl is hit
         if (direction > 0 and adverse <= current_sl) or \
            (direction < 0 and adverse >= current_sl):
-            # Trade exits here
+            # Trade exits here via trailing SL
             exit_rr = (current_sl - entry_price) / sl_distance * direction
-            improved = (direction > 0 and current_sl > original_sl) or \
+            
+            # CRITICAL: Return trailing SL exit for BOTH cases:
+            # 1. Losing trade: trailing SL improved (reduced loss)
+            # 2. Winning trade: trailing SL hit before TP (cut profit early)
+            # Only skip if trailing SL == original SL (no movement occurred)
+            sl_moved = (direction > 0 and current_sl > original_sl) or \
                        (direction < 0 and current_sl < original_sl)
-            return (exit_rr - friction_rr) if improved else None
+            
+            if sl_moved:
+                return exit_rr - friction_rr
+            else:
+                # Trailing SL never moved from original — same as M5 result
+                return None
 
-    # Reached end of window without SL hit — this shouldn't happen for a losing
-    # M5 trade (original SL should fire within bars_held bars), but handle anyway.
-    # If current_sl was never improved beyond original, no change needed.
-    improved = (direction > 0 and current_sl > original_sl) or \
-               (direction < 0 and current_sl < original_sl)
-    if not improved:
-        return None
-    exit_rr = (current_sl - entry_price) / sl_distance * direction
-    return exit_rr - friction_rr
+    # Reached end of window without SL hit — TP was reached or trade expired
+    # Return None to keep M5 result (likely TP for winning trades)
+    return None
 
 
 def simulate_dynamic_concurrent_backtest(
@@ -675,8 +681,9 @@ def simulate_dynamic_concurrent_backtest(
                 _full_rr = net_rr
                 net_rr = _partial_tp_pct * _pt_rr + (1.0 - _partial_tp_pct) * _full_rr
 
-            # G11: For LOSING trades — use M1 path to find accurate trailing SL exit
-            if raw_rr < 0 and _trail_enabled:
+            # G11: For ALL trades — use M1 path to find accurate trailing SL exit
+            # CRITICAL FIX: Apply to winning AND losing trades (matches live behavior)
+            if _trail_enabled:
                 _m1_net_rr = _simulate_trade_m1_trailing(
                     entry_time=_entry_time_utc,
                     entry_price=_entry_price_slipped,
@@ -691,14 +698,17 @@ def simulate_dynamic_concurrent_backtest(
                     adaptive_enabled=_adaptive_trailing_enabled,
                 )
                 if _m1_net_rr is not None:
+                    # Trailing SL triggered — use that exit regardless of M5 result
                     net_rr = _m1_net_rr
                 else:
                     # M1 data unavailable for window — fall back to peak_rr heuristic
-                    _peak_rr = float(getattr(row, 'peak_rr', 0.0))
-                    if _peak_rr >= _trail_act_rr:
-                        net_rr = max(_trail_act_rr - _trail_atr_mult, 0.0) - _row_friction
-                    elif _peak_rr >= _trail_be_rr:
-                        net_rr = -_row_friction
+                    # Only apply heuristic to losing trades (winning trades keep TP)
+                    if raw_rr < 0:
+                        _peak_rr = float(getattr(row, 'peak_rr', 0.0))
+                        if _peak_rr >= _trail_act_rr:
+                            net_rr = max(_trail_act_rr - _trail_atr_mult, 0.0) - _row_friction
+                        elif _peak_rr >= _trail_be_rr:
+                            net_rr = -_row_friction
         else:
             # G12: Partial TP — if realized_rr >= threshold, simulate closing
             #      partial_tp_pct at partial_tp_rr and the rest at full TP.

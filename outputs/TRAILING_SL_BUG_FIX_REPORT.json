@@ -1,0 +1,27 @@
+{
+  "old_results": {
+    "folds": 29,
+    "avg_return_pct": 2490.42,
+    "profit_per_fold": 4981,
+    "profit_per_month": 1660,
+    "win_rate": 47.3,
+    "profit_factor": 3.878,
+    "max_dd": -14.68
+  },
+  "new_results": {
+    "folds": 4,
+    "returns": [
+      -15.5,
+      -15.2,
+      -15.6,
+      -7.4
+    ],
+    "avg_return_pct": -13.4,
+    "avg_balance": 173.25,
+    "profit_per_fold": -26.75
+  },
+  "gap_pct": 2503.82,
+  "fix_description": "Apply trailing SL to ALL trades, not just losing trades",
+  "live_evidence": "User data shows many positive SL exits (breakeven, small profit)",
+  "recommendation": "Test with trailing_sl.enabled=false first"
+}
