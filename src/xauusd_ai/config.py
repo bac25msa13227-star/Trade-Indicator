@@ -452,6 +452,11 @@ class TrainingSettings(StrictSettingsModel):
     use_ensemble: bool = False
     # Feature selection: drop bottom N% by RF importance. 0 = disabled.
     feature_selection_drop_pct: int = 0
+    # P1 Enhancement: LSTM + Ensemble
+    use_lstm: bool = False                 # Enable LSTM for temporal patterns (requires PyTorch)
+    lstm_hidden_dim: int = 64              # LSTM hidden units
+    lstm_num_layers: int = 2               # LSTM depth
+    lstm_dropout: float = 0.3              # LSTM dropout for regularization
     # Offset applied to the optimized ML threshold at inference time.
     # Negative = accept more signals (lower threshold), positive = stricter.
     ml_threshold_offset: float = 0.0
