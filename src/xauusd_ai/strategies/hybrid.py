@@ -8,6 +8,10 @@ import numpy as np
 import pandas as pd
 
 from xauusd_ai.config import Settings
+from xauusd_ai.strategies.entry_quality_filter import (
+    get_entry_quality_config,
+    should_pass_entry_quality_filter,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -219,6 +223,17 @@ class HybridStrategy:
                 return False, "d1_trend_gate (uptrend, no sell)"
             if daily_bias < 0 and trade_side == "buy":
                 return False, "d1_trend_gate (downtrend, no buy)"
+
+        # Entry quality filter: require multiple confirmations to improve win rate
+        quality_config = get_entry_quality_config(self.settings)
+        if quality_config["enabled"]:
+            pass_filter, reason, quality_score, confirmations = should_pass_entry_quality_filter(
+                row,
+                min_score=quality_config["min_score"],
+                min_confirmations=quality_config["min_confirmations"],
+            )
+            if not pass_filter:
+                return False, reason
 
         return True, "ok"
 

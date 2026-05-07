@@ -27,12 +27,24 @@ try:
 except ImportError:
     _MLFLOW_AVAILABLE = False
 
+# P1 Enhancement: Ensemble + LSTM
+try:
+    from xauusd_ai.model.ensemble import EnsembleModel, create_ensemble_model
+    from xauusd_ai.model.lstm_model import create_lstm_model
+    _ENSEMBLE_AVAILABLE = True
+except ImportError:
+    _ENSEMBLE_AVAILABLE = False
+    logging.getLogger(__name__).warning(
+        "Ensemble/LSTM modules not available; fallback to tree-only models"
+    )
+
 
 class ModelTrainer:
     def __init__(self, settings: Settings, mlflow_tracker=None) -> None:
         self.settings = settings
         self._mlflow: MLflowTracker | None = mlflow_tracker  # type: ignore[name-defined]
         self._use_ensemble = bool(getattr(settings.training, 'use_ensemble', False))
+        self._use_lstm = bool(getattr(settings.training, 'use_lstm', False))  # P1: LSTM flag
         self._feat_sel_drop = int(getattr(settings.training, 'feature_selection_drop_pct', 0))
         self.model = self._build_model()
         self._feature_mask = None
@@ -42,8 +54,28 @@ class ModelTrainer:
         self.feature_columns: list[str] = list(FEATURE_COLUMNS)  # updated by load_artifacts for backward compat
 
     def _build_model(self):
-        """Build model: WF-identical ensemble or single HGB."""
-        if self._use_ensemble:
+        """Build model: P1 Ensemble (tree+LSTM), VotingClassifier, or single HGB."""
+        # P1 Enhancement: Tree + LSTM Ensemble
+        if self._use_ensemble and self._use_lstm and _ENSEMBLE_AVAILABLE:
+            logging.getLogger(__name__).info("Building P1 Ensemble: HGB + LSTM")
+            tree_model = HistGradientBoostingClassifier(
+                max_iter=1000, learning_rate=0.01, max_depth=7,
+                min_samples_leaf=20, l2_regularization=1.0,
+                max_bins=128, class_weight=None,
+                early_stopping=True, validation_fraction=0.1,
+                n_iter_no_change=40, random_state=42,
+            )
+            # LSTM will be created during fit() after we know input shape
+            # For now, create ensemble wrapper with None LSTM (will be set during train())
+            return create_ensemble_model(
+                tree_model=tree_model,
+                lstm_model=None,  # Created during train()
+                settings=self.settings
+            )
+        
+        # Voting Ensemble (HGB + RF + ET)
+        elif self._use_ensemble:
+            logging.getLogger(__name__).info("Building VotingClassifier Ensemble")
             _hgb = HistGradientBoostingClassifier(
                 max_iter=1000, learning_rate=0.01, max_depth=7,
                 min_samples_leaf=20, l2_regularization=1.0,
@@ -66,13 +98,17 @@ class ModelTrainer:
                 voting="soft",
                 weights=[3, 2, 1],
             )
-        return HistGradientBoostingClassifier(
-            max_iter=300, learning_rate=0.05, max_depth=5,
-            min_samples_leaf=20, l2_regularization=1.0,
-            max_bins=63, class_weight=None,
-            early_stopping=True, validation_fraction=0.1,
-            n_iter_no_change=20, random_state=42,
-        )
+        
+        # Single HGB (baseline)
+        else:
+            logging.getLogger(__name__).info("Building single HGB model")
+            return HistGradientBoostingClassifier(
+                max_iter=300, learning_rate=0.05, max_depth=5,
+                min_samples_leaf=20, l2_regularization=1.0,
+                max_bins=63, class_weight=None,
+                early_stopping=True, validation_fraction=0.1,
+                n_iter_no_change=20, random_state=42,
+            )
 
     def _aligned_feature_frame(self, frame: pd.DataFrame) -> pd.DataFrame:
         """Align any dataframe/row to model feature schema.
@@ -152,6 +188,22 @@ class ModelTrainer:
         x_test_sel = self._apply_feature_mask(x_test)
 
         self.model = self._build_model()  # fresh model each train
+        
+        # P1: Create LSTM if using ensemble + lstm
+        if self._use_ensemble and self._use_lstm and _ENSEMBLE_AVAILABLE:
+            if isinstance(self.model, EnsembleModel) and self.model.lstm_model is None:
+                logging.getLogger(__name__).info(
+                    f"Creating LSTM model for P1 ensemble (input_dim={x_train_sel.shape[1]})"
+                )
+                lstm_model = create_lstm_model(
+                    input_dim=x_train_sel.shape[1],
+                    hidden_dim=getattr(self.settings.training, 'lstm_hidden_dim', 64),
+                    num_layers=getattr(self.settings.training, 'lstm_num_layers', 2),
+                    dropout=getattr(self.settings.training, 'lstm_dropout', 0.3),
+                )
+                self.model.lstm_model = lstm_model
+                logging.getLogger(__name__).info("LSTM model created and attached to ensemble")
+        
         self.model.fit(x_train_sel, y_train, sample_weight=sw)
 
         # Probability calibration via isotonic regression on validation holdout

@@ -11,6 +11,7 @@ except ImportError:
 
 from xauusd_ai.config import Settings
 from xauusd_ai.data.news_features import attach_news_features
+from xauusd_ai.features.regime_detection import add_regime_features
 from xauusd_ai.features.indicators import (
     atr, macd, rsi, zscore,
     bos_choch, fair_value_gap, order_block, kill_zone, judas_swing,
@@ -109,6 +110,12 @@ FEATURE_COLUMNS = [
     "trend_strength_score", # Trend quality from consensus + ADX + H4 premium/discount
     "pullback_quality",     # Pullback entry quality around 50% retracement + rejection
     "execution_quality",    # Breakout/continuation quality from candle structure + flow
+    # --- v6: Regime Detection (5) ---
+    "regime_trending",      # ADX-based trending regime (1=trending, 0=not)
+    "regime_sideway",       # ADX-based sideway regime (1=sideway, 0=not)
+    "regime_volatile",      # ATR-based volatile regime (1=volatile, 0=not)
+    "regime_score",         # Composite regime score (-1 to +1, higher=better for trading)
+    "regime_favorable",     # Binary favorable regime flag (1=good to trade, 0=skip)
 ]
 
 
@@ -348,6 +355,10 @@ def _merge_context(settings: Settings, frames: dict[str, pd.DataFrame]) -> pd.Da
     _d1_dir = merged["daily_bias"]
     merged["multi_tf_consensus"] = (_d1_dir + _h4_dir + _h1_dir).fillna(0)  # -3 to +3
     merged["h4_h1_bias_agree"] = ((_h4_dir == _h1_dir) & (_h4_dir != 0)).astype(int)
+    
+    # ── v6: Regime Detection features ──────────────────────────────────
+    # Add regime detection to skip sideway markets and improve win rate
+    merged = add_regime_features(merged, lookback=50)
 
     # Meta-features that summarize whether the current bar is worth trading.
     direction_hint = np.sign(
