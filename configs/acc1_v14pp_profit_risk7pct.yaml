@@ -14,8 +14,8 @@ app:
   backtest_trades_path: outputs/backtest_trades_acc1.csv
   backtest_equity_plot_path: outputs/backtest_equity_acc1.png
   backtest_trades_plot_path: outputs/backtest_trades_plot_acc1.png
-  walkforward_report_path: outputs/walkforward_report_acc1_v14pp_profit.json
-  walkforward_trades_path: outputs/walkforward_trades_acc1_v14pp_profit.csv
+  walkforward_report_path: outputs/walkforward_report_acc1_v14pp_profit_risk7pct.json
+  walkforward_trades_path: outputs/walkforward_trades_acc1_v14pp_profit_risk7pct.csv
   paper_trade_log_path: outputs/paper_trade_signals_acc1.csv
   live_learning_log_path: outputs/live_learning_log_acc1.jsonl
   live_closed_trades_path: outputs/live_closed_trades_acc1.csv
@@ -104,7 +104,7 @@ strategy:
 
 risk:
   mode: fixed_fractional
-  risk_per_trade: 0.060             # 🎯 OPTIMIZED: 6% risk → $1,660/month (+11% over $1,500 target), DD -14.7%, PF 3.88, Sortino 11.1
+  risk_per_trade: 0.070             # 🎯 TARGET100k FINAL: WF 29-fold $200 reset → net $125k, lose 2, DD 19.42%, PF 3.07
   risk_tier_floor: 0.02
   max_open_positions: 3
   stop_loss_atr_multiple: 1.5
