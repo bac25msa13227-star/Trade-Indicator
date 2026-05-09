@@ -1,0 +1,68 @@
+# Auto-generated WF config #5
+# Threshold: 0.6, Risk: 5%, MaxPos: 4
+# Trailing: BE=0.5, Act=1.0, Mult=1.0
+# Slippage: 0.015, Friction: 0.17
+
+app:
+  model_path: outputs/acc1_combo133_202604_model.pkl
+  scaler_path: outputs/acc1_combo133_202604_scaler.pkl
+  model_meta_path: outputs/acc1_combo133_202604_meta.json
+  log_level: INFO
+
+market:
+  symbol: XAUUSDm
+  training_symbol: GC=F
+  training_data_source: csv_folder
+  csv_folder_path: src/xauusd_ai/real_data
+  csv_timeframe: M15
+  higher_timeframe: D1
+  mid_timeframe: H1
+  structure_timeframe: H4
+  execution_timeframe: M5
+  bars:
+    D1: 100
+    H1: 500
+    H4: 200
+    M30: 300
+    M15: 300
+    M5: 500
+    M1: 200
+  timezone: UTC
+
+strategy:
+  signal_threshold: 0.6
+  sideways_volatility_threshold: 0.20
+  strong_volatility_threshold: 0.80
+  sideway_min_confidence: 0.6
+  volatile_min_confidence: 0.6
+
+risk:
+  mode: fixed_fractional
+  risk_per_trade: 0.05
+  max_open_positions: 4
+  stop_loss_atr_multiple: 1.5
+  take_profit_rr: 5.5
+  entry_slippage_atr_frac: 0.015
+  min_confidence: 0.6
+  kill_switch_enabled: true
+  daily_loss_limit_pct: 0.15
+  max_drawdown_kill_pct: 0.15
+  spread_cost_rr: 0.1003
+  slippage_rr: 0.049300000000000004
+  commission_rr: 0.0204
+  use_dynamic_slippage: true
+
+execution:
+  auto_trade: true
+  trailing_sl:
+    enabled: true
+    breakeven_at_rr: 0.5
+    activation_rr: 1.0
+    trail_atr_multiple: 1.0
+
+training:
+  use_ensemble: true
+  retrain_on_startup: false
+  live_learning_enabled: false
+  max_train_bars: 30000
+  backtest_initial_balance: 500.0
