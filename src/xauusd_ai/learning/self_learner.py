@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from collections import Counter
 from datetime import datetime, timezone
@@ -27,6 +28,8 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 import yfinance as yf
+
+from xauusd_ai.learning.loss_memory import LossMemoryStore
 
 if TYPE_CHECKING:
     from xauusd_ai.config import Settings
@@ -78,6 +81,7 @@ class SelfLearner:
         # Trạng thái loss learning
         self._accumulated_losses: int = 0
         self._loss_patterns: list[dict] = []  # features của các lệnh thua gần đây
+        self._loss_memory = LossMemoryStore(account=os.environ.get("TRADING_ACCOUNT") or "acc1")
         # Pre-load historical CSV để live-learning có đủ dataset ngay từ đầu
         self._preload_csv_cache()
 
@@ -621,6 +625,7 @@ class SelfLearner:
         event = {
             "event": "loss_analysis",
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "account": os.environ.get("TRADING_ACCOUNT") or "acc1",
             "ticket": position.get("ticket"),
             "side": position.get("side"),
             "volume": position.get("volume"),
@@ -634,6 +639,7 @@ class SelfLearner:
         }
         with self._loss_log_path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(event, default=str) + "\n")
+        self._loss_memory.add_loss(event)
 
         reason_summary = " | ".join(analysis["reasons"])
         LOGGER.warning(

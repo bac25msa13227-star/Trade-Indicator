@@ -278,6 +278,7 @@ class RiskSettings(StrictSettingsModel):
     dynamic_risk_enabled: bool = False
     dynamic_risk_min: float = 0.02                 # Minimum risk for low confidence (<0.70)
     dynamic_risk_max: float = 0.05                 # Maximum risk for high confidence (>=0.85)
+    rating_risk_enabled: bool = False              # Optional 5-tier rating risk scale.
     risk_throttle_rules: list[RiskThrottleRuleSettings] = Field(default_factory=list)
 
 

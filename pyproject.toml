@@ -18,6 +18,8 @@ dependencies = [
   "matplotlib>=3.9.2",
   "python-dotenv>=1.0.1",
   "yfinance>=0.2.54",
+  "mem0ai>=0.1.100",
+  "qdrant-client>=1.12.1",
 ]
 
 

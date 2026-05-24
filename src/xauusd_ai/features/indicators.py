@@ -3,6 +3,29 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+INDICATOR_MENU = {
+    "trend": {
+        "indicators": ["ema", "macd", "bos_choch"],
+        "usage": "Use to confirm direction and avoid counter-trend entries.",
+        "caveat": "Lagging signals can flip late during sharp reversals.",
+    },
+    "volatility": {
+        "indicators": ["atr", "zscore"],
+        "usage": "Use for SL/TP sizing, spread tolerance, and DD off-switch design.",
+        "caveat": "High ATR improves room for profit but increases stop and min-lot risk.",
+    },
+    "momentum": {
+        "indicators": ["rsi", "macd_hist"],
+        "usage": "Use to detect acceleration or exhaustion before entry.",
+        "caveat": "Momentum can stay extreme in trend days, so do not use it alone.",
+    },
+    "ict_wyckoff": {
+        "indicators": ["fair_value_gap", "liquidity_sweep", "wyckoff_phase"],
+        "usage": "Use as structural context for entry quality and direction filters.",
+        "caveat": "Pattern labels are proxies from OHLCV bars, not ground-truth order flow.",
+    },
+}
+
 
 def ema(series: pd.Series, period: int) -> pd.Series:
     return series.ewm(span=period, adjust=False).mean()

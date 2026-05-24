@@ -447,7 +447,14 @@ class RiskManager:
         # Anti-martingale: reduce risk after consecutive losses
         anti_mart = self.get_anti_martingale_factor()
 
-        raw_fraction = base_fraction * regime_multiplier * score_multiplier * anti_mart
+        rating_multiplier = 1.0
+        if bool(getattr(self.settings.risk, "rating_risk_enabled", False)):
+            from xauusd_ai.strategies.rating import rating_from_decision, rating_risk_multiplier
+
+            rating = rating_from_decision(side or "buy", confidence, should_trade=True)
+            rating_multiplier = rating_risk_multiplier(rating)
+
+        raw_fraction = base_fraction * regime_multiplier * score_multiplier * anti_mart * rating_multiplier
         throttled_fraction, _, _ = self.apply_risk_throttle(
             raw_fraction,
             market_row,
@@ -588,6 +595,8 @@ class RiskManager:
             volume = self.settings.risk.fixed_lot * throttle_mult
 
         reason = decision.reason
+        if getattr(decision, "rating", None):
+            reason = f"{reason} | rating={decision.rating}"
         if throttle_mult < 1.0:
             reason = f"{reason} | risk_throttle({throttle_reason}) x{throttle_mult:.2f}"
 

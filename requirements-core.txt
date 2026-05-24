@@ -9,3 +9,5 @@ python-dotenv>=1.0.1
 yfinance>=0.2.54
 SQLAlchemy>=2.0.35
 prometheus-client>=0.20.0
+mem0ai>=0.1.100
+qdrant-client>=1.12.1

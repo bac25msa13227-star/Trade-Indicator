@@ -6,6 +6,9 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 import pandas as pd
 
+from xauusd_ai.learning.decision_log import DecisionLog
+from xauusd_ai.strategies.rating import rating_from_decision
+
 
 class PaperTradeLogger:
     """
@@ -18,7 +21,12 @@ class PaperTradeLogger:
     - Comparison of predicted vs actual P&L
     """
     
-    def __init__(self, output_path: str = "outputs/paper_trades.jsonl"):
+    def __init__(
+        self,
+        output_path: str = "outputs/paper_trades.jsonl",
+        decision_log: DecisionLog | None = None,
+        enable_decision_log: bool = True,
+    ):
         """
         Initialize paper trade logger.
         
@@ -28,6 +36,9 @@ class PaperTradeLogger:
         self.output_path = Path(output_path)
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
         self.trade_counter = 0
+        self.decision_log = decision_log if enable_decision_log else None
+        if self.decision_log is None and enable_decision_log:
+            self.decision_log = DecisionLog(output_dir=self.output_path.parent)
     
     def log_entry_signal(
         self,
@@ -49,11 +60,18 @@ class PaperTradeLogger:
         self.trade_counter += 1
         trade_id = self.trade_counter
         
+        rating = signal.get("rating") or rating_from_decision(
+            signal.get("side", "hold"),
+            float(signal.get("confidence", signal.get("probability", 0.0)) or 0.0),
+            should_trade=True,
+        )
+
         entry = {
             "type": "entry",
             "trade_id": trade_id,
             "timestamp": datetime.utcnow().isoformat(),
             "side": signal.get("side"),
+            "rating": rating,
             "entry_price": signal.get("entry_price"),
             "stop_loss": signal.get("stop_loss"),
             "take_profit": signal.get("take_profit"),
@@ -74,6 +92,9 @@ class PaperTradeLogger:
         }
         
         self._write_entry(entry)
+        if self.decision_log is not None:
+            decision_signal = {**signal, "rating": rating}
+            self.decision_log.log_entry(trade_id, decision_signal, market_data)
         return trade_id
     
     def log_exit(
@@ -108,6 +129,15 @@ class PaperTradeLogger:
         }
         
         self._write_entry(entry)
+        if self.decision_log is not None:
+            self.decision_log.log_exit(
+                trade_id=trade_id,
+                exit_price=exit_price,
+                exit_reason=exit_reason,
+                bars_held=bars_held,
+                realized_rr=realized_rr,
+                actual_slippage_pips=actual_slippage_pips,
+            )
     
     def log_skip(
         self,
@@ -132,6 +162,21 @@ class PaperTradeLogger:
         }
         
         self._write_entry(entry)
+        if self.decision_log is not None:
+            enriched_signal = None
+            if signal is not None:
+                try:
+                    enriched_signal = {
+                        **signal,
+                        "rating": signal.get("rating") or rating_from_decision(
+                            signal.get("side", "hold"),
+                            float(signal.get("confidence", signal.get("probability", 0.0)) or 0.0),
+                            should_trade=False,
+                        ),
+                    }
+                except Exception:
+                    enriched_signal = signal
+            self.decision_log.log_skip(reason=reason, signal=enriched_signal, market_data=market_data)
     
     def get_summary_stats(self) -> Dict[str, Any]:
         """

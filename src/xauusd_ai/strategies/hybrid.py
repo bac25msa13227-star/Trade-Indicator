@@ -1,30 +1,57 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
 
 import numpy as np
 import pandas as pd
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from xauusd_ai.config import Settings
 from xauusd_ai.strategies.entry_quality_filter import (
     get_entry_quality_config,
     should_pass_entry_quality_filter,
 )
+from xauusd_ai.strategies.rating import TradeRating, rating_from_decision
 
 LOGGER = logging.getLogger(__name__)
 
 
-@dataclass
-class TradeDecision:
+class TradeDecision(BaseModel):
+    model_config = ConfigDict(validate_assignment=True)
+
     should_trade: bool
-    side: str
-    confidence: float
+    side: Literal["buy", "sell", "hold"]
+    confidence: float = Field(ge=0.0, le=1.0)
     reason: str
-    entry_price: float
-    stop_loss: float
-    take_profit: float
+    entry_price: float = Field(ge=0.0)
+    stop_loss: float = Field(ge=0.0)
+    take_profit: float = Field(ge=0.0)
+    rating: TradeRating | None = None
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        # Backward-compatible positional construction used throughout the legacy code.
+        if args:
+            names = ["should_trade", "side", "confidence", "reason", "entry_price", "stop_loss", "take_profit"]
+            if len(args) > len(names):
+                raise TypeError(f"TradeDecision expected at most {len(names)} positional args, got {len(args)}")
+            kwargs.update({name: value for name, value in zip(names, args)})
+        if "side" in kwargs:
+            kwargs["side"] = str(kwargs["side"]).strip().lower()
+        super().__init__(**kwargs)
+
+    @model_validator(mode="after")
+    def _validate_trade_geometry(self) -> "TradeDecision":
+        if self.rating is None:
+            object.__setattr__(self, "rating", rating_from_decision(self.side, self.confidence, self.should_trade))
+        if not self.should_trade:
+            return self
+        if self.side == "buy" and not (self.stop_loss < self.entry_price < self.take_profit):
+            raise ValueError("BUY decision requires stop_loss < entry_price < take_profit")
+        if self.side == "sell" and not (self.take_profit < self.entry_price < self.stop_loss):
+            raise ValueError("SELL decision requires take_profit < entry_price < stop_loss")
+        return self
 
 
 class HybridStrategy:
