@@ -1,0 +1,30 @@
+{
+  "folds": 63,
+  "first_fold": 118,
+  "last_fold": 180,
+  "min_history_folds": 12,
+  "baseline_median_final": 3032.58,
+  "baseline_min_final": 1506.5,
+  "baseline_mean_final": 3730.46,
+  "baseline_worst_dd_pct": -29.89,
+  "baseline_loss_folds": 0,
+  "baseline_total_trades": 2561,
+  "agent_median_final": 2884.18,
+  "agent_min_final": 1160.89,
+  "agent_mean_final": 3786.22,
+  "agent_worst_dd_pct": -34.1,
+  "agent_loss_folds": 1,
+  "agent_total_trades": 2442,
+  "agent_better_final_folds": 32,
+  "agent_worse_final_folds": 19,
+  "agent_total_skip": 119,
+  "agent_total_reduce": 267,
+  "agent_total_boost": 943,
+  "agent_total_take": 1232,
+  "decision_actions": {
+    "TAKE": 1232,
+    "BOOST": 943,
+    "REDUCE": 267,
+    "SKIP": 119
+  }
+}
