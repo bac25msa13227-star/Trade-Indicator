@@ -279,6 +279,12 @@ class RiskSettings(StrictSettingsModel):
     dynamic_risk_min: float = 0.02                 # Minimum risk for low confidence (<0.70)
     dynamic_risk_max: float = 0.05                 # Maximum risk for high confidence (>=0.85)
     rating_risk_enabled: bool = False              # Optional 5-tier rating risk scale.
+    confidence_bucket_risk_enabled: bool = False   # Optional WF-selected confidence bucket risk scale.
+    confidence_bucket_low_cutoff: float = 0.55
+    confidence_bucket_high_cutoff: float = 0.70
+    confidence_bucket_low_multiplier: float = 1.0
+    confidence_bucket_mid_multiplier: float = 1.0
+    confidence_bucket_high_multiplier: float = 1.0
     risk_throttle_rules: list[RiskThrottleRuleSettings] = Field(default_factory=list)
 
 

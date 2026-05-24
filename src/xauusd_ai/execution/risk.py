@@ -454,7 +454,18 @@ class RiskManager:
             rating = rating_from_decision(side or "buy", confidence, should_trade=True)
             rating_multiplier = rating_risk_multiplier(rating)
 
-        raw_fraction = base_fraction * regime_multiplier * score_multiplier * anti_mart * rating_multiplier
+        bucket_multiplier = 1.0
+        if bool(getattr(self.settings.risk, "confidence_bucket_risk_enabled", False)):
+            low_cutoff = float(getattr(self.settings.risk, "confidence_bucket_low_cutoff", 0.55))
+            high_cutoff = float(getattr(self.settings.risk, "confidence_bucket_high_cutoff", 0.70))
+            if confidence < low_cutoff:
+                bucket_multiplier = float(getattr(self.settings.risk, "confidence_bucket_low_multiplier", 1.0))
+            elif confidence < high_cutoff:
+                bucket_multiplier = float(getattr(self.settings.risk, "confidence_bucket_mid_multiplier", 1.0))
+            else:
+                bucket_multiplier = float(getattr(self.settings.risk, "confidence_bucket_high_multiplier", 1.0))
+
+        raw_fraction = base_fraction * regime_multiplier * score_multiplier * anti_mart * rating_multiplier * bucket_multiplier
         throttled_fraction, _, _ = self.apply_risk_throttle(
             raw_fraction,
             market_row,

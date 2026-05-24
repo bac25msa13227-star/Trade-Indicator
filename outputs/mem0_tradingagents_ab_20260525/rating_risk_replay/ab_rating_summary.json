@@ -1,0 +1,18 @@
+{
+  "folds": 63,
+  "deposit": 1200.0,
+  "match_rate_median_pct": 100.0,
+  "baseline_median_final": 3032.58,
+  "rating_median_final": 1967.74,
+  "baseline_min_final": 1506.5,
+  "rating_min_final": 1165.85,
+  "baseline_worst_dd_pct": -29.89,
+  "rating_worst_dd_pct": -35.94,
+  "baseline_loss_folds": 0,
+  "rating_loss_folds": 1,
+  "rating_better_final_folds": 0,
+  "rating_worse_final_folds": 63,
+  "total_baseline_trades": 2561,
+  "total_rating_active_trades": 1443,
+  "total_rating_skipped_trades": 1118
+}
