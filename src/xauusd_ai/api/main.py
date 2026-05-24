@@ -94,7 +94,7 @@ _RUNTIME_PROFILE_OVERRIDE_TEMPLATE = "runtime_profile_override_{account}.json"
 
 _ACCOUNT_CFG: dict[str, dict[str, str]] = {
     "acc1": {
-        "label": "ACC1 · Live Profile",
+        "label": "ACC1 · Paper 1200 Risk1",
         "status": "live_status_acc1.json",
         "trades": "live_closed_trades_acc1.csv",
         "trades_fallback": "live_closed_trades.csv",
@@ -106,9 +106,12 @@ _ACCOUNT_CFG: dict[str, dict[str, str]] = {
         "bt_trades": "backtest_trades_acc1.csv",
         "peak": "risk_peak_balance_acc1.json",
         "daily": "risk_daily_state_acc1.json",
+        "bridge_signal_log": "bridge_signal_log_acc1.json",
+        "rv3_wf_results": "mt5_1200_deposit_sweep_20260520/risk_1_0/mt5_wf_results.csv",
+        "rv3_guard_report": "clean_1200usd_risk1_mt5_pass_20260520/dashboard_guard_report.json",
     },
     "acc2": {
-        "label": "ACC2 · Live Profile",
+        "label": "ACC2 · Demo 1200 Risk2",
         "status": "live_status_acc2.json",
         "trades": "live_closed_trades_acc2.csv",
         "trades_fallback": "live_closed_trades_acc2.csv",
@@ -120,6 +123,9 @@ _ACCOUNT_CFG: dict[str, dict[str, str]] = {
         "bt_trades": "backtest_trades_acc2.csv",
         "peak": "risk_peak_balance_acc2.json",
         "daily": "risk_daily_state_acc2.json",
+        "bridge_signal_log": "bridge_signal_log_acc2.json",
+        "rv3_wf_results": "mt5_1200_deposit_sweep_20260520/risk_2_0/mt5_wf_results.csv",
+        "rv3_guard_report": "acc2_demo_1200_risk2_live_check_20260520/dashboard_guard_report.json",
     },
 }
 
@@ -243,7 +249,12 @@ def _apply_live_config_overrides() -> None:
         try:
             settings = load_settings(cfg_path)
             app_cfg = settings.app
-            _ACCOUNT_CFG[acct]["label"] = f"{acct.upper()} · {Path(app_cfg.model_path).name}"
+            if acct == "acc1":
+                _ACCOUNT_CFG[acct]["label"] = "ACC1 - Paper 1200 Risk1"
+            elif acct == "acc2":
+                _ACCOUNT_CFG[acct]["label"] = "ACC2 - Demo 1200 Risk2"
+            else:
+                _ACCOUNT_CFG[acct]["label"] = f"{acct.upper()} - {Path(app_cfg.model_path).name}"
             _ACCOUNT_CFG[acct]["meta"] = Path(app_cfg.model_meta_path).name
             _ACCOUNT_CFG[acct]["wf"] = Path(app_cfg.walkforward_report_path).name
             _ACCOUNT_CFG[acct]["bt"] = Path(app_cfg.backtest_report_path).name
@@ -1453,6 +1464,53 @@ def _build_dashboard_payload() -> dict:
         _dashboard_cache_lock.release()
 
 
+def _iso_epoch_seconds(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        text = str(value).strip().replace("Z", "+00:00")
+        return float(datetime.fromisoformat(text).timestamp())
+    except Exception:
+        return None
+
+
+def _publish_live_prometheus_metrics(
+    account: str,
+    status: dict[str, Any],
+    *,
+    status_path: Path,
+    balance: float,
+    open_positions: int,
+    drawdown_pct: float,
+    win_rate: float,
+) -> None:
+    """Keep Prometheus business gauges aligned with the live dashboard snapshot."""
+    try:
+        from xauusd_ai.infra.metrics import TradingMetrics
+
+        status_age: float | None = None
+        try:
+            if status_path.exists():
+                status_age = max(0.0, time.time() - status_path.stat().st_mtime)
+        except Exception:
+            status_age = None
+
+        bar_ts = _iso_epoch_seconds(
+            status.get("rolling_v3_bar")
+            or status.get("rolling_v3_online_bar")
+            or status.get("bar_time")
+        )
+        metrics = TradingMetrics(account=account)
+        metrics.update_account(balance, open_positions, drawdown_pct / 100.0, win_rate)
+        metrics.update_live_status(
+            status,
+            status_file_age_seconds=status_age,
+            bar_timestamp_seconds=bar_ts,
+        )
+    except Exception as exc:
+        logger.debug("Could not publish live Prometheus metrics for %s: %s", account, exc)
+
+
 def _build_dashboard_payload_uncached() -> dict:
     accounts: dict[str, Any] = {}
     benchmarks = _load_benchmark_targets()
@@ -1460,7 +1518,8 @@ def _build_dashboard_payload_uncached() -> dict:
         runtime_cfg = _ACCOUNT_RUNTIME_CFG.get(acct, {})
         daily    = _safe_json(_output_path(cfg.get("daily", "risk_daily_state.json")))
         peak_bal = float(_safe_json(_output_path(cfg.get("peak", "risk_peak_balance.json"))).get("peak_balance") or 0)
-        status = _safe_json(_output_path(cfg["status"]))
+        status_path = _output_path(cfg["status"])
+        status = _safe_json(status_path)
         meta   = _safe_json(_output_path(cfg["meta"]))
         wf_path_candidates = [
             _output_path(cfg["wf"]),
@@ -1504,7 +1563,7 @@ def _build_dashboard_payload_uncached() -> dict:
                 bt_trades = _safe_csv_tail(bt_trades_path, 1000, account=acct)
 
         bal = float(status.get("account_balance") or 0)
-        dd  = round((peak_bal - bal) / peak_bal * 100, 2) if peak_bal > 0 else 0.0
+        dd  = max(0.0, round((peak_bal - bal) / peak_bal * 100, 2)) if peak_bal > 0 else 0.0
 
         wins = 0
         total_pnl = 0.0
@@ -1520,6 +1579,15 @@ def _build_dashboard_payload_uncached() -> dict:
                 pass
         win_rate  = round(wins / len(trades), 4) if trades else 0.0
         total_pnl = round(total_pnl, 2)
+        _publish_live_prometheus_metrics(
+            acct,
+            status,
+            status_path=status_path,
+            balance=bal,
+            open_positions=int(status.get("open_positions") or 0),
+            drawdown_pct=dd,
+            win_rate=win_rate,
+        )
         pnl_explain = _build_pnl_explain(trades, signals)
         profile_presets = _estimate_profile_presets(trades, runtime_cfg, dd)
         matrix_windows = runtime_cfg.get("admin_matrix_windows_days") if isinstance(runtime_cfg, dict) else [7, 30]
@@ -1564,6 +1632,33 @@ def _build_dashboard_payload_uncached() -> dict:
             if isinstance(threshold_eff_cfg, (int, float))
             else (max(threshold_candidates) if threshold_candidates else None)
         )
+
+        bridge_log: list = []
+        if cfg.get("bridge_signal_log"):
+            try:
+                _bsl_path = _output_path(cfg["bridge_signal_log"])
+                if _bsl_path.exists():
+                    _bsl_raw = _json.loads(_bsl_path.read_text(encoding="utf-8"))
+                    if isinstance(_bsl_raw, list):
+                        bridge_log = _bsl_raw[-200:]
+            except Exception:
+                pass
+
+        rv3_wf_rows: list = []
+        if cfg.get("rv3_wf_results"):
+            try:
+                _rv3_path = _output_path(cfg["rv3_wf_results"])
+                if _rv3_path.exists():
+                    rv3_wf_rows = _safe_csv_tail(_rv3_path, 50, account=acct)
+            except Exception:
+                pass
+
+        rv3_guard: dict = {}
+        if cfg.get("rv3_guard_report"):
+            try:
+                rv3_guard = _safe_json(_output_path(cfg["rv3_guard_report"]))
+            except Exception:
+                pass
 
         accounts[acct] = {
             "label":   cfg["label"],
@@ -1622,6 +1717,9 @@ def _build_dashboard_payload_uncached() -> dict:
             "runtime": runtime_cfg,
             "benchmark": benchmarks.get(acct, {}),
             "auto_trade_enabled": runtime_cfg.get("auto_trade_enabled"),
+            "bridge_signal_log": bridge_log,
+            "rv3_wf_results": rv3_wf_rows,
+            "rv3_guard": rv3_guard,
         }
 
     return {
@@ -2034,6 +2132,7 @@ async def get_tunnel_url() -> dict[str, Any]:
     """Return the current Cloudflare tunnel URL if available."""
     import re as _re
     candidates = [
+        _OUTPUTS / "tunnel_url.txt",
         _OUTPUTS / "tunnel_err.txt",
         _OUTPUTS / "cloudflared.log",
         _OUTPUTS / "tunnel.log",

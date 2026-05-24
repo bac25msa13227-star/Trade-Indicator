@@ -1,4 +1,4 @@
-# launch_bot_acc2.ps1 — Start live bot ACC2 (433326057 / port 5601)
+# launch_bot_acc2.ps1 — Start live bot ACC2 (MT5_LOGIN_ACC2 / port 5601)
 $ROOT = "C:\Users\Administrator\Documents\Trade-Indicator"
 Set-Location $ROOT
 

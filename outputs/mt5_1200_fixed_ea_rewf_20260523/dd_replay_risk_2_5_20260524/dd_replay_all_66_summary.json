@@ -1,0 +1,98 @@
+{
+  "risk_pct": 2.5,
+  "deposit": 1200,
+  "folds": 66,
+  "fold_range": "118-183",
+  "loss_folds_replayed": 0,
+  "min_final_balance_replayed": 1233.23,
+  "median_final_balance_replayed": 2495.07,
+  "mean_final_balance_replayed": 2966.06,
+  "worst_dd_pct_replayed": -24.9,
+  "worst_dd_fold": 164,
+  "folds_dd_below_10pct": 34,
+  "folds_dd_below_15pct": 14,
+  "folds_dd_below_20pct": 3,
+  "max_abs_final_balance_gap_vs_mt5": 0.08,
+  "worst_10_folds": [
+    {
+      "report_fold": 164,
+      "max_dd_pct_replayed": -24.9,
+      "final_balance_replayed": 3413.78,
+      "trades_replayed": 56,
+      "wins": 32,
+      "losses": 24
+    },
+    {
+      "report_fold": 182,
+      "max_dd_pct_replayed": -20.15,
+      "final_balance_replayed": 1633.86,
+      "trades_replayed": 59,
+      "wins": 21,
+      "losses": 38
+    },
+    {
+      "report_fold": 120,
+      "max_dd_pct_replayed": -20.09,
+      "final_balance_replayed": 1630.37,
+      "trades_replayed": 35,
+      "wins": 14,
+      "losses": 21
+    },
+    {
+      "report_fold": 124,
+      "max_dd_pct_replayed": -19.57,
+      "final_balance_replayed": 1649.41,
+      "trades_replayed": 38,
+      "wins": 15,
+      "losses": 23
+    },
+    {
+      "report_fold": 181,
+      "max_dd_pct_replayed": -19.16,
+      "final_balance_replayed": 1233.23,
+      "trades_replayed": 93,
+      "wins": 27,
+      "losses": 66
+    },
+    {
+      "report_fold": 152,
+      "max_dd_pct_replayed": -18.4,
+      "final_balance_replayed": 2142.37,
+      "trades_replayed": 38,
+      "wins": 18,
+      "losses": 20
+    },
+    {
+      "report_fold": 122,
+      "max_dd_pct_replayed": -18.13,
+      "final_balance_replayed": 1600.61,
+      "trades_replayed": 36,
+      "wins": 14,
+      "losses": 22
+    },
+    {
+      "report_fold": 149,
+      "max_dd_pct_replayed": -17.51,
+      "final_balance_replayed": 2084.53,
+      "trades_replayed": 42,
+      "wins": 19,
+      "losses": 23
+    },
+    {
+      "report_fold": 128,
+      "max_dd_pct_replayed": -17.38,
+      "final_balance_replayed": 1444.58,
+      "trades_replayed": 26,
+      "wins": 10,
+      "losses": 16
+    },
+    {
+      "report_fold": 160,
+      "max_dd_pct_replayed": -17.32,
+      "final_balance_replayed": 2397.1,
+      "trades_replayed": 40,
+      "wins": 20,
+      "losses": 20
+    }
+  ]
+}

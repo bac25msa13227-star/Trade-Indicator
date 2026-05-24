@@ -951,9 +951,11 @@ def run_live_loop(settings: Settings) -> None:
             # Profit filter hot-reload
             settings.risk.profit_filter_enabled = new_settings.risk.profit_filter_enabled
             settings.risk.min_expected_profit = new_settings.risk.min_expected_profit
+            settings.risk.min_expected_profit_r = new_settings.risk.min_expected_profit_r
             settings.risk.profit_filter_spread_pips = new_settings.risk.profit_filter_spread_pips
             profit_filter.enabled = settings.risk.profit_filter_enabled
             profit_filter.min_expected_profit = settings.risk.min_expected_profit
+            profit_filter.min_expected_profit_r = settings.risk.min_expected_profit_r
             profit_filter.spread_pips = settings.risk.profit_filter_spread_pips
             _market_gate_enabled = bool(settings.market.enforce_market_open_gate)
             _market_stale_seconds = max(int(settings.market.market_tick_stale_seconds), 30)
@@ -1024,14 +1026,16 @@ def run_live_loop(settings: Settings) -> None:
     # ── Profit Filter (transaction cost optimization) ────────────────────────
     profit_filter = MinimumProfitFilter(
         min_expected_profit=settings.risk.min_expected_profit,
+        min_expected_profit_r=settings.risk.min_expected_profit_r,
         spread_pips=settings.risk.profit_filter_spread_pips,
         pip_value=10.0,  # $10 per pip for XAUUSD at 1.0 lot
         enabled=settings.risk.profit_filter_enabled
     )
     LOGGER.info(
-        "Profit filter initialized: enabled=%s, min_profit=$%.2f",
+        "Profit filter initialized: enabled=%s, min_profit=$%.2f, min_profit_r=%.2fR",
         profit_filter.enabled,
-        profit_filter.min_expected_profit
+        profit_filter.min_expected_profit,
+        profit_filter.min_expected_profit_r,
     )
 
     _state_suffix = _account_tag or "default"
@@ -3057,31 +3061,133 @@ def run_live_loop(settings: Settings) -> None:
                     volatility_regime=volatility_regime,
                 )
 
+                if decision.should_trade and not settings.strategy.force_trade:
+                    if account_balance <= 0:
+                        LOGGER.warning("Risk gate BLOCKED: account balance unavailable")
+                        decision = decision.__class__(
+                            should_trade=False,
+                            side=decision.side,
+                            confidence=decision.confidence,
+                            reason="ACCOUNT_BALANCE_UNAVAILABLE",
+                            entry_price=decision.entry_price,
+                            stop_loss=decision.stop_loss,
+                            take_profit=decision.take_profit,
+                        )
+                    else:
+                        current_risk_amount = risk_manager.order_risk_amount(
+                            order_plan.volume,
+                            order_plan.entry_price,
+                            order_plan.stop_loss,
+                        )
+                        if order_plan.volume <= 0 or current_risk_amount <= 0:
+                            LOGGER.warning(
+                                "Risk gate BLOCKED: invalid order risk | volume=%.2f entry=%.2f sl=%.2f",
+                                order_plan.volume,
+                                order_plan.entry_price,
+                                order_plan.stop_loss,
+                            )
+                            decision = decision.__class__(
+                                should_trade=False,
+                                side=decision.side,
+                                confidence=decision.confidence,
+                                reason="RISK_UNTRADABLE_LOT_OR_STOP",
+                                entry_price=decision.entry_price,
+                                stop_loss=decision.stop_loss,
+                                take_profit=decision.take_profit,
+                            )
+                        else:
+                            existing_risk_total = 0.0
+                            unknown_risk_tickets: list[str] = []
+                            try:
+                                existing_positions_for_risk = executor.get_open_positions(
+                                    magic_number=settings.execution.magic_number
+                                )
+                            except Exception as _risk_pos_err:
+                                existing_positions_for_risk = []
+                                unknown_risk_tickets.append(f"positions_error:{_risk_pos_err}")
+                            for _pos in existing_positions_for_risk:
+                                _risk = risk_manager.order_risk_amount(
+                                    _safe_float(_pos.get("volume"), 0.0),
+                                    _safe_float(_pos.get("open_price"), 0.0),
+                                    _safe_float(_pos.get("sl"), 0.0),
+                                )
+                                if _risk <= 0 and _safe_float(_pos.get("volume"), 0.0) > 0:
+                                    unknown_risk_tickets.append(str(_pos.get("ticket", "?")))
+                                else:
+                                    existing_risk_total += _risk
+
+                            if unknown_risk_tickets:
+                                exposure_reason = (
+                                    "EXPOSURE_CAP: existing position risk unknown "
+                                    f"(tickets={','.join(unknown_risk_tickets[:5])})"
+                                )
+                                exposure_ok = False
+                            else:
+                                exposure_ok, exposure_reason = risk_manager.check_total_exposure(
+                                    account_balance,
+                                    current_risk_amount,
+                                    existing_risk_total,
+                                )
+
+                            if not exposure_ok:
+                                LOGGER.warning(
+                                    "Risk gate BLOCKED: %s | current_risk=%.2f existing_risk=%.2f balance=%.2f",
+                                    exposure_reason,
+                                    current_risk_amount,
+                                    existing_risk_total,
+                                    account_balance,
+                                )
+                                decision = decision.__class__(
+                                    should_trade=False,
+                                    side=decision.side,
+                                    confidence=decision.confidence,
+                                    reason=exposure_reason,
+                                    entry_price=decision.entry_price,
+                                    stop_loss=decision.stop_loss,
+                                    take_profit=decision.take_profit,
+                                )
+
                 # ── Profit Filter (transaction cost optimization) ─────────────────────────
                 if decision.should_trade and profit_filter.enabled and not settings.strategy.force_trade:
-                    predicted_profit = _estimate_profit(
-                        entry_price=decision.entry_price or order_plan.entry_price,
-                        stop_loss=decision.stop_loss or order_plan.stop_loss,
-                        take_profit=decision.take_profit or order_plan.take_profit,
-                        confidence=decision.confidence,
-                        win_probability=None  # Use confidence as proxy
+                    pf_entry = decision.entry_price or order_plan.entry_price
+                    pf_stop = decision.stop_loss or order_plan.stop_loss
+                    pf_take = decision.take_profit or order_plan.take_profit
+                    pf_stop_distance = abs(pf_entry - pf_stop) if pf_entry and pf_stop else 0.0
+                    predicted_rr = (
+                        abs((pf_take - pf_entry) / (pf_entry - pf_stop))
+                        if pf_entry and pf_stop and pf_take and pf_stop_distance > 0
+                        else 2.0
                     )
+                    # Match the WF R-based sweep: probability from confidence and
+                    # winner RR from the empirical trade distribution.
+                    win_probability = max(0.35, min(0.65, (decision.confidence - 0.5) * 2))
+                    data_driven_rr = 3.67
+                    predicted_profit_r = (
+                        win_probability * data_driven_rr - (1 - win_probability)
+                    )
+                    current_risk_amount = risk_manager.order_risk_amount(
+                        order_plan.volume,
+                        order_plan.entry_price,
+                        order_plan.stop_loss,
+                    )
+                    predicted_profit = predicted_profit_r * current_risk_amount
                     
                     # Check if trade should be skipped
                     should_skip, skip_reason = profit_filter.should_skip_trade(
                         predicted_profit=predicted_profit,
-                        predicted_rr=abs((decision.take_profit - decision.entry_price) / 
-                                        (decision.entry_price - decision.stop_loss)) if decision.entry_price and decision.stop_loss and decision.take_profit else 2.0,
-                        lot_size=order_plan.volume
+                        predicted_rr=predicted_rr,
+                        predicted_profit_r=predicted_profit_r,
+                        lot_size=1.0,
                     )
                     
                     if should_skip:
                         LOGGER.info(
-                            "PROFIT_FILTER BLOCKED: %s | entry=%.2f sl=%.2f tp=%.2f conf=%.2%% | predicted_profit=$%.2f",
+                            "PROFIT_FILTER BLOCKED: %s | entry=%.2f sl=%.2f tp=%.2f conf=%.2f%% | predicted_profit=$%.2f predicted_profit_r=%.2fR",
                             skip_reason,
-                            decision.entry_price, decision.stop_loss, decision.take_profit,
+                            pf_entry, pf_stop, pf_take,
                             decision.confidence * 100,
-                            predicted_profit
+                            predicted_profit,
+                            predicted_profit_r,
                         )
                         decision = decision.__class__(
                             should_trade=False,

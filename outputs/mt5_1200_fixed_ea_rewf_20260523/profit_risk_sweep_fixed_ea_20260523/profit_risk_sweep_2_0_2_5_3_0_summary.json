@@ -1,0 +1,50 @@
+[
+  {
+    "risk_pct": "2.0",
+    "folds": 66,
+    "loss_folds": 0,
+    "+5pct_folds": 65,
+    "+20pct_folds": 62,
+    "min_final": 1246.71,
+    "median_final": 2147.49,
+    "mean_final": 2439.84,
+    "max_final": 5224.27,
+    "median_net_pct": 78.96,
+    "mean_net_pct": 103.32,
+    "total_trades": 5526,
+    "median_wr_pct": 52.1,
+    "worst_fold": 181
+  },
+  {
+    "risk_pct": "2.5",
+    "folds": 66,
+    "loss_folds": 0,
+    "+5pct_folds": 65,
+    "+20pct_folds": 64,
+    "min_final": 1233.17,
+    "median_final": 2495.06,
+    "mean_final": 2966.06,
+    "max_final": 7541.07,
+    "median_net_pct": 107.92,
+    "mean_net_pct": 147.17,
+    "total_trades": 5526,
+    "median_wr_pct": 52.1,
+    "worst_fold": 181
+  },
+  {
+    "risk_pct": "3.0",
+    "folds": 66,
+    "loss_folds": 1,
+    "+5pct_folds": 65,
+    "+20pct_folds": 64,
+    "min_final": 1184.27,
+    "median_final": 2898.81,
+    "mean_final": 3625.06,
+    "max_final": 10800.22,
+    "median_net_pct": 141.56,
+    "mean_net_pct": 202.09,
+    "total_trades": 5526,
+    "median_wr_pct": 52.1,
+    "worst_fold": 181
+  }
+]

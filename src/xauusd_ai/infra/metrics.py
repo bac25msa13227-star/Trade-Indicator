@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,61 @@ if _PROMETHEUS_AVAILABLE:
     OPEN_POSITIONS_GAUGE = Gauge(
         "trading_open_positions",
         "Number of currently open positions",
+        ["account"],
+    )
+    EQUITY_GAUGE = Gauge(
+        "trading_account_equity",
+        "Current account equity",
+        ["account"],
+    )
+    SIGNAL_CONFIDENCE_GAUGE = Gauge(
+        "trading_signal_confidence",
+        "Latest live signal confidence/probability",
+        ["account"],
+    )
+    SIGNAL_THRESHOLD_GAUGE = Gauge(
+        "trading_signal_threshold",
+        "Current live signal threshold",
+        ["account"],
+    )
+    SIGNAL_SHOULD_TRADE_GAUGE = Gauge(
+        "trading_signal_should_trade",
+        "Whether the latest live signal passed the trade gate (1=yes, 0=no)",
+        ["account"],
+    )
+    AUTO_TRADE_GAUGE = Gauge(
+        "trading_auto_trade_enabled",
+        "Whether automatic order execution is enabled (1=yes, 0=no)",
+        ["account"],
+    )
+    MARKET_TICK_AGE_GAUGE = Gauge(
+        "trading_market_tick_age_seconds",
+        "Age of the latest MT5 market tick seen by the live bridge",
+        ["account", "symbol"],
+    )
+    MARKET_TICK_FRESH_GAUGE = Gauge(
+        "trading_market_tick_fresh",
+        "Whether the latest MT5 market tick is fresh (1=yes, 0=no)",
+        ["account", "symbol"],
+    )
+    MARKET_TRADE_ENABLED_GAUGE = Gauge(
+        "trading_market_trade_enabled",
+        "Whether MT5 reports trading enabled for the symbol (1=yes, 0=no)",
+        ["account", "symbol"],
+    )
+    LIVE_STATUS_FILE_AGE_GAUGE = Gauge(
+        "trading_live_status_file_age_seconds",
+        "Age of the live status file consumed by the API",
+        ["account"],
+    )
+    LIVE_BAR_TIMESTAMP_GAUGE = Gauge(
+        "trading_live_bar_timestamp_seconds",
+        "Unix timestamp of the latest closed M5 bar processed by the live loop",
+        ["account"],
+    )
+    ROLLING_V3_ORDERS_TODAY_GAUGE = Gauge(
+        "trading_rolling_v3_orders_today",
+        "Number of rolling v3 orders sent today",
         ["account"],
     )
 
@@ -167,6 +223,61 @@ class TradingMetrics:
         DRAWDOWN_GAUGE.labels(account=self.account).set(drawdown_pct)
         if win_rate is not None:
             WIN_RATE_GAUGE.labels(account=self.account).set(win_rate)
+
+    def update_live_status(
+        self,
+        status: dict[str, Any],
+        *,
+        status_file_age_seconds: float | None = None,
+        bar_timestamp_seconds: float | None = None,
+    ) -> None:
+        """Publish gauges from the live status JSON used by the dashboard."""
+        if not self._enabled:
+            return
+
+        def _as_float(value: Any, default: float = 0.0) -> float:
+            try:
+                if value in (None, ""):
+                    return default
+                return float(value)
+            except (TypeError, ValueError):
+                return default
+
+        def _as_bool(value: Any) -> float:
+            if isinstance(value, bool):
+                return 1.0 if value else 0.0
+            if isinstance(value, (int, float)):
+                return 1.0 if value != 0 else 0.0
+            return 1.0 if str(value).strip().lower() in {"1", "true", "yes", "y", "on"} else 0.0
+
+        symbol = str(status.get("market_symbol") or "unknown")
+        EQUITY_GAUGE.labels(account=self.account).set(_as_float(status.get("account_equity")))
+        SIGNAL_CONFIDENCE_GAUGE.labels(account=self.account).set(
+            _as_float(status.get("rolling_v3_online_probability"), _as_float(status.get("confidence")))
+        )
+        SIGNAL_THRESHOLD_GAUGE.labels(account=self.account).set(
+            _as_float(status.get("signal_threshold"), _as_float(status.get("strategy_required_min")))
+        )
+        SIGNAL_SHOULD_TRADE_GAUGE.labels(account=self.account).set(
+            _as_bool(status.get("rolling_v3_online_should_trade", status.get("should_trade")))
+        )
+        AUTO_TRADE_GAUGE.labels(account=self.account).set(_as_bool(status.get("auto_trade_enabled")))
+        MARKET_TICK_AGE_GAUGE.labels(account=self.account, symbol=symbol).set(
+            _as_float(status.get("market_tick_age_sec"))
+        )
+        MARKET_TICK_FRESH_GAUGE.labels(account=self.account, symbol=symbol).set(
+            _as_bool(status.get("market_tick_is_fresh"))
+        )
+        MARKET_TRADE_ENABLED_GAUGE.labels(account=self.account, symbol=symbol).set(
+            _as_bool(status.get("market_trade_enabled"))
+        )
+        ROLLING_V3_ORDERS_TODAY_GAUGE.labels(account=self.account).set(
+            _as_float(status.get("rolling_v3_orders_today"))
+        )
+        if status_file_age_seconds is not None:
+            LIVE_STATUS_FILE_AGE_GAUGE.labels(account=self.account).set(max(0.0, float(status_file_age_seconds)))
+        if bar_timestamp_seconds is not None:
+            LIVE_BAR_TIMESTAMP_GAUGE.labels(account=self.account).set(float(bar_timestamp_seconds))
 
     def record_model_version(self, version: str, roc_auc: float) -> None:
         if not self._enabled:

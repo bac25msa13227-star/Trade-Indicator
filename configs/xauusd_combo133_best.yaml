@@ -153,11 +153,11 @@ risk:
   risk_tier_floor: 0.02
   max_open_positions: 3
   stop_loss_atr_multiple: 1.5
-  take_profit_rr: 3.5                        # TP tại RR=3.5
+  take_profit_rr: 3.5                        # TP tại RR=3.5 (proven: MT5 WR=51%, +308%)
   entry_slippage_atr_frac: 0.07
   volatile_take_profit_rr: 5.0
   sideway_take_profit_rr: 2.5
-  min_confidence: 0.70
+  min_confidence: 0.74
   fixed_lot: 0.01
   max_risk_fraction: 0.08
   sideway_risk_multiplier: 1.0

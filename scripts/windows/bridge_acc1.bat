@@ -1,11 +1,27 @@
 @echo off
-title MT5 Bridge ACC1 (270832477 / Exness-MT5Trial17) - Port 5600
+title MT5 Bridge ACC1 - Port 5600
 set MT5_BRIDGE_PORT=5600
-set MT5_LOGIN=270832477
-set MT5_PASSWORD=07032001bB@
-set MT5_SERVER=Exness-MT5Trial17
 set MT5_TERMINAL_PATH=C:\Program Files\MetaTrader 5\terminal64.exe
-cd /d C:\Users\Administrator\Documents\Trade-Indicator
+cd /d "%~dp0..\.."
+
+if exist ".env" (
+  for /f "usebackq eol=# tokens=1,* delims==" %%A in (".env") do (
+    if not "%%A"=="" set "%%A=%%B"
+  )
+)
+
+if "%MT5_LOGIN%"=="" (
+  echo ERROR: MT5_LOGIN is missing. Set rotated ACC1 credentials in .env.
+  exit /b 1
+)
+if "%MT5_PASSWORD%"=="" (
+  echo ERROR: MT5_PASSWORD is missing. Set rotated ACC1 credentials in .env.
+  exit /b 1
+)
+if "%MT5_SERVER%"=="" (
+  echo ERROR: MT5_SERVER is missing. Set ACC1 server in .env.
+  exit /b 1
+)
 
 :restart
 echo [%date% %time%] Starting ACC1 bridge on port 5600...

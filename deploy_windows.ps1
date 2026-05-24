@@ -1,12 +1,12 @@
-# Windows Production Deployment with Checklist
-# ACC1: Paper Mode | ACC2: Live Demo | Profit Filter: $15
+﻿# Windows Production Deployment with Checklist
+# ACC1: Paper Mode | ACC2: Paper Mode (Demo) | Profit Filter: $15
 
-Write-Host "==================================" -ForegroundColor Cyan
+Write-Host "=================================" -ForegroundColor Cyan
 Write-Host "XAUUSD AI Production Deployment" -ForegroundColor Cyan
-Write-Host "==================================" -ForegroundColor Cyan
+Write-Host "=================================" -ForegroundColor Cyan
 Write-Host ""
 
-$REPO_PATH = "$env:USERPROFILE\Documents\Thạc sĩ MSE\Trade Indicator"
+$REPO_PATH = "F:\Trading_BOT_AUTO\Trade-Indicator"
 $ERRORS = @()
 
 # Step 1: Git Pull & Verification
@@ -69,10 +69,10 @@ if ($acc1Config -match "mode:\s*paper" -and $acc1Config -match "profit_filter_en
     $ERRORS += "ACC1 config incorrect"
 }
 
-# Check ACC2 (Live Demo)
+# Check ACC2 (Paper Demo)
 $acc2Config = Get-Content "configs\live_acc2.yaml" -Raw
-if ($acc2Config -match "mode:\s*live" -and $acc2Config -match "profit_filter_enabled:\s*true" -and $acc2Config -match "min_expected_profit:\s*15") {
-    Write-Host "  ✓ ACC2: Live mode, filter enabled, \$15 threshold" -ForegroundColor Green
+if ($acc2Config -match "mode:\s*paper" -and $acc2Config -match "profit_filter_enabled:\s*true" -and $acc2Config -match "min_expected_profit:\s*15") {
+    Write-Host "  ✓ ACC2: Paper mode, filter enabled, \$15 threshold" -ForegroundColor Green
 } else {
     Write-Host "  ✗ ACC2: Config incorrect" -ForegroundColor Red
     $ERRORS += "ACC2 config incorrect"
@@ -137,24 +137,22 @@ Write-Host ""
 # Step 6: Pre-Deployment Cleanup
 Write-Host "[6/7] Pre-Deployment Cleanup..." -ForegroundColor Yellow
 
-# Stop native ACC1 process (PID 428 or search by name)
-Write-Host "  Stopping native ACC1 process..." -ForegroundColor Gray
-$acc1Processes = Get-Process | Where-Object { $_.ProcessName -like "*python*" -and $_.Id -eq 428 }
-if ($acc1Processes) {
-    Stop-Process -Id 428 -Force
-    Write-Host "  ✓ Stopped PID 428" -ForegroundColor Green
-} else {
-    # Try finding by command line (orchestrator.py)
-    $pythonProcesses = Get-WmiObject Win32_Process | Where-Object { $_.Name -eq "python.exe" -and $_.CommandLine -like "*orchestrator.py*" }
-    if ($pythonProcesses) {
-        foreach ($proc in $pythonProcesses) {
-            Stop-Process -Id $proc.ProcessId -Force
-            Write-Host "  ✓ Stopped orchestrator PID $($proc.ProcessId)" -ForegroundColor Green
-        }
-    } else {
-        Write-Host "  ℹ No native ACC1 process found (already stopped or not running)" -ForegroundColor Gray
+# Stop native paper mode processes (ACC1 PID 428 and ACC2 PID 20240 or search by cmdline)
+Write-Host "  Stopping native paper mode processes..." -ForegroundColor Gray
+foreach ($nativePid in @(428, 20240)) {
+    $proc = Get-Process -Id $nativePid -ErrorAction SilentlyContinue
+    if ($proc) {
+        Stop-Process -Id $nativePid -Force
+        Write-Host "  ✓ Stopped PID $nativePid" -ForegroundColor Green
     }
 }
+# Also scan for any run_paper_mode.py processes
+$paperProcs = Get-WmiObject Win32_Process | Where-Object { $_.Name -eq "python.exe" -and ($_.CommandLine -like "*run_paper_mode*" -or $_.CommandLine -like "*paper_mode*") }
+foreach ($proc in $paperProcs) {
+    Stop-Process -Id $proc.ProcessId -Force
+    Write-Host "  ✓ Stopped paper process PID $($proc.ProcessId)" -ForegroundColor Green
+}
+Write-Host "  ✓ Native processes stopped" -ForegroundColor Green
 
 # Stop existing Docker containers
 Write-Host "  Stopping existing Docker containers..." -ForegroundColor Gray
@@ -169,7 +167,7 @@ Write-Host "  Starting infrastructure..." -ForegroundColor Gray
 docker compose up -d postgres minio mlflow prometheus 2>&1 | Out-Null
 Start-Sleep -Seconds 10
 
-Write-Host "  Starting ACC1 (paper) and ACC2 (live demo)..." -ForegroundColor Gray
+Write-Host "  Starting ACC1 (paper) and ACC2 (paper demo)..." -ForegroundColor Gray
 docker compose up -d live-acc1 live 2>&1 | Out-Null
 Start-Sleep -Seconds 30
 
@@ -187,7 +185,7 @@ $checklistItems = @(
     @{ Name = "Code synced to main branch"; Status = ($currentBranch -eq "main" -or (git branch --show-current) -eq "main") },
     @{ Name = "All required files present"; Status = ($missingFiles.Count -eq 0) },
     @{ Name = "ACC1 config: paper mode + \$15 filter"; Status = ($acc1Config -match "mode:\s*paper") },
-    @{ Name = "ACC2 config: live mode + \$15 filter"; Status = ($acc2Config -match "mode:\s*live") },
+    @{ Name = "ACC2 config: paper mode + \$15 filter"; Status = ($acc2Config -match "mode:\s*paper") },
     @{ Name = "Model files valid (34MB + 3KB)"; Status = ($modelSize -gt 30 -and $modelSize -lt 40) },
     @{ Name = "Docker running"; Status = ($LASTEXITCODE -eq 0) },
     @{ Name = "Native ACC1 stopped"; Status = $true },

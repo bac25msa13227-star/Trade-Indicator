@@ -6,6 +6,7 @@ import pandas as pd
 
 from xauusd_ai.config import RiskThrottleRuleSettings, Settings
 from xauusd_ai.execution.risk import RiskManager
+from xauusd_ai.strategies.hybrid import TradeDecision
 
 
 class RiskManagerCoreTests(unittest.TestCase):
@@ -119,6 +120,41 @@ class RiskManagerCoreTests(unittest.TestCase):
         allowed, reason = self.rm.can_open_position(balance=300.0, current_open_positions=3, volatility_regime=1)
         self.assertFalse(allowed)
         self.assertIn("Đã đủ lệnh", reason)
+
+
+    def test_dynamic_lot_blocks_when_min_lot_exceeds_risk_cap(self) -> None:
+        self.settings.risk.max_risk_fraction = 0.02
+        lot = self.rm.calculate_dynamic_lot(
+            balance=200.0,
+            stop_distance=10.0,
+            risk_fraction=0.02,
+        )
+        self.assertEqual(lot, 0.0)
+
+    def test_build_order_plan_does_not_apply_risk_throttle_twice(self) -> None:
+        self.settings.risk.risk_per_trade = 0.02
+        self.settings.risk.max_risk_fraction = 0.05
+        self.settings.risk.min_confidence = 0.5
+        self.settings.risk.risk_throttle_rules = [
+            RiskThrottleRuleSettings(name="half_size", risk_multiplier=0.5)
+        ]
+        decision = TradeDecision(
+            should_trade=True,
+            side="buy",
+            confidence=0.5,
+            reason="unit",
+            entry_price=100.0,
+            stop_loss=95.0,
+            take_profit=110.0,
+        )
+        row = pd.Series({"strategy_score": 1.0, "trade_side": "buy"})
+        plan = self.rm.build_order_plan(
+            decision,
+            row,
+            account_balance=1000.0,
+            volatility_regime=1,
+        )
+        self.assertAlmostEqual(plan.volume, 0.02, places=6)
 
 
 if __name__ == "__main__":

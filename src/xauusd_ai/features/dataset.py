@@ -25,6 +25,8 @@ from xauusd_ai.features.indicators import (
     # v5: Enhanced ICT & Wyckoff
     breaker_block, silver_bullet_setup, session_open_bias,
     reaccumulation_signal, wyckoff_effort_result,
+    # v7: Weekly-scale trend context
+    weekly_trend_metrics,
 )
 
 
@@ -116,6 +118,12 @@ FEATURE_COLUMNS = [
     "regime_volatile",      # ATR-based volatile regime (1=volatile, 0=not)
     "regime_score",         # Composite regime score (-1 to +1, higher=better for trading)
     "regime_favorable",     # Binary favorable regime flag (1=good to trade, 0=skip)
+    # --- v7: Weekly-scale trend context (3) ---
+    # Derived from D1 bars — no separate W1 frame needed.
+    # Helps discriminate trending (fold 1, Nov-Dec 2023) vs consolidating (fold 3, Jan-Feb 2024).
+    "weekly_bias_d1",       # (EMA5-EMA20)/ATR14 on D1 — weekly trend direction+strength ±3
+    "weekly_range_tight",   # 5-day H-L range / 100-day avg — <0.6=consolidation, >1.4=expansion
+    "d1_run_length",        # tanh(consecutive D1 closes above/below EMA20 / 10) ±1
 ]
 
 
@@ -229,13 +237,24 @@ def _frame_bias(frame: pd.DataFrame, fast_window: int, slow_window: int) -> pd.S
 
 def _merge_context(settings: Settings, frames: dict[str, pd.DataFrame]) -> pd.DataFrame:
     execution = _enrich_execution_frame(settings, frames[settings.market.execution_timeframe])
-    daily = frames[settings.market.higher_timeframe][["time", "close"]].copy()
+    d1_full = frames[settings.market.higher_timeframe]  # full D1 frame (high/low/close needed for v7)
+    daily = d1_full[["time", "close"]].copy()
     hourly = frames[settings.market.mid_timeframe][["time", "close"]].copy()
 
     daily["daily_bias"] = _frame_bias(daily, 5, 20)
     hourly["hourly_bias"] = _frame_bias(hourly, 10, 50)
 
-    merged = pd.merge_asof(execution.sort_values("time"), daily[["time", "daily_bias"]].sort_values("time"), on="time")
+    # v7: Weekly-scale context from full D1 data (trend maturity + range tightness)
+    w_bias, w_tight, d1_run = weekly_trend_metrics(d1_full)
+    daily["weekly_bias_d1"] = w_bias.values
+    daily["weekly_range_tight"] = w_tight.values
+    daily["d1_run_length"] = d1_run.values
+
+    merged = pd.merge_asof(
+        execution.sort_values("time"),
+        daily[["time", "daily_bias", "weekly_bias_d1", "weekly_range_tight", "d1_run_length"]].sort_values("time"),
+        on="time",
+    )
     merged = pd.merge_asof(merged.sort_values("time"), hourly[["time", "hourly_bias"]].sort_values("time"), on="time")
     merged[["daily_bias", "hourly_bias"]] = merged[["daily_bias", "hourly_bias"]].fillna(0)
     merged["trend_alignment"] = (merged["daily_bias"] == merged["hourly_bias"]).astype(int)

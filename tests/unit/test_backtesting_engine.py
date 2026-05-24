@@ -67,6 +67,18 @@ class BacktestingEngineTests(unittest.TestCase):
         self.assertEqual(result.report["trades"], 2)
         self.assertIn("max_concurrent_positions", result.report)
 
+    def test_dynamic_concurrent_backtest_skips_when_min_lot_exceeds_risk_cap(self) -> None:
+        settings = self._settings()
+        settings.risk.max_risk_fraction = 0.02
+        predictions = self._predictions()
+        predictions["atr"] = 20.0
+        risk_manager = RiskManager(settings)
+
+        result = simulate_dynamic_concurrent_backtest(predictions, settings, risk_manager, label="test", compound=False)
+
+        self.assertEqual(result.report["trades"], 0)
+        self.assertEqual(result.report["signals_risk_cap"], 2)
+
     def test_write_backtest_outputs_creates_artifacts(self) -> None:
         predictions = self._predictions()
         trades = pd.DataFrame(

@@ -53,6 +53,18 @@ class _StubRiskManager:
     def record_trade_result(self, pnl: float, balance: float) -> None:
         return None
 
+    @staticmethod
+    def order_risk_amount(volume: float, entry_price: float, stop_loss: float) -> float:
+        return abs(float(entry_price) - float(stop_loss)) * 100.0 * float(volume)
+
+    def check_total_exposure(
+        self, balance: float, current_risk_amount: float, existing_risk_total: float
+    ) -> tuple[bool, str]:
+        return True, "ok"
+
+    def is_circuit_breaker_active(self, balance: float) -> tuple[bool, str]:
+        return False, "ok"
+
 
 class LiveLoopNewsOverrideTests(unittest.TestCase):
     def _make_settings(self, temp_dir: Path, account_tag: str) -> Settings:

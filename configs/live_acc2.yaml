@@ -10,8 +10,8 @@ app:
   backtest_trades_path: outputs/backtest_trades_acc2.csv
   backtest_equity_plot_path: outputs/backtest_equity_acc2.png
   backtest_trades_plot_path: outputs/backtest_trades_plot_acc2.png
-  walkforward_report_path: outputs/walkforward_report_acc1.json
-  walkforward_trades_path: outputs/walkforward_trades_acc1.csv
+  walkforward_report_path: outputs/walkforward_report_acc2.json
+  walkforward_trades_path: outputs/walkforward_trades_acc2.csv
   paper_trade_log_path: outputs/paper_trade_signals_acc2.csv
   live_learning_log_path: outputs/live_learning_log_acc2.jsonl
   live_closed_trades_path: outputs/live_closed_trades_acc2.csv
@@ -19,7 +19,7 @@ app:
   dashboard_port: 8501
   log_level: INFO
 market:
-  symbol: XAUUSDm
+  symbol: XAUUSD
   training_symbol: GC=F
   training_data_source: csv_folder
   live_data_source: bridge
@@ -129,7 +129,7 @@ strategy:
   d1_trend_gate: false
 risk:
   mode: fixed_fractional
-  risk_per_trade: 0.04             # V14++ COMPOSITE
+  risk_per_trade: 0.020
   risk_tier_floor: 0.02
   max_open_positions: 3
   stop_loss_atr_multiple: 1.5
@@ -139,19 +139,20 @@ risk:
   sideway_take_profit_rr: 2.5
   min_confidence: 0.70
   fixed_lot: 0.01
-  max_risk_fraction: 0.08
+  max_risk_fraction: 0.02
   sideway_risk_multiplier: 1.0
   normal_risk_multiplier: 1.0
   strong_volatility_risk_multiplier: 0.70
   kill_switch_enabled: true
-  daily_loss_limit_pct: 0.12
-  max_drawdown_kill_pct: 0.20
+  daily_loss_limit_pct: 0.05
+  max_drawdown_kill_pct: 0.15
   consecutive_loss_pause_count: 3
   consecutive_loss_cooldown_bars: 12
   anti_martingale_factor: 0.7
   anti_martingale_max_reductions: 2
   volatility_risk_scaling_enabled: false
-  max_total_exposure_pct: 0.30
+  max_total_exposure_pct: 0.06
+  max_spread_points: 1.5
   reentry_guard_enabled: true
   reentry_cooldown_bars_after_sl: 5
   reentry_min_distance_atr: 0.35
@@ -207,20 +208,21 @@ risk:
     - 21
   # Profit filter — skip low-profit trades to reduce transaction costs
   profit_filter_enabled: true        # ✅ ENABLED with WF-validated threshold
-  min_expected_profit: 15.0          # $15 optimal threshold (validated: 82.3% skip, +15,107% avg return/fold)
+  min_expected_profit: 0.0           # Disabled when min_expected_profit_r > 0
+  min_expected_profit_r: 2.5         # R-based sweep candidate for $200 account
   profit_filter_spread_pips: 0.5     # XAUUSD typical spread
 
 execution:
   # Execution mode: "live" (real trading), "paper" (shadow mode), "backtest" (historical)
   # Paper mode logs all signals with predicted slippage but does NOT place real orders
   # Switch to "paper" for validation before enabling live trading
-  mode: live  # Options: live, paper, backtest
+  mode: live  # live trading on the demo account configured via .env
   auto_trade: true
   deviation: 20
   magic_number: 20260316
   comment: xauusd-ai-live-acc2
   paper_trade_max_loops: 0
-  paper_data_source: mt5
+  paper_data_source: bridge           # MT5 bridge at localhost:5600
   close_opposite_on_signal: true
   trailing_sl:
     enabled: true
@@ -286,17 +288,24 @@ integrations:
     login_env: MT5_LOGIN_ACC2
     password_env: MT5_PASSWORD_ACC2
     server_env: MT5_SERVER_ACC2
-    login: 433326057
-    password: 07032001bB@
-    server: Exness-MT5Trial7
+    login: null
+    password: null
+    server: null
     terminal_path: C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe
   telegram:
     token_env: TELEGRAM_BOT_TOKEN_ACC2
     chat_id_env: TELEGRAM_CHAT_ID_ACC2
   news:
-    enabled: false
-    provider: stub
-
+    enabled: true
+    provider: forexfactory
+    minutes_before: 30
+    minutes_after: 30
+    trade_before_news: false
+    trade_after_news: false
+    high_impact_only: true
+    currencies:
+      - USD
+    news_trade_override: false
 admin:
   canary:
     enabled: false
@@ -319,3 +328,4 @@ admin:
     bridge_feed_divergence_points: 80.0
     only_when_market_open: true
   regime_session_matrix_windows_days: [7, 30]
+

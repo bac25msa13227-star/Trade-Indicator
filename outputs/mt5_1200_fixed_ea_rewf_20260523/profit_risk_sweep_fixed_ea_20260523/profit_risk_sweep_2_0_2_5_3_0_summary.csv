@@ -1,0 +1,4 @@
+risk_pct,folds,loss_folds,+5pct_folds,+20pct_folds,min_final,median_final,mean_final,max_final,median_net_pct,mean_net_pct,total_trades,median_wr_pct,worst_fold
+2.0,66,0,65,62,1246.71,2147.49,2439.84,5224.27,78.96,103.32,5526,52.1,181
+2.5,66,0,65,64,1233.17,2495.06,2966.06,7541.07,107.92,147.17,5526,52.1,181
+3.0,66,1,65,64,1184.27,2898.81,3625.06,10800.22,141.56,202.09,5526,52.1,181

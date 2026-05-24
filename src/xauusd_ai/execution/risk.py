@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -219,6 +220,19 @@ class RiskManager:
             )
         return True, "ok"
 
+    @staticmethod
+    def order_risk_amount(volume: float, entry_price: float, stop_loss: float) -> float:
+        """Return USD risk for an XAUUSD order, or 0 when the risk is unknown."""
+        try:
+            volume_f = float(volume)
+            entry_f = float(entry_price)
+            sl_f = float(stop_loss)
+        except (TypeError, ValueError):
+            return 0.0
+        if volume_f <= 0 or entry_f <= 0 or sl_f <= 0:
+            return 0.0
+        return abs(entry_f - sl_f) * _XAUUSD_CONTRACT_OZ * volume_f
+
     # ------------------------------------------------------------------
     # Dynamic position limit — phụ thuộc balance + market regime
     # ------------------------------------------------------------------
@@ -295,28 +309,43 @@ class RiskManager:
         if risk_fraction is None:
             risk_fraction = self.settings.risk.risk_per_trade
 
-        risk_amount = balance * risk_fraction
+        if balance <= 0 or risk_fraction <= 0 or stop_distance <= 0:
+            return 0.0
 
-        if stop_distance <= 0:
-            return _MIN_LOT
+        risk_amount = balance * risk_fraction
+        max_risk_amount = balance * self.settings.risk.max_risk_fraction
+        min_lot_risk = _MIN_LOT * _XAUUSD_CONTRACT_OZ * stop_distance
+        if max_risk_amount > 0 and min_lot_risk > max_risk_amount:
+            LOGGER.warning(
+                "lot_size blocked: min_lot risk %.2f exceeds max risk %.2f "
+                "(balance=%.2f stop=%.4f max_risk_pct=%.4f)",
+                min_lot_risk,
+                max_risk_amount,
+                balance,
+                stop_distance,
+                self.settings.risk.max_risk_fraction,
+            )
+            return 0.0
 
         raw_lot = risk_amount / (_XAUUSD_CONTRACT_OZ * stop_distance)
 
         # Làm tròn đến lot step
-        lot = max(_MIN_LOT, round(raw_lot / _LOT_STEP) * _LOT_STEP)
+        if raw_lot < _MIN_LOT:
+            lot = _MIN_LOT
+        else:
+            lot = math.floor(raw_lot / _LOT_STEP) * _LOT_STEP
 
         # Hard cap: không vượt max_risk_fraction trong bất kỳ tình huống nào
-        max_risk_amount = balance * self.settings.risk.max_risk_fraction
-        max_lot = max(_MIN_LOT, round(
-            (max_risk_amount / (_XAUUSD_CONTRACT_OZ * stop_distance)) / _LOT_STEP
-        ) * _LOT_STEP)
+        max_lot_raw = max_risk_amount / (_XAUUSD_CONTRACT_OZ * stop_distance)
+        max_lot = math.floor(max_lot_raw / _LOT_STEP) * _LOT_STEP
+        max_lot = max(_MIN_LOT, max_lot)
         lot = min(lot, max_lot)
 
         LOGGER.debug(
             "lot_size: balance=%.2f stop=%.4f risk_pct=%.4f → lot=%.2f",
             balance, stop_distance, risk_fraction, lot,
         )
-        return lot
+        return round(lot, 2)
 
     # ------------------------------------------------------------------
     # Gate: có được phép mở lệnh mới không?
@@ -554,8 +583,7 @@ class RiskManager:
                                     current_balance=account_balance,
                                     market_row=latest_bar,
                                     side=decision.side)
-            rf_throttled = rf * throttle_mult
-            volume = self.calculate_dynamic_lot(account_balance, stop_distance, rf_throttled)
+            volume = self.calculate_dynamic_lot(account_balance, stop_distance, rf)
         else:
             volume = self.settings.risk.fixed_lot * throttle_mult
 

@@ -107,6 +107,7 @@ _parser.add_argument("--blocked-hours", default=None, help="Comma-separated UTC 
 _parser.add_argument("--combo133", action="store_true", help="Apply all show_combo133 settings: min_conf=0.70, blocked=[3,15,17,22,23], require_trend=False, min_strat=0.0, d1_gate=False, fast mode")
 _parser.add_argument("--profit-filter", action="store_true", help="Enable profit filter to skip low-profit trades")
 _parser.add_argument("--min-profit", type=float, default=12.0, help="Minimum expected profit threshold (USD) for profit filter (default: 12.0)")
+_parser.add_argument("--min-profit-r", type=float, default=None, help="Minimum expected profit threshold in R. Overrides --min-profit when set.")
 _known, _rest = _parser.parse_known_args()
 FAST_MODE = _known.fast
 NO_COMPOUND = _known.no_compound
@@ -123,6 +124,7 @@ FORCE_THRESHOLD = _known.force_threshold
 COMBO133_MODE = _known.combo133
 PROFIT_FILTER_ENABLED = _known.profit_filter
 MIN_EXPECTED_PROFIT = _known.min_profit
+MIN_EXPECTED_PROFIT_R = _known.min_profit_r
 # Parse blocked hours: --blocked-hours 3,15,17,22,23 OR from --combo133
 _bh_raw = _known.blocked_hours
 BLOCKED_HOURS: list[int] | None = [int(x) for x in _bh_raw.split(",") if x.strip()] if _bh_raw else None
@@ -201,7 +203,10 @@ elif NO_DD_KILL:
 else:
     print(f"  CB mode : ✅ LIVE-equivalent (kill_switch_enabled=True)")
 if PROFIT_FILTER_ENABLED:
-    print(f"  Filter  : 💰 PROFIT FILTER (min_profit=${MIN_EXPECTED_PROFIT:.2f}, skips low-profit trades)")
+    if MIN_EXPECTED_PROFIT_R is not None:
+        print(f"  Filter  : PROFIT FILTER (min_profit_r={MIN_EXPECTED_PROFIT_R:.2f}R, skips low-profit trades)")
+    else:
+        print(f"  Filter  : PROFIT FILTER (min_profit=${MIN_EXPECTED_PROFIT:.2f}, skips low-profit trades)")
 print()
 
 LABEL_LOOKAHEAD_BARS = get_label_lookahead_bars(settings)
@@ -612,13 +617,20 @@ while fold_start + TRAIN_BARS + TEST_BARS <= n_total:
         
         # Calculate risk in USD from balance and risk_fraction
         # This matches how orchestrator calculates risk
-        if 'balance_before' in fold_sim_df.columns:
-            # Use actual balance from simulation
-            risk_fraction = RISK_PCT if RISK_PCT_OVERRIDE is not None else _sim_settings.risk.risk_per_trade
+        risk_fraction = (
+            RISK_PCT_OVERRIDE
+            if RISK_PCT_OVERRIDE is not None
+            else float(settings_full.risk.risk_per_trade)
+        )
+        max_risk_fraction = float(getattr(settings_full.risk, "max_risk_fraction", 0.0) or 0.0)
+        if max_risk_fraction > 0:
+            risk_fraction = min(risk_fraction, max_risk_fraction)
+
+        if "balance_before" in fold_sim_df.columns:
+            # Use actual balance from simulation when available.
             fold_sim_df["risk_usd"] = fold_sim_df["balance_before"] * risk_fraction
         else:
-            # Fallback: use starting balance
-            risk_fraction = RISK_PCT if RISK_PCT_OVERRIDE is not None else 0.03
+            # Before simulation, align expected-profit filtering with live/backtest risk caps.
             fold_sim_df["risk_usd"] = STARTING_BALANCE * risk_fraction
         
         # Estimate expected profit using realistic parameters:
@@ -628,9 +640,18 @@ while fold_start + TRAIN_BARS + TEST_BARS <= n_total:
             fold_sim_df["probability"] * (median_winner_rr * fold_sim_df["risk_usd"])
             - (1 - fold_sim_df["probability"]) * fold_sim_df["risk_usd"]
         )
+        fold_sim_df["estimated_profit_r"] = (
+            fold_sim_df["estimated_profit"] / fold_sim_df["risk_usd"].replace(0, np.nan)
+        )
         
-        # Apply filter: skip trades with estimated profit < threshold
-        profit_mask = fold_sim_df["estimated_profit"] > MIN_EXPECTED_PROFIT
+        # Apply filter: skip trades with estimated profit < threshold.
+        # USD thresholds depend on account size; R thresholds scale with risk.
+        if MIN_EXPECTED_PROFIT_R is not None:
+            profit_mask = fold_sim_df["estimated_profit_r"] > MIN_EXPECTED_PROFIT_R
+            filter_desc = f"{MIN_EXPECTED_PROFIT_R:.2f}R"
+        else:
+            profit_mask = fold_sim_df["estimated_profit"] > MIN_EXPECTED_PROFIT
+            filter_desc = f"${MIN_EXPECTED_PROFIT:.2f}"
         n_before_filter = len(fold_sim_df)
         n_skipped = (~profit_mask).sum()
         
@@ -641,7 +662,7 @@ while fold_start + TRAIN_BARS + TEST_BARS <= n_total:
             f"  [PROFIT FILTER] Using RR={median_winner_rr:.2f} (data-driven), "
             f"risk={risk_fraction:.3f}×balance"
         )
-        print(f"  [PROFIT FILTER] Skipped {n_skipped}/{n_before_filter} signals ({skip_rate:.1f}%) with profit < ${MIN_EXPECTED_PROFIT:.2f}")
+        print(f"  [PROFIT FILTER] Skipped {n_skipped}/{n_before_filter} signals ({skip_rate:.1f}%) with profit < {filter_desc}")
     
     _sim_settings = settings_full.model_copy(deep=True)
     _sim_settings.training.backtest_initial_balance = _compound_balance  # compound across folds
@@ -1236,6 +1257,17 @@ if sim_trade_log:
     all_sim_trades = pd.concat(sim_trade_log, ignore_index=True)
     all_sim_trades.to_csv(_out_sim_trades, index=False)
     print(f"  Sim trades    → {_out_sim_trades}  ({len(all_sim_trades):,} executed trades)")
+
+else:
+    pd.DataFrame(columns=[
+        "time", "side", "entry_price", "realized_rr", "net_rr", "friction_rr",
+        "swap_rr", "gap_rr", "bars_held", "probability", "risk_fraction", "pnl",
+        "balance_before", "balance_after", "drawdown", "is_win", "is_loss",
+        "is_draw", "max_positions_allowed", "open_positions_at_open",
+        "volatility_regime", "risk_throttle_multiplier", "risk_throttle_reason",
+        "fold", "test_start", "test_end",
+    ]).to_csv(_out_sim_trades, index=False)
+    print(f"  Sim trades    -> {_out_sim_trades}  (0 executed trades)")
 
 if not all_signals.empty:
     all_signals.to_csv(out_signals, index=False)

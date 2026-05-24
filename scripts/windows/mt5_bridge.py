@@ -9,10 +9,10 @@ endpoints so the containers can call them via http://host.docker.internal:5600.
 Usage (run once on Windows host, keep running in background):
     python scripts/windows/mt5_bridge.py
 
-Or with explicit credentials (overrides env vars):
-    set MT5_LOGIN=270832477
-    set MT5_PASSWORD=yourpassword
-    set MT5_SERVER=Exness-MT5Trial17
+Or with credentials loaded from .env/environment:
+    set MT5_LOGIN=<rotated_account_number>
+    set MT5_PASSWORD=<rotated_password>
+    set MT5_SERVER=<broker_server>
     set MT5_TERMINAL_PATH=C:\Program Files\MetaTrader 5\terminal64.exe
     python scripts/windows/mt5_bridge.py
 """
@@ -63,8 +63,17 @@ except ImportError:
 import argparse as _argparse
 _ap = _argparse.ArgumentParser(description="MT5 HTTP bridge")
 _ap.add_argument("--port", type=int, default=int(os.getenv("MT5_BRIDGE_PORT", "5600")))
+_ap.add_argument("--mt5-login", type=int, default=None, help="Override MT5_LOGIN env var")
+_ap.add_argument("--mt5-password", default=None, help="Override MT5_PASSWORD env var")
+_ap.add_argument("--mt5-server", default=None, help="Override MT5_SERVER env var")
+_ap.add_argument("--mt5-path", default=None, help="Override MT5_TERMINAL_PATH env var")
 _args, _unknown = _ap.parse_known_args()
 PORT = _args.port
+# Apply CLI overrides to env (so _ensure() and _init_mt5() pick them up consistently)
+if _args.mt5_login is not None:   os.environ["MT5_LOGIN"]         = str(_args.mt5_login)
+if _args.mt5_password is not None: os.environ["MT5_PASSWORD"]      = _args.mt5_password
+if _args.mt5_server is not None:   os.environ["MT5_SERVER"]        = _args.mt5_server
+if _args.mt5_path is not None:     os.environ["MT5_TERMINAL_PATH"] = _args.mt5_path
 
 # ── MT5 lifecycle ──────────────────────────────────────────────────────────────
 
@@ -127,9 +136,42 @@ def _ensure() -> None:
 
 # ── Operations ─────────────────────────────────────────────────────────────────
 
+def _resolve_symbol(symbol: str) -> str:
+    """Resolve model symbol to broker symbol, e.g. XAUUSD -> XAUUSDm."""
+    requested = str(symbol)
+    mt5.symbol_select(requested, True)
+    if mt5.symbol_info(requested) is not None:
+        return requested
+
+    candidates = list(mt5.symbols_get(f"{requested}*") or [])
+    if not candidates:
+        candidates = list(mt5.symbols_get(f"*{requested}*") or [])
+    if not candidates:
+        raise RuntimeError(f"symbol not found: {requested}")
+
+    def _score(item) -> tuple:
+        name = str(getattr(item, "name", ""))
+        trade_mode = int(getattr(item, "trade_mode", 0) or 0)
+        visible = bool(getattr(item, "visible", False))
+        return (
+            1 if name.upper().startswith(requested.upper()) else 0,
+            1 if trade_mode == 4 else 0,
+            1 if visible else 0,
+            -len(name),
+        )
+
+    resolved = str(getattr(sorted(candidates, key=_score, reverse=True)[0], "name", requested))
+    mt5.symbol_select(resolved, True)
+    if mt5.symbol_info(resolved) is None:
+        raise RuntimeError(f"resolved symbol unavailable: requested={requested} resolved={resolved}")
+    if resolved != requested:
+        log.info("Resolved symbol %s -> %s", requested, resolved)
+    return resolved
+
+
 def op_place_order(body: dict) -> dict:
     _ensure()
-    symbol    = str(body["symbol"])
+    symbol    = _resolve_symbol(str(body["symbol"]))
     side      = str(body["side"])
     volume    = float(body["volume"])
     stop_loss = float(body.get("stop_loss") or 0)
@@ -208,8 +250,79 @@ def op_place_order(body: dict) -> dict:
     raise RuntimeError(f"All filling modes failed: {last_err}")
 
 
+def op_check_order(body: dict) -> dict:
+    """Validate a market order request with MT5 without sending it."""
+    _ensure()
+    symbol = _resolve_symbol(str(body["symbol"]))
+    side = str(body["side"])
+    volume = float(body["volume"])
+    stop_loss = float(body.get("stop_loss") or 0)
+    take_profit = float(body.get("take_profit") or 0)
+    entry_price = float(body.get("entry_price") or 0)
+    deviation = int(body.get("deviation", 20))
+    magic = int(body.get("magic", 0))
+    comment = str(body.get("comment", "mt5-bridge-check"))
+
+    mt5.symbol_select(symbol, True)
+    tick = mt5.symbol_info_tick(symbol)
+    if tick is None:
+        raise RuntimeError(f"No tick data for {symbol}: {mt5.last_error()}")
+    sinfo = mt5.symbol_info(symbol)
+    digits = sinfo.digits if sinfo is not None else 5
+
+    order_type = mt5.ORDER_TYPE_BUY if side == "buy" else mt5.ORDER_TYPE_SELL
+    price = tick.ask if side == "buy" else tick.bid
+    if stop_loss and take_profit:
+        ref = entry_price if entry_price else (stop_loss + take_profit) / 2
+        sl_dist = abs(ref - stop_loss)
+        tp_dist = abs(take_profit - ref)
+        if side == "buy":
+            sl = round(price - sl_dist, digits)
+            tp = round(price + tp_dist, digits)
+        else:
+            sl = round(price + sl_dist, digits)
+            tp = round(price - tp_dist, digits)
+    else:
+        sl = round(stop_loss, digits)
+        tp = round(take_profit, digits)
+
+    checks = []
+    for filling in [mt5.ORDER_FILLING_RETURN, mt5.ORDER_FILLING_IOC, mt5.ORDER_FILLING_FOK]:
+        req = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": symbol,
+            "volume": volume,
+            "type": order_type,
+            "price": price,
+            "sl": sl,
+            "tp": tp,
+            "deviation": deviation,
+            "magic": magic,
+            "comment": comment,
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": filling,
+        }
+        result = mt5.order_check(req)
+        if result is None:
+            checks.append({"type_filling": filling, "error": str(mt5.last_error()), "request": req})
+            continue
+        payload = {
+            k: (v if isinstance(v, (int, float, str, type(None))) else str(v))
+            for k, v in result._asdict().items()
+        }
+        payload["request"] = {
+            k: (v if isinstance(v, (int, float, str, type(None))) else str(v))
+            for k, v in req.items()
+        }
+        checks.append(payload)
+        if payload.get("retcode") != 10030:
+            return payload | {"checks": checks}
+    return {"retcode": 10030, "comment": "All filling modes unsupported", "checks": checks}
+
+
 def op_get_positions(symbol: str, magic: int | None = None) -> list:
     _ensure()
+    symbol = _resolve_symbol(symbol)
     positions = mt5.positions_get(symbol=symbol)
     if not positions:
         return []
@@ -320,6 +433,8 @@ def op_get_tick(symbol: str) -> dict:
     """Return current real-time ask/bid price for symbol."""
     _ensure()
     import time as _time
+    requested_symbol = str(symbol)
+    symbol = _resolve_symbol(requested_symbol)
     mt5.symbol_select(symbol, True)
     tick = None
     for _attempt in range(3):
@@ -330,6 +445,7 @@ def op_get_tick(symbol: str) -> dict:
     if tick is None:
         raise RuntimeError(f"No tick data for {symbol}: {mt5.last_error()}")
     return {
+        "requested_symbol": requested_symbol,
         "symbol": symbol,
         "ask":    float(tick.ask),
         "bid":    float(tick.bid),
@@ -338,9 +454,35 @@ def op_get_tick(symbol: str) -> dict:
     }
 
 
+def op_get_symbol_info(symbol: str) -> dict:
+    """Return broker symbol metadata needed for live risk sizing."""
+    _ensure()
+    requested_symbol = str(symbol)
+    symbol = _resolve_symbol(requested_symbol)
+    mt5.symbol_select(symbol, True)
+    info = mt5.symbol_info(symbol)
+    if info is None:
+        raise RuntimeError(f"symbol_info failed for {symbol}: {mt5.last_error()}")
+    return {
+        "requested_symbol": requested_symbol,
+        "symbol": symbol,
+        "digits": int(getattr(info, "digits", 0) or 0),
+        "point": float(getattr(info, "point", 0.0) or 0.0),
+        "trade_tick_value": float(getattr(info, "trade_tick_value", 0.0) or 0.0),
+        "trade_tick_size": float(getattr(info, "trade_tick_size", 0.0) or 0.0),
+        "trade_contract_size": float(getattr(info, "trade_contract_size", 0.0) or 0.0),
+        "trade_stops_level": int(getattr(info, "trade_stops_level", 0) or 0),
+        "volume_min": float(getattr(info, "volume_min", 0.01) or 0.01),
+        "volume_max": float(getattr(info, "volume_max", 5.0) or 5.0),
+        "volume_step": float(getattr(info, "volume_step", 0.01) or 0.01),
+        "trade_mode": int(getattr(info, "trade_mode", -1)),
+    }
+
+
 def op_get_rates(symbol: str, timeframe: str, bars: int) -> list:
     """Return OHLCV bars for symbol/timeframe directly from MT5 (realtime)."""
     _ensure()
+    symbol = _resolve_symbol(symbol)
     tf_map = {
         "M1":  mt5.TIMEFRAME_M1,
         "M5":  mt5.TIMEFRAME_M5,
@@ -355,8 +497,23 @@ def op_get_rates(symbol: str, timeframe: str, bars: int) -> list:
     mt5.symbol_select(symbol, True)
     import time as _time
     rates = None
+    tick = mt5.symbol_info_tick(symbol)
+    candidates = []
+    if tick is not None and int(getattr(tick, "time", 0) or 0) > 0:
+        to_dt = _dt.datetime.fromtimestamp(int(tick.time), tz=_dt.timezone.utc) + _dt.timedelta(minutes=10)
+        candidates.append(("from_tick_time", lambda: mt5.copy_rates_from(symbol, tf_map[timeframe], to_dt, bars)))
+    candidates.append(("from_pos", lambda: mt5.copy_rates_from_pos(symbol, tf_map[timeframe], 0, bars)))
     for _attempt in range(6):
-        rates = mt5.copy_rates_from_pos(symbol, tf_map[timeframe], 0, bars)
+        best_rates = None
+        best_last = -1
+        for _name, getter in candidates:
+            item = getter()
+            if item is not None and len(item) > 0:
+                last_time = int(item[-1]["time"])
+                if last_time > best_last:
+                    best_rates = item
+                    best_last = last_time
+        rates = best_rates
         if rates is not None and len(rates) > 0:
             break
         _time.sleep(min(2 * (1.5 ** _attempt), 10))
@@ -373,6 +530,59 @@ def op_get_rates(symbol: str, timeframe: str, bars: int) -> list:
             "tick_volume": int(r["tick_volume"]),
             "spread":      int(r["spread"]),
         })
+    tf_seconds = {"M1": 60, "M5": 300, "M15": 900, "M30": 1800, "H1": 3600, "H4": 14400, "D1": 86400}[timeframe]
+    tick = mt5.symbol_info_tick(symbol)
+    if tick is not None and result:
+        tick_time = int(getattr(tick, "time", 0) or 0)
+        last_time = int(result[-1]["time"])
+        if tick_time - last_time > tf_seconds:
+            start_dt = _dt.datetime.fromtimestamp(last_time, tz=_dt.timezone.utc)
+            ticks = mt5.copy_ticks_from(symbol, start_dt, 200000, mt5.COPY_TICKS_ALL)
+            point = float(getattr(mt5.symbol_info(symbol), "point", 0.001) or 0.001)
+            synthetic: dict[int, dict] = {}
+            if ticks is not None:
+                for item in ticks:
+                    epoch = int(item["time"])
+                    bar_time = epoch - (epoch % tf_seconds)
+                    if bar_time <= last_time:
+                        continue
+                    bid = float(item["bid"])
+                    ask = float(item["ask"])
+                    last = float(item["last"])
+                    if bid > 0 and ask > 0:
+                        price = (bid + ask) / 2.0
+                        spread = int(round((ask - bid) / point)) if point > 0 else 0
+                    elif bid > 0:
+                        price = bid
+                        spread = 0
+                    elif ask > 0:
+                        price = ask
+                        spread = 0
+                    elif last > 0:
+                        price = last
+                        spread = 0
+                    else:
+                        continue
+                    row = synthetic.get(bar_time)
+                    if row is None:
+                        synthetic[bar_time] = {
+                            "time": bar_time,
+                            "open": price,
+                            "high": price,
+                            "low": price,
+                            "close": price,
+                            "tick_volume": 1,
+                            "spread": spread,
+                        }
+                    else:
+                        row["high"] = max(float(row["high"]), price)
+                        row["low"] = min(float(row["low"]), price)
+                        row["close"] = price
+                        row["tick_volume"] = int(row["tick_volume"]) + 1
+                        row["spread"] = spread or int(row["spread"])
+            if synthetic:
+                result.extend(synthetic[key] for key in sorted(synthetic))
+                result = result[-int(bars):]
     return result
 
 
@@ -418,6 +628,8 @@ def _collect_session_windows(symbol: str, now_utc: _dt.datetime, days_ahead: int
 def op_market_state(symbol: str, stale_seconds: int = 300) -> dict:
     """Best-effort broker market state for XAUUSD via MT5 server sessions + tick freshness."""
     _ensure()
+    requested_symbol = str(symbol)
+    symbol = _resolve_symbol(requested_symbol)
     now_utc = _dt.datetime.now(_dt.timezone.utc)
     stale_seconds = max(int(stale_seconds or 300), 30)
 
@@ -469,6 +681,7 @@ def op_market_state(symbol: str, stale_seconds: int = 300) -> dict:
         mins_to_close = int((next_close_utc - now_utc).total_seconds() // 60)
 
     return {
+        "requested_symbol": requested_symbol,
         "symbol": symbol,
         "server_time_utc": now_utc.isoformat(),
         "is_open": is_open,
@@ -691,6 +904,7 @@ def op_get_history_deals(symbol: str, since_epoch: float, magic: int | None = No
     """Return all OUT deals for symbol since since_epoch (Unix timestamp)."""
     import datetime as _dt
     _ensure()
+    symbol = _resolve_symbol(symbol)
     from_dt = _dt.datetime.fromtimestamp(since_epoch, tz=_dt.timezone.utc)
     to_dt   = _dt.datetime.now(_dt.timezone.utc)
     deals = mt5.history_deals_get(from_dt, to_dt)
@@ -801,6 +1015,9 @@ class _Handler(BaseHTTPRequestHandler):
             elif path == "/tick":
                 symbol = qs.get("symbol", ["XAUUSD"])[0]
                 self._send_json(200, op_get_tick(symbol))
+            elif path == "/symbol/info":
+                symbol = qs.get("symbol", ["XAUUSD"])[0]
+                self._send_json(200, op_get_symbol_info(symbol))
             elif path == "/rates":
                 symbol    = qs.get("symbol",    ["XAUUSD"])[0]
                 timeframe = qs.get("timeframe", ["M15"])[0]
@@ -828,7 +1045,9 @@ class _Handler(BaseHTTPRequestHandler):
         path   = parsed.path
         try:
             body = self._body()  # moved inside try so JSONDecodeError is caught
-            if path == "/order":
+            if path == "/order/check":
+                self._send_json(200, op_check_order(body))
+            elif path == "/order":
                 self._send_json(200, op_place_order(body))
             elif "/positions/" in path and path.endswith("/close"):
                 ticket = int(path.split("/")[2])

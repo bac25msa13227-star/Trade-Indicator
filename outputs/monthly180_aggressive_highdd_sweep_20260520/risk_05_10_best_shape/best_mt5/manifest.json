@@ -1,0 +1,1626 @@
+{
+  "all_signals": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\all_signals.csv",
+  "folds": [
+    {
+      "fold": 1,
+      "train_start": "2010-05-28 07:00:00",
+      "train_end": "2011-05-28 07:00:00",
+      "test_start": "2011-05-28 07:00:00",
+      "test_end": "2011-06-27 07:00:00",
+      "signals": 31,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_01_signals.csv"
+    },
+    {
+      "fold": 2,
+      "train_start": "2010-06-27 07:00:00",
+      "train_end": "2011-06-27 07:00:00",
+      "test_start": "2011-06-27 07:00:00",
+      "test_end": "2011-07-27 07:00:00",
+      "signals": 50,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_02_signals.csv"
+    },
+    {
+      "fold": 3,
+      "train_start": "2010-07-27 07:00:00",
+      "train_end": "2011-07-27 07:00:00",
+      "test_start": "2011-07-27 07:00:00",
+      "test_end": "2011-08-26 07:00:00",
+      "signals": 55,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_03_signals.csv"
+    },
+    {
+      "fold": 4,
+      "train_start": "2010-08-26 07:00:00",
+      "train_end": "2011-08-26 07:00:00",
+      "test_start": "2011-08-26 07:00:00",
+      "test_end": "2011-09-25 07:00:00",
+      "signals": 46,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_04_signals.csv"
+    },
+    {
+      "fold": 5,
+      "train_start": "2010-09-25 07:00:00",
+      "train_end": "2011-09-25 07:00:00",
+      "test_start": "2011-09-25 07:00:00",
+      "test_end": "2011-10-25 07:00:00",
+      "signals": 27,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_05_signals.csv"
+    },
+    {
+      "fold": 6,
+      "train_start": "2010-10-25 07:00:00",
+      "train_end": "2011-10-25 07:00:00",
+      "test_start": "2011-10-25 07:00:00",
+      "test_end": "2011-11-24 07:00:00",
+      "signals": 57,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_06_signals.csv"
+    },
+    {
+      "fold": 7,
+      "train_start": "2010-11-24 07:00:00",
+      "train_end": "2011-11-24 07:00:00",
+      "test_start": "2011-11-24 07:00:00",
+      "test_end": "2011-12-24 07:00:00",
+      "signals": 43,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_07_signals.csv"
+    },
+    {
+      "fold": 8,
+      "train_start": "2010-12-24 07:00:00",
+      "train_end": "2011-12-24 07:00:00",
+      "test_start": "2011-12-24 07:00:00",
+      "test_end": "2012-01-23 07:00:00",
+      "signals": 46,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_08_signals.csv"
+    },
+    {
+      "fold": 9,
+      "train_start": "2011-01-23 07:00:00",
+      "train_end": "2012-01-23 07:00:00",
+      "test_start": "2012-01-23 07:00:00",
+      "test_end": "2012-02-22 07:00:00",
+      "signals": 46,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_09_signals.csv"
+    },
+    {
+      "fold": 10,
+      "train_start": "2011-02-22 07:00:00",
+      "train_end": "2012-02-22 07:00:00",
+      "test_start": "2012-02-22 07:00:00",
+      "test_end": "2012-03-23 07:00:00",
+      "signals": 39,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_10_signals.csv"
+    },
+    {
+      "fold": 11,
+      "train_start": "2011-03-24 07:00:00",
+      "train_end": "2012-03-23 07:00:00",
+      "test_start": "2012-03-23 07:00:00",
+      "test_end": "2012-04-22 07:00:00",
+      "signals": 37,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_11_signals.csv"
+    },
+    {
+      "fold": 12,
+      "train_start": "2011-04-23 07:00:00",
+      "train_end": "2012-04-22 07:00:00",
+      "test_start": "2012-04-22 07:00:00",
+      "test_end": "2012-05-22 07:00:00",
+      "signals": 49,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_12_signals.csv"
+    },
+    {
+      "fold": 13,
+      "train_start": "2011-05-23 07:00:00",
+      "train_end": "2012-05-22 07:00:00",
+      "test_start": "2012-05-22 07:00:00",
+      "test_end": "2012-06-21 07:00:00",
+      "signals": 34,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_13_signals.csv"
+    },
+    {
+      "fold": 14,
+      "train_start": "2011-06-22 07:00:00",
+      "train_end": "2012-06-21 07:00:00",
+      "test_start": "2012-06-21 07:00:00",
+      "test_end": "2012-07-21 07:00:00",
+      "signals": 42,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_14_signals.csv"
+    },
+    {
+      "fold": 15,
+      "train_start": "2011-07-22 07:00:00",
+      "train_end": "2012-07-21 07:00:00",
+      "test_start": "2012-07-21 07:00:00",
+      "test_end": "2012-08-20 07:00:00",
+      "signals": 38,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_15_signals.csv"
+    },
+    {
+      "fold": 16,
+      "train_start": "2011-08-21 07:00:00",
+      "train_end": "2012-08-20 07:00:00",
+      "test_start": "2012-08-20 07:00:00",
+      "test_end": "2012-09-19 07:00:00",
+      "signals": 44,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_16_signals.csv"
+    },
+    {
+      "fold": 17,
+      "train_start": "2011-09-20 07:00:00",
+      "train_end": "2012-09-19 07:00:00",
+      "test_start": "2012-09-19 07:00:00",
+      "test_end": "2012-10-19 07:00:00",
+      "signals": 27,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_17_signals.csv"
+    },
+    {
+      "fold": 18,
+      "train_start": "2011-10-20 07:00:00",
+      "train_end": "2012-10-19 07:00:00",
+      "test_start": "2012-10-19 07:00:00",
+      "test_end": "2012-11-18 07:00:00",
+      "signals": 40,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_18_signals.csv"
+    },
+    {
+      "fold": 19,
+      "train_start": "2011-11-19 07:00:00",
+      "train_end": "2012-11-18 07:00:00",
+      "test_start": "2012-11-18 07:00:00",
+      "test_end": "2012-12-18 07:00:00",
+      "signals": 27,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_19_signals.csv"
+    },
+    {
+      "fold": 20,
+      "train_start": "2011-12-19 07:00:00",
+      "train_end": "2012-12-18 07:00:00",
+      "test_start": "2012-12-18 07:00:00",
+      "test_end": "2013-01-17 07:00:00",
+      "signals": 31,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_20_signals.csv"
+    },
+    {
+      "fold": 21,
+      "train_start": "2012-01-18 07:00:00",
+      "train_end": "2013-01-17 07:00:00",
+      "test_start": "2013-01-17 07:00:00",
+      "test_end": "2013-02-16 07:00:00",
+      "signals": 31,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_21_signals.csv"
+    },
+    {
+      "fold": 22,
+      "train_start": "2012-02-17 07:00:00",
+      "train_end": "2013-02-16 07:00:00",
+      "test_start": "2013-02-16 07:00:00",
+      "test_end": "2013-03-18 07:00:00",
+      "signals": 27,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_22_signals.csv"
+    },
+    {
+      "fold": 23,
+      "train_start": "2012-03-18 07:00:00",
+      "train_end": "2013-03-18 07:00:00",
+      "test_start": "2013-03-18 07:00:00",
+      "test_end": "2013-04-17 07:00:00",
+      "signals": 26,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_23_signals.csv"
+    },
+    {
+      "fold": 24,
+      "train_start": "2012-04-17 07:00:00",
+      "train_end": "2013-04-17 07:00:00",
+      "test_start": "2013-04-17 07:00:00",
+      "test_end": "2013-05-17 07:00:00",
+      "signals": 21,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_24_signals.csv"
+    },
+    {
+      "fold": 25,
+      "train_start": "2012-05-17 07:00:00",
+      "train_end": "2013-05-17 07:00:00",
+      "test_start": "2013-05-17 07:00:00",
+      "test_end": "2013-06-16 07:00:00",
+      "signals": 29,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_25_signals.csv"
+    },
+    {
+      "fold": 26,
+      "train_start": "2012-06-16 07:00:00",
+      "train_end": "2013-06-16 07:00:00",
+      "test_start": "2013-06-16 07:00:00",
+      "test_end": "2013-07-16 07:00:00",
+      "signals": 39,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_26_signals.csv"
+    },
+    {
+      "fold": 27,
+      "train_start": "2012-07-16 07:00:00",
+      "train_end": "2013-07-16 07:00:00",
+      "test_start": "2013-07-16 07:00:00",
+      "test_end": "2013-08-15 07:00:00",
+      "signals": 11,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_27_signals.csv"
+    },
+    {
+      "fold": 28,
+      "train_start": "2012-08-15 07:00:00",
+      "train_end": "2013-08-15 07:00:00",
+      "test_start": "2013-08-15 07:00:00",
+      "test_end": "2013-09-14 07:00:00",
+      "signals": 26,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_28_signals.csv"
+    },
+    {
+      "fold": 29,
+      "train_start": "2012-09-14 07:00:00",
+      "train_end": "2013-09-14 07:00:00",
+      "test_start": "2013-09-14 07:00:00",
+      "test_end": "2013-10-14 07:00:00",
+      "signals": 31,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_29_signals.csv"
+    },
+    {
+      "fold": 30,
+      "train_start": "2012-10-14 07:00:00",
+      "train_end": "2013-10-14 07:00:00",
+      "test_start": "2013-10-14 07:00:00",
+      "test_end": "2013-11-13 07:00:00",
+      "signals": 24,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_30_signals.csv"
+    },
+    {
+      "fold": 31,
+      "train_start": "2012-11-13 07:00:00",
+      "train_end": "2013-11-13 07:00:00",
+      "test_start": "2013-11-13 07:00:00",
+      "test_end": "2013-12-13 07:00:00",
+      "signals": 41,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_31_signals.csv"
+    },
+    {
+      "fold": 32,
+      "train_start": "2012-12-13 07:00:00",
+      "train_end": "2013-12-13 07:00:00",
+      "test_start": "2013-12-13 07:00:00",
+      "test_end": "2014-01-12 07:00:00",
+      "signals": 23,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_32_signals.csv"
+    },
+    {
+      "fold": 33,
+      "train_start": "2013-01-12 07:00:00",
+      "train_end": "2014-01-12 07:00:00",
+      "test_start": "2014-01-12 07:00:00",
+      "test_end": "2014-02-11 07:00:00",
+      "signals": 28,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_33_signals.csv"
+    },
+    {
+      "fold": 34,
+      "train_start": "2013-02-11 07:00:00",
+      "train_end": "2014-02-11 07:00:00",
+      "test_start": "2014-02-11 07:00:00",
+      "test_end": "2014-03-13 07:00:00",
+      "signals": 58,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_34_signals.csv"
+    },
+    {
+      "fold": 35,
+      "train_start": "2013-03-13 07:00:00",
+      "train_end": "2014-03-13 07:00:00",
+      "test_start": "2014-03-13 07:00:00",
+      "test_end": "2014-04-12 07:00:00",
+      "signals": 35,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_35_signals.csv"
+    },
+    {
+      "fold": 36,
+      "train_start": "2013-04-12 07:00:00",
+      "train_end": "2014-04-12 07:00:00",
+      "test_start": "2014-04-12 07:00:00",
+      "test_end": "2014-05-12 07:00:00",
+      "signals": 43,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_36_signals.csv"
+    },
+    {
+      "fold": 37,
+      "train_start": "2013-05-12 07:00:00",
+      "train_end": "2014-05-12 07:00:00",
+      "test_start": "2014-05-12 07:00:00",
+      "test_end": "2014-06-11 07:00:00",
+      "signals": 39,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_37_signals.csv"
+    },
+    {
+      "fold": 38,
+      "train_start": "2013-06-11 07:00:00",
+      "train_end": "2014-06-11 07:00:00",
+      "test_start": "2014-06-11 07:00:00",
+      "test_end": "2014-07-11 07:00:00",
+      "signals": 45,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_38_signals.csv"
+    },
+    {
+      "fold": 39,
+      "train_start": "2013-07-11 07:00:00",
+      "train_end": "2014-07-11 07:00:00",
+      "test_start": "2014-07-11 07:00:00",
+      "test_end": "2014-08-10 07:00:00",
+      "signals": 36,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_39_signals.csv"
+    },
+    {
+      "fold": 40,
+      "train_start": "2013-08-10 07:00:00",
+      "train_end": "2014-08-10 07:00:00",
+      "test_start": "2014-08-10 07:00:00",
+      "test_end": "2014-09-09 07:00:00",
+      "signals": 37,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_40_signals.csv"
+    },
+    {
+      "fold": 41,
+      "train_start": "2013-09-09 07:00:00",
+      "train_end": "2014-09-09 07:00:00",
+      "test_start": "2014-09-09 07:00:00",
+      "test_end": "2014-10-09 07:00:00",
+      "signals": 53,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_41_signals.csv"
+    },
+    {
+      "fold": 42,
+      "train_start": "2013-10-09 07:00:00",
+      "train_end": "2014-10-09 07:00:00",
+      "test_start": "2014-10-09 07:00:00",
+      "test_end": "2014-11-08 07:00:00",
+      "signals": 40,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_42_signals.csv"
+    },
+    {
+      "fold": 43,
+      "train_start": "2013-11-08 07:00:00",
+      "train_end": "2014-11-08 07:00:00",
+      "test_start": "2014-11-08 07:00:00",
+      "test_end": "2014-12-08 07:00:00",
+      "signals": 17,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_43_signals.csv"
+    },
+    {
+      "fold": 44,
+      "train_start": "2013-12-08 07:00:00",
+      "train_end": "2014-12-08 07:00:00",
+      "test_start": "2014-12-08 07:00:00",
+      "test_end": "2015-01-07 07:00:00",
+      "signals": 34,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_44_signals.csv"
+    },
+    {
+      "fold": 45,
+      "train_start": "2014-01-07 07:00:00",
+      "train_end": "2015-01-07 07:00:00",
+      "test_start": "2015-01-07 07:00:00",
+      "test_end": "2015-02-06 07:00:00",
+      "signals": 22,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_45_signals.csv"
+    },
+    {
+      "fold": 46,
+      "train_start": "2014-02-06 07:00:00",
+      "train_end": "2015-02-06 07:00:00",
+      "test_start": "2015-02-06 07:00:00",
+      "test_end": "2015-03-08 07:00:00",
+      "signals": 35,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_46_signals.csv"
+    },
+    {
+      "fold": 47,
+      "train_start": "2014-03-08 07:00:00",
+      "train_end": "2015-03-08 07:00:00",
+      "test_start": "2015-03-08 07:00:00",
+      "test_end": "2015-04-07 07:00:00",
+      "signals": 46,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_47_signals.csv"
+    },
+    {
+      "fold": 48,
+      "train_start": "2014-04-07 07:00:00",
+      "train_end": "2015-04-07 07:00:00",
+      "test_start": "2015-04-07 07:00:00",
+      "test_end": "2015-05-07 07:00:00",
+      "signals": 35,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_48_signals.csv"
+    },
+    {
+      "fold": 49,
+      "train_start": "2014-05-07 07:00:00",
+      "train_end": "2015-05-07 07:00:00",
+      "test_start": "2015-05-07 07:00:00",
+      "test_end": "2015-06-06 07:00:00",
+      "signals": 26,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_49_signals.csv"
+    },
+    {
+      "fold": 50,
+      "train_start": "2014-06-06 07:00:00",
+      "train_end": "2015-06-06 07:00:00",
+      "test_start": "2015-06-06 07:00:00",
+      "test_end": "2015-07-06 07:00:00",
+      "signals": 35,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_50_signals.csv"
+    },
+    {
+      "fold": 51,
+      "train_start": "2014-07-06 07:00:00",
+      "train_end": "2015-07-06 07:00:00",
+      "test_start": "2015-07-06 07:00:00",
+      "test_end": "2015-08-05 07:00:00",
+      "signals": 33,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_51_signals.csv"
+    },
+    {
+      "fold": 52,
+      "train_start": "2014-08-05 07:00:00",
+      "train_end": "2015-08-05 07:00:00",
+      "test_start": "2015-08-05 07:00:00",
+      "test_end": "2015-09-04 07:00:00",
+      "signals": 31,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_52_signals.csv"
+    },
+    {
+      "fold": 53,
+      "train_start": "2014-09-04 07:00:00",
+      "train_end": "2015-09-04 07:00:00",
+      "test_start": "2015-09-04 07:00:00",
+      "test_end": "2015-10-04 07:00:00",
+      "signals": 31,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_53_signals.csv"
+    },
+    {
+      "fold": 54,
+      "train_start": "2014-10-04 07:00:00",
+      "train_end": "2015-10-04 07:00:00",
+      "test_start": "2015-10-04 07:00:00",
+      "test_end": "2015-11-03 07:00:00",
+      "signals": 28,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_54_signals.csv"
+    },
+    {
+      "fold": 55,
+      "train_start": "2014-11-03 07:00:00",
+      "train_end": "2015-11-03 07:00:00",
+      "test_start": "2015-11-03 07:00:00",
+      "test_end": "2015-12-03 07:00:00",
+      "signals": 37,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_55_signals.csv"
+    },
+    {
+      "fold": 56,
+      "train_start": "2014-12-03 07:00:00",
+      "train_end": "2015-12-03 07:00:00",
+      "test_start": "2015-12-03 07:00:00",
+      "test_end": "2016-01-02 07:00:00",
+      "signals": 19,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_56_signals.csv"
+    },
+    {
+      "fold": 57,
+      "train_start": "2015-01-02 07:00:00",
+      "train_end": "2016-01-02 07:00:00",
+      "test_start": "2016-01-02 07:00:00",
+      "test_end": "2016-02-01 07:00:00",
+      "signals": 35,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_57_signals.csv"
+    },
+    {
+      "fold": 58,
+      "train_start": "2015-02-01 07:00:00",
+      "train_end": "2016-02-01 07:00:00",
+      "test_start": "2016-02-01 07:00:00",
+      "test_end": "2016-03-02 07:00:00",
+      "signals": 44,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_58_signals.csv"
+    },
+    {
+      "fold": 59,
+      "train_start": "2015-03-03 07:00:00",
+      "train_end": "2016-03-02 07:00:00",
+      "test_start": "2016-03-02 07:00:00",
+      "test_end": "2016-04-01 07:00:00",
+      "signals": 39,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_59_signals.csv"
+    },
+    {
+      "fold": 60,
+      "train_start": "2015-04-02 07:00:00",
+      "train_end": "2016-04-01 07:00:00",
+      "test_start": "2016-04-01 07:00:00",
+      "test_end": "2016-05-01 07:00:00",
+      "signals": 42,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_60_signals.csv"
+    },
+    {
+      "fold": 61,
+      "train_start": "2015-05-02 07:00:00",
+      "train_end": "2016-05-01 07:00:00",
+      "test_start": "2016-05-01 07:00:00",
+      "test_end": "2016-05-31 07:00:00",
+      "signals": 31,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_61_signals.csv"
+    },
+    {
+      "fold": 62,
+      "train_start": "2015-06-01 07:00:00",
+      "train_end": "2016-05-31 07:00:00",
+      "test_start": "2016-05-31 07:00:00",
+      "test_end": "2016-06-30 07:00:00",
+      "signals": 49,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_62_signals.csv"
+    },
+    {
+      "fold": 63,
+      "train_start": "2015-07-01 07:00:00",
+      "train_end": "2016-06-30 07:00:00",
+      "test_start": "2016-06-30 07:00:00",
+      "test_end": "2016-07-30 07:00:00",
+      "signals": 44,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_63_signals.csv"
+    },
+    {
+      "fold": 64,
+      "train_start": "2015-07-31 07:00:00",
+      "train_end": "2016-07-30 07:00:00",
+      "test_start": "2016-07-30 07:00:00",
+      "test_end": "2016-08-29 07:00:00",
+      "signals": 35,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_64_signals.csv"
+    },
+    {
+      "fold": 65,
+      "train_start": "2015-08-30 07:00:00",
+      "train_end": "2016-08-29 07:00:00",
+      "test_start": "2016-08-29 07:00:00",
+      "test_end": "2016-09-28 07:00:00",
+      "signals": 46,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_65_signals.csv"
+    },
+    {
+      "fold": 66,
+      "train_start": "2015-09-29 07:00:00",
+      "train_end": "2016-09-28 07:00:00",
+      "test_start": "2016-09-28 07:00:00",
+      "test_end": "2016-10-28 07:00:00",
+      "signals": 26,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_66_signals.csv"
+    },
+    {
+      "fold": 67,
+      "train_start": "2015-10-29 07:00:00",
+      "train_end": "2016-10-28 07:00:00",
+      "test_start": "2016-10-28 07:00:00",
+      "test_end": "2016-11-27 07:00:00",
+      "signals": 37,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_67_signals.csv"
+    },
+    {
+      "fold": 68,
+      "train_start": "2015-11-28 07:00:00",
+      "train_end": "2016-11-27 07:00:00",
+      "test_start": "2016-11-27 07:00:00",
+      "test_end": "2016-12-27 07:00:00",
+      "signals": 38,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_68_signals.csv"
+    },
+    {
+      "fold": 69,
+      "train_start": "2015-12-28 07:00:00",
+      "train_end": "2016-12-27 07:00:00",
+      "test_start": "2016-12-27 07:00:00",
+      "test_end": "2017-01-26 07:00:00",
+      "signals": 50,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_69_signals.csv"
+    },
+    {
+      "fold": 70,
+      "train_start": "2016-01-27 07:00:00",
+      "train_end": "2017-01-26 07:00:00",
+      "test_start": "2017-01-26 07:00:00",
+      "test_end": "2017-02-25 07:00:00",
+      "signals": 52,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_70_signals.csv"
+    },
+    {
+      "fold": 71,
+      "train_start": "2016-02-26 07:00:00",
+      "train_end": "2017-02-25 07:00:00",
+      "test_start": "2017-02-25 07:00:00",
+      "test_end": "2017-03-27 07:00:00",
+      "signals": 49,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_71_signals.csv"
+    },
+    {
+      "fold": 72,
+      "train_start": "2016-03-27 07:00:00",
+      "train_end": "2017-03-27 07:00:00",
+      "test_start": "2017-03-27 07:00:00",
+      "test_end": "2017-04-26 07:00:00",
+      "signals": 52,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_72_signals.csv"
+    },
+    {
+      "fold": 73,
+      "train_start": "2016-04-26 07:00:00",
+      "train_end": "2017-04-26 07:00:00",
+      "test_start": "2017-04-26 07:00:00",
+      "test_end": "2017-05-26 07:00:00",
+      "signals": 35,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_73_signals.csv"
+    },
+    {
+      "fold": 74,
+      "train_start": "2016-05-26 07:00:00",
+      "train_end": "2017-05-26 07:00:00",
+      "test_start": "2017-05-26 07:00:00",
+      "test_end": "2017-06-25 07:00:00",
+      "signals": 48,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_74_signals.csv"
+    },
+    {
+      "fold": 75,
+      "train_start": "2016-06-25 07:00:00",
+      "train_end": "2017-06-25 07:00:00",
+      "test_start": "2017-06-25 07:00:00",
+      "test_end": "2017-07-25 07:00:00",
+      "signals": 41,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_75_signals.csv"
+    },
+    {
+      "fold": 76,
+      "train_start": "2016-07-25 07:00:00",
+      "train_end": "2017-07-25 07:00:00",
+      "test_start": "2017-07-25 07:00:00",
+      "test_end": "2017-08-24 07:00:00",
+      "signals": 51,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_76_signals.csv"
+    },
+    {
+      "fold": 77,
+      "train_start": "2016-08-24 07:00:00",
+      "train_end": "2017-08-24 07:00:00",
+      "test_start": "2017-08-24 07:00:00",
+      "test_end": "2017-09-23 07:00:00",
+      "signals": 58,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_77_signals.csv"
+    },
+    {
+      "fold": 78,
+      "train_start": "2016-09-23 07:00:00",
+      "train_end": "2017-09-23 07:00:00",
+      "test_start": "2017-09-23 07:00:00",
+      "test_end": "2017-10-23 07:00:00",
+      "signals": 48,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_78_signals.csv"
+    },
+    {
+      "fold": 79,
+      "train_start": "2016-10-23 07:00:00",
+      "train_end": "2017-10-23 07:00:00",
+      "test_start": "2017-10-23 07:00:00",
+      "test_end": "2017-11-22 07:00:00",
+      "signals": 34,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_79_signals.csv"
+    },
+    {
+      "fold": 80,
+      "train_start": "2016-11-22 07:00:00",
+      "train_end": "2017-11-22 07:00:00",
+      "test_start": "2017-11-22 07:00:00",
+      "test_end": "2017-12-22 07:00:00",
+      "signals": 37,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_80_signals.csv"
+    },
+    {
+      "fold": 81,
+      "train_start": "2016-12-22 07:00:00",
+      "train_end": "2017-12-22 07:00:00",
+      "test_start": "2017-12-22 07:00:00",
+      "test_end": "2018-01-21 07:00:00",
+      "signals": 65,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_81_signals.csv"
+    },
+    {
+      "fold": 82,
+      "train_start": "2017-01-21 07:00:00",
+      "train_end": "2018-01-21 07:00:00",
+      "test_start": "2018-01-21 07:00:00",
+      "test_end": "2018-02-20 07:00:00",
+      "signals": 43,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_82_signals.csv"
+    },
+    {
+      "fold": 83,
+      "train_start": "2017-02-20 07:00:00",
+      "train_end": "2018-02-20 07:00:00",
+      "test_start": "2018-02-20 07:00:00",
+      "test_end": "2018-03-22 07:00:00",
+      "signals": 38,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_83_signals.csv"
+    },
+    {
+      "fold": 84,
+      "train_start": "2017-03-22 07:00:00",
+      "train_end": "2018-03-22 07:00:00",
+      "test_start": "2018-03-22 07:00:00",
+      "test_end": "2018-04-21 07:00:00",
+      "signals": 47,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_84_signals.csv"
+    },
+    {
+      "fold": 85,
+      "train_start": "2017-04-21 07:00:00",
+      "train_end": "2018-04-21 07:00:00",
+      "test_start": "2018-04-21 07:00:00",
+      "test_end": "2018-05-21 07:00:00",
+      "signals": 49,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_85_signals.csv"
+    },
+    {
+      "fold": 86,
+      "train_start": "2017-05-21 07:00:00",
+      "train_end": "2018-05-21 07:00:00",
+      "test_start": "2018-05-21 07:00:00",
+      "test_end": "2018-06-20 07:00:00",
+      "signals": 31,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_86_signals.csv"
+    },
+    {
+      "fold": 87,
+      "train_start": "2017-06-20 07:00:00",
+      "train_end": "2018-06-20 07:00:00",
+      "test_start": "2018-06-20 07:00:00",
+      "test_end": "2018-07-20 07:00:00",
+      "signals": 68,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_87_signals.csv"
+    },
+    {
+      "fold": 88,
+      "train_start": "2017-07-20 07:00:00",
+      "train_end": "2018-07-20 07:00:00",
+      "test_start": "2018-07-20 07:00:00",
+      "test_end": "2018-08-19 07:00:00",
+      "signals": 53,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_88_signals.csv"
+    },
+    {
+      "fold": 89,
+      "train_start": "2017-08-19 07:00:00",
+      "train_end": "2018-08-19 07:00:00",
+      "test_start": "2018-08-19 07:00:00",
+      "test_end": "2018-09-18 07:00:00",
+      "signals": 49,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_89_signals.csv"
+    },
+    {
+      "fold": 90,
+      "train_start": "2017-09-18 07:00:00",
+      "train_end": "2018-09-18 07:00:00",
+      "test_start": "2018-09-18 07:00:00",
+      "test_end": "2018-10-18 07:00:00",
+      "signals": 33,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_90_signals.csv"
+    },
+    {
+      "fold": 91,
+      "train_start": "2017-10-18 07:00:00",
+      "train_end": "2018-10-18 07:00:00",
+      "test_start": "2018-10-18 07:00:00",
+      "test_end": "2018-11-17 07:00:00",
+      "signals": 41,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_91_signals.csv"
+    },
+    {
+      "fold": 92,
+      "train_start": "2017-11-17 07:00:00",
+      "train_end": "2018-11-17 07:00:00",
+      "test_start": "2018-11-17 07:00:00",
+      "test_end": "2018-12-17 07:00:00",
+      "signals": 48,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_92_signals.csv"
+    },
+    {
+      "fold": 93,
+      "train_start": "2017-12-17 07:00:00",
+      "train_end": "2018-12-17 07:00:00",
+      "test_start": "2018-12-17 07:00:00",
+      "test_end": "2019-01-16 07:00:00",
+      "signals": 40,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_93_signals.csv"
+    },
+    {
+      "fold": 94,
+      "train_start": "2018-01-16 07:00:00",
+      "train_end": "2019-01-16 07:00:00",
+      "test_start": "2019-01-16 07:00:00",
+      "test_end": "2019-02-15 07:00:00",
+      "signals": 43,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_94_signals.csv"
+    },
+    {
+      "fold": 95,
+      "train_start": "2018-02-15 07:00:00",
+      "train_end": "2019-02-15 07:00:00",
+      "test_start": "2019-02-15 07:00:00",
+      "test_end": "2019-03-17 07:00:00",
+      "signals": 52,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_95_signals.csv"
+    },
+    {
+      "fold": 96,
+      "train_start": "2018-03-17 07:00:00",
+      "train_end": "2019-03-17 07:00:00",
+      "test_start": "2019-03-17 07:00:00",
+      "test_end": "2019-04-16 07:00:00",
+      "signals": 60,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_96_signals.csv"
+    },
+    {
+      "fold": 97,
+      "train_start": "2018-04-16 07:00:00",
+      "train_end": "2019-04-16 07:00:00",
+      "test_start": "2019-04-16 07:00:00",
+      "test_end": "2019-05-16 07:00:00",
+      "signals": 41,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_97_signals.csv"
+    },
+    {
+      "fold": 98,
+      "train_start": "2018-05-16 07:00:00",
+      "train_end": "2019-05-16 07:00:00",
+      "test_start": "2019-05-16 07:00:00",
+      "test_end": "2019-06-15 07:00:00",
+      "signals": 53,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_98_signals.csv"
+    },
+    {
+      "fold": 99,
+      "train_start": "2018-06-15 07:00:00",
+      "train_end": "2019-06-15 07:00:00",
+      "test_start": "2019-06-15 07:00:00",
+      "test_end": "2019-07-15 07:00:00",
+      "signals": 33,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_99_signals.csv"
+    },
+    {
+      "fold": 100,
+      "train_start": "2018-07-15 07:00:00",
+      "train_end": "2019-07-15 07:00:00",
+      "test_start": "2019-07-15 07:00:00",
+      "test_end": "2019-08-14 07:00:00",
+      "signals": 48,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_100_signals.csv"
+    },
+    {
+      "fold": 101,
+      "train_start": "2018-08-14 07:00:00",
+      "train_end": "2019-08-14 07:00:00",
+      "test_start": "2019-08-14 07:00:00",
+      "test_end": "2019-09-13 07:00:00",
+      "signals": 30,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_101_signals.csv"
+    },
+    {
+      "fold": 102,
+      "train_start": "2018-09-13 07:00:00",
+      "train_end": "2019-09-13 07:00:00",
+      "test_start": "2019-09-13 07:00:00",
+      "test_end": "2019-10-13 07:00:00",
+      "signals": 39,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_102_signals.csv"
+    },
+    {
+      "fold": 103,
+      "train_start": "2018-10-13 07:00:00",
+      "train_end": "2019-10-13 07:00:00",
+      "test_start": "2019-10-13 07:00:00",
+      "test_end": "2019-11-12 07:00:00",
+      "signals": 50,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_103_signals.csv"
+    },
+    {
+      "fold": 104,
+      "train_start": "2018-11-12 07:00:00",
+      "train_end": "2019-11-12 07:00:00",
+      "test_start": "2019-11-12 07:00:00",
+      "test_end": "2019-12-12 07:00:00",
+      "signals": 44,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_104_signals.csv"
+    },
+    {
+      "fold": 105,
+      "train_start": "2018-12-12 07:00:00",
+      "train_end": "2019-12-12 07:00:00",
+      "test_start": "2019-12-12 07:00:00",
+      "test_end": "2020-01-11 07:00:00",
+      "signals": 44,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_105_signals.csv"
+    },
+    {
+      "fold": 106,
+      "train_start": "2019-01-11 07:00:00",
+      "train_end": "2020-01-11 07:00:00",
+      "test_start": "2020-01-11 07:00:00",
+      "test_end": "2020-02-10 07:00:00",
+      "signals": 34,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_106_signals.csv"
+    },
+    {
+      "fold": 107,
+      "train_start": "2019-02-10 07:00:00",
+      "train_end": "2020-02-10 07:00:00",
+      "test_start": "2020-02-10 07:00:00",
+      "test_end": "2020-03-11 07:00:00",
+      "signals": 47,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_107_signals.csv"
+    },
+    {
+      "fold": 108,
+      "train_start": "2019-03-12 07:00:00",
+      "train_end": "2020-03-11 07:00:00",
+      "test_start": "2020-03-11 07:00:00",
+      "test_end": "2020-04-10 07:00:00",
+      "signals": 30,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_108_signals.csv"
+    },
+    {
+      "fold": 109,
+      "train_start": "2019-04-11 07:00:00",
+      "train_end": "2020-04-10 07:00:00",
+      "test_start": "2020-04-10 07:00:00",
+      "test_end": "2020-05-10 07:00:00",
+      "signals": 33,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_109_signals.csv"
+    },
+    {
+      "fold": 110,
+      "train_start": "2019-05-11 07:00:00",
+      "train_end": "2020-05-10 07:00:00",
+      "test_start": "2020-05-10 07:00:00",
+      "test_end": "2020-06-09 07:00:00",
+      "signals": 30,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_110_signals.csv"
+    },
+    {
+      "fold": 111,
+      "train_start": "2019-06-10 07:00:00",
+      "train_end": "2020-06-09 07:00:00",
+      "test_start": "2020-06-09 07:00:00",
+      "test_end": "2020-07-09 07:00:00",
+      "signals": 51,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_111_signals.csv"
+    },
+    {
+      "fold": 112,
+      "train_start": "2019-07-10 07:00:00",
+      "train_end": "2020-07-09 07:00:00",
+      "test_start": "2020-07-09 07:00:00",
+      "test_end": "2020-08-08 07:00:00",
+      "signals": 46,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_112_signals.csv"
+    },
+    {
+      "fold": 113,
+      "train_start": "2019-08-09 07:00:00",
+      "train_end": "2020-08-08 07:00:00",
+      "test_start": "2020-08-08 07:00:00",
+      "test_end": "2020-09-07 07:00:00",
+      "signals": 31,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_113_signals.csv"
+    },
+    {
+      "fold": 114,
+      "train_start": "2019-09-08 07:00:00",
+      "train_end": "2020-09-07 07:00:00",
+      "test_start": "2020-09-07 07:00:00",
+      "test_end": "2020-10-07 07:00:00",
+      "signals": 39,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_114_signals.csv"
+    },
+    {
+      "fold": 115,
+      "train_start": "2019-10-08 07:00:00",
+      "train_end": "2020-10-07 07:00:00",
+      "test_start": "2020-10-07 07:00:00",
+      "test_end": "2020-11-06 07:00:00",
+      "signals": 38,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_115_signals.csv"
+    },
+    {
+      "fold": 116,
+      "train_start": "2019-11-07 07:00:00",
+      "train_end": "2020-11-06 07:00:00",
+      "test_start": "2020-11-06 07:00:00",
+      "test_end": "2020-12-06 07:00:00",
+      "signals": 29,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_116_signals.csv"
+    },
+    {
+      "fold": 117,
+      "train_start": "2019-12-07 07:00:00",
+      "train_end": "2020-12-06 07:00:00",
+      "test_start": "2020-12-06 07:00:00",
+      "test_end": "2021-01-05 07:00:00",
+      "signals": 37,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_117_signals.csv"
+    },
+    {
+      "fold": 118,
+      "train_start": "2020-01-06 07:00:00",
+      "train_end": "2021-01-05 07:00:00",
+      "test_start": "2021-01-05 07:00:00",
+      "test_end": "2021-02-04 07:00:00",
+      "signals": 34,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_118_signals.csv"
+    },
+    {
+      "fold": 119,
+      "train_start": "2020-02-05 07:00:00",
+      "train_end": "2021-02-04 07:00:00",
+      "test_start": "2021-02-04 07:00:00",
+      "test_end": "2021-03-06 07:00:00",
+      "signals": 53,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_119_signals.csv"
+    },
+    {
+      "fold": 120,
+      "train_start": "2020-03-06 07:00:00",
+      "train_end": "2021-03-06 07:00:00",
+      "test_start": "2021-03-06 07:00:00",
+      "test_end": "2021-04-05 07:00:00",
+      "signals": 35,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_120_signals.csv"
+    },
+    {
+      "fold": 121,
+      "train_start": "2020-04-05 07:00:00",
+      "train_end": "2021-04-05 07:00:00",
+      "test_start": "2021-04-05 07:00:00",
+      "test_end": "2021-05-05 07:00:00",
+      "signals": 25,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_121_signals.csv"
+    },
+    {
+      "fold": 122,
+      "train_start": "2020-05-05 07:00:00",
+      "train_end": "2021-05-05 07:00:00",
+      "test_start": "2021-05-05 07:00:00",
+      "test_end": "2021-06-04 07:00:00",
+      "signals": 37,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_122_signals.csv"
+    },
+    {
+      "fold": 123,
+      "train_start": "2020-06-04 07:00:00",
+      "train_end": "2021-06-04 07:00:00",
+      "test_start": "2021-06-04 07:00:00",
+      "test_end": "2021-07-04 07:00:00",
+      "signals": 44,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_123_signals.csv"
+    },
+    {
+      "fold": 124,
+      "train_start": "2020-07-04 07:00:00",
+      "train_end": "2021-07-04 07:00:00",
+      "test_start": "2021-07-04 07:00:00",
+      "test_end": "2021-08-03 07:00:00",
+      "signals": 41,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_124_signals.csv"
+    },
+    {
+      "fold": 125,
+      "train_start": "2020-08-03 07:00:00",
+      "train_end": "2021-08-03 07:00:00",
+      "test_start": "2021-08-03 07:00:00",
+      "test_end": "2021-09-02 07:00:00",
+      "signals": 30,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_125_signals.csv"
+    },
+    {
+      "fold": 126,
+      "train_start": "2020-09-02 07:00:00",
+      "train_end": "2021-09-02 07:00:00",
+      "test_start": "2021-09-02 07:00:00",
+      "test_end": "2021-10-02 07:00:00",
+      "signals": 25,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_126_signals.csv"
+    },
+    {
+      "fold": 127,
+      "train_start": "2020-10-02 07:00:00",
+      "train_end": "2021-10-02 07:00:00",
+      "test_start": "2021-10-02 07:00:00",
+      "test_end": "2021-11-01 07:00:00",
+      "signals": 30,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_127_signals.csv"
+    },
+    {
+      "fold": 128,
+      "train_start": "2020-11-01 07:00:00",
+      "train_end": "2021-11-01 07:00:00",
+      "test_start": "2021-11-01 07:00:00",
+      "test_end": "2021-12-01 07:00:00",
+      "signals": 27,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_128_signals.csv"
+    },
+    {
+      "fold": 129,
+      "train_start": "2020-12-01 07:00:00",
+      "train_end": "2021-12-01 07:00:00",
+      "test_start": "2021-12-01 07:00:00",
+      "test_end": "2021-12-31 07:00:00",
+      "signals": 44,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_129_signals.csv"
+    },
+    {
+      "fold": 130,
+      "train_start": "2020-12-31 07:00:00",
+      "train_end": "2021-12-31 07:00:00",
+      "test_start": "2021-12-31 07:00:00",
+      "test_end": "2022-01-30 07:00:00",
+      "signals": 41,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_130_signals.csv"
+    },
+    {
+      "fold": 131,
+      "train_start": "2021-01-30 07:00:00",
+      "train_end": "2022-01-30 07:00:00",
+      "test_start": "2022-01-30 07:00:00",
+      "test_end": "2022-03-01 07:00:00",
+      "signals": 36,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_131_signals.csv"
+    },
+    {
+      "fold": 132,
+      "train_start": "2021-03-01 07:00:00",
+      "train_end": "2022-03-01 07:00:00",
+      "test_start": "2022-03-01 07:00:00",
+      "test_end": "2022-03-31 07:00:00",
+      "signals": 37,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_132_signals.csv"
+    },
+    {
+      "fold": 133,
+      "train_start": "2021-03-31 07:00:00",
+      "train_end": "2022-03-31 07:00:00",
+      "test_start": "2022-03-31 07:00:00",
+      "test_end": "2022-04-30 07:00:00",
+      "signals": 37,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_133_signals.csv"
+    },
+    {
+      "fold": 134,
+      "train_start": "2021-04-30 07:00:00",
+      "train_end": "2022-04-30 07:00:00",
+      "test_start": "2022-04-30 07:00:00",
+      "test_end": "2022-05-30 07:00:00",
+      "signals": 35,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_134_signals.csv"
+    },
+    {
+      "fold": 135,
+      "train_start": "2021-05-30 07:00:00",
+      "train_end": "2022-05-30 07:00:00",
+      "test_start": "2022-05-30 07:00:00",
+      "test_end": "2022-06-29 07:00:00",
+      "signals": 36,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_135_signals.csv"
+    },
+    {
+      "fold": 136,
+      "train_start": "2021-06-29 07:00:00",
+      "train_end": "2022-06-29 07:00:00",
+      "test_start": "2022-06-29 07:00:00",
+      "test_end": "2022-07-29 07:00:00",
+      "signals": 54,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_136_signals.csv"
+    },
+    {
+      "fold": 137,
+      "train_start": "2021-07-29 07:00:00",
+      "train_end": "2022-07-29 07:00:00",
+      "test_start": "2022-07-29 07:00:00",
+      "test_end": "2022-08-28 07:00:00",
+      "signals": 45,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_137_signals.csv"
+    },
+    {
+      "fold": 138,
+      "train_start": "2021-08-28 07:00:00",
+      "train_end": "2022-08-28 07:00:00",
+      "test_start": "2022-08-28 07:00:00",
+      "test_end": "2022-09-27 07:00:00",
+      "signals": 56,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_138_signals.csv"
+    },
+    {
+      "fold": 139,
+      "train_start": "2021-09-27 07:00:00",
+      "train_end": "2022-09-27 07:00:00",
+      "test_start": "2022-09-27 07:00:00",
+      "test_end": "2022-10-27 07:00:00",
+      "signals": 50,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_139_signals.csv"
+    },
+    {
+      "fold": 140,
+      "train_start": "2021-10-27 07:00:00",
+      "train_end": "2022-10-27 07:00:00",
+      "test_start": "2022-10-27 07:00:00",
+      "test_end": "2022-11-26 07:00:00",
+      "signals": 61,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_140_signals.csv"
+    },
+    {
+      "fold": 141,
+      "train_start": "2021-11-26 07:00:00",
+      "train_end": "2022-11-26 07:00:00",
+      "test_start": "2022-11-26 07:00:00",
+      "test_end": "2022-12-26 07:00:00",
+      "signals": 39,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_141_signals.csv"
+    },
+    {
+      "fold": 142,
+      "train_start": "2021-12-26 07:00:00",
+      "train_end": "2022-12-26 07:00:00",
+      "test_start": "2022-12-26 07:00:00",
+      "test_end": "2023-01-25 07:00:00",
+      "signals": 48,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_142_signals.csv"
+    },
+    {
+      "fold": 143,
+      "train_start": "2022-01-25 07:00:00",
+      "train_end": "2023-01-25 07:00:00",
+      "test_start": "2023-01-25 07:00:00",
+      "test_end": "2023-02-24 07:00:00",
+      "signals": 43,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_143_signals.csv"
+    },
+    {
+      "fold": 144,
+      "train_start": "2022-02-24 07:00:00",
+      "train_end": "2023-02-24 07:00:00",
+      "test_start": "2023-02-24 07:00:00",
+      "test_end": "2023-03-26 07:00:00",
+      "signals": 61,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_144_signals.csv"
+    },
+    {
+      "fold": 145,
+      "train_start": "2022-03-26 07:00:00",
+      "train_end": "2023-03-26 07:00:00",
+      "test_start": "2023-03-26 07:00:00",
+      "test_end": "2023-04-25 07:00:00",
+      "signals": 40,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_145_signals.csv"
+    },
+    {
+      "fold": 146,
+      "train_start": "2022-04-25 07:00:00",
+      "train_end": "2023-04-25 07:00:00",
+      "test_start": "2023-04-25 07:00:00",
+      "test_end": "2023-05-25 07:00:00",
+      "signals": 45,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_146_signals.csv"
+    },
+    {
+      "fold": 147,
+      "train_start": "2022-05-25 07:00:00",
+      "train_end": "2023-05-25 07:00:00",
+      "test_start": "2023-05-25 07:00:00",
+      "test_end": "2023-06-24 07:00:00",
+      "signals": 40,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_147_signals.csv"
+    },
+    {
+      "fold": 148,
+      "train_start": "2022-06-24 07:00:00",
+      "train_end": "2023-06-24 07:00:00",
+      "test_start": "2023-06-24 07:00:00",
+      "test_end": "2023-07-24 07:00:00",
+      "signals": 42,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_148_signals.csv"
+    },
+    {
+      "fold": 149,
+      "train_start": "2022-07-24 07:00:00",
+      "train_end": "2023-07-24 07:00:00",
+      "test_start": "2023-07-24 07:00:00",
+      "test_end": "2023-08-23 07:00:00",
+      "signals": 43,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_149_signals.csv"
+    },
+    {
+      "fold": 150,
+      "train_start": "2022-08-23 07:00:00",
+      "train_end": "2023-08-23 07:00:00",
+      "test_start": "2023-08-23 07:00:00",
+      "test_end": "2023-09-22 07:00:00",
+      "signals": 51,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_150_signals.csv"
+    },
+    {
+      "fold": 151,
+      "train_start": "2022-09-22 07:00:00",
+      "train_end": "2023-09-22 07:00:00",
+      "test_start": "2023-09-22 07:00:00",
+      "test_end": "2023-10-22 07:00:00",
+      "signals": 40,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_151_signals.csv"
+    },
+    {
+      "fold": 152,
+      "train_start": "2022-10-22 07:00:00",
+      "train_end": "2023-10-22 07:00:00",
+      "test_start": "2023-10-22 07:00:00",
+      "test_end": "2023-11-21 07:00:00",
+      "signals": 42,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_152_signals.csv"
+    },
+    {
+      "fold": 153,
+      "train_start": "2022-11-21 07:00:00",
+      "train_end": "2023-11-21 07:00:00",
+      "test_start": "2023-11-21 07:00:00",
+      "test_end": "2023-12-21 07:00:00",
+      "signals": 27,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_153_signals.csv"
+    },
+    {
+      "fold": 154,
+      "train_start": "2022-12-21 07:00:00",
+      "train_end": "2023-12-21 07:00:00",
+      "test_start": "2023-12-21 07:00:00",
+      "test_end": "2024-01-20 07:00:00",
+      "signals": 32,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_154_signals.csv"
+    },
+    {
+      "fold": 155,
+      "train_start": "2023-01-20 07:00:00",
+      "train_end": "2024-01-20 07:00:00",
+      "test_start": "2024-01-20 07:00:00",
+      "test_end": "2024-02-19 07:00:00",
+      "signals": 35,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_155_signals.csv"
+    },
+    {
+      "fold": 156,
+      "train_start": "2023-02-19 07:00:00",
+      "train_end": "2024-02-19 07:00:00",
+      "test_start": "2024-02-19 07:00:00",
+      "test_end": "2024-03-20 07:00:00",
+      "signals": 44,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_156_signals.csv"
+    },
+    {
+      "fold": 157,
+      "train_start": "2023-03-21 07:00:00",
+      "train_end": "2024-03-20 07:00:00",
+      "test_start": "2024-03-20 07:00:00",
+      "test_end": "2024-04-19 07:00:00",
+      "signals": 26,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_157_signals.csv"
+    },
+    {
+      "fold": 158,
+      "train_start": "2023-04-20 07:00:00",
+      "train_end": "2024-04-19 07:00:00",
+      "test_start": "2024-04-19 07:00:00",
+      "test_end": "2024-05-19 07:00:00",
+      "signals": 48,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_158_signals.csv"
+    },
+    {
+      "fold": 159,
+      "train_start": "2023-05-20 07:00:00",
+      "train_end": "2024-05-19 07:00:00",
+      "test_start": "2024-05-19 07:00:00",
+      "test_end": "2024-06-18 07:00:00",
+      "signals": 37,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_159_signals.csv"
+    },
+    {
+      "fold": 160,
+      "train_start": "2023-06-19 07:00:00",
+      "train_end": "2024-06-18 07:00:00",
+      "test_start": "2024-06-18 07:00:00",
+      "test_end": "2024-07-18 07:00:00",
+      "signals": 42,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_160_signals.csv"
+    },
+    {
+      "fold": 161,
+      "train_start": "2023-07-19 07:00:00",
+      "train_end": "2024-07-18 07:00:00",
+      "test_start": "2024-07-18 07:00:00",
+      "test_end": "2024-08-17 07:00:00",
+      "signals": 46,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_161_signals.csv"
+    },
+    {
+      "fold": 162,
+      "train_start": "2023-08-18 07:00:00",
+      "train_end": "2024-08-17 07:00:00",
+      "test_start": "2024-08-17 07:00:00",
+      "test_end": "2024-09-16 07:00:00",
+      "signals": 49,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_162_signals.csv"
+    },
+    {
+      "fold": 163,
+      "train_start": "2023-09-17 07:00:00",
+      "train_end": "2024-09-16 07:00:00",
+      "test_start": "2024-09-16 07:00:00",
+      "test_end": "2024-10-16 07:00:00",
+      "signals": 52,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_163_signals.csv"
+    },
+    {
+      "fold": 164,
+      "train_start": "2023-10-17 07:00:00",
+      "train_end": "2024-10-16 07:00:00",
+      "test_start": "2024-10-16 07:00:00",
+      "test_end": "2024-11-15 07:00:00",
+      "signals": 58,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_164_signals.csv"
+    },
+    {
+      "fold": 165,
+      "train_start": "2023-11-16 07:00:00",
+      "train_end": "2024-11-15 07:00:00",
+      "test_start": "2024-11-15 07:00:00",
+      "test_end": "2024-12-15 07:00:00",
+      "signals": 59,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_165_signals.csv"
+    },
+    {
+      "fold": 166,
+      "train_start": "2023-12-16 07:00:00",
+      "train_end": "2024-12-15 07:00:00",
+      "test_start": "2024-12-15 07:00:00",
+      "test_end": "2025-01-14 07:00:00",
+      "signals": 50,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_166_signals.csv"
+    },
+    {
+      "fold": 167,
+      "train_start": "2024-01-15 07:00:00",
+      "train_end": "2025-01-14 07:00:00",
+      "test_start": "2025-01-14 07:00:00",
+      "test_end": "2025-02-13 07:00:00",
+      "signals": 75,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_167_signals.csv"
+    },
+    {
+      "fold": 168,
+      "train_start": "2024-02-14 07:00:00",
+      "train_end": "2025-02-13 07:00:00",
+      "test_start": "2025-02-13 07:00:00",
+      "test_end": "2025-03-15 07:00:00",
+      "signals": 61,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_168_signals.csv"
+    },
+    {
+      "fold": 169,
+      "train_start": "2024-03-15 07:00:00",
+      "train_end": "2025-03-15 07:00:00",
+      "test_start": "2025-03-15 07:00:00",
+      "test_end": "2025-04-14 07:00:00",
+      "signals": 53,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_169_signals.csv"
+    },
+    {
+      "fold": 170,
+      "train_start": "2024-04-14 07:00:00",
+      "train_end": "2025-04-14 07:00:00",
+      "test_start": "2025-04-14 07:00:00",
+      "test_end": "2025-05-14 07:00:00",
+      "signals": 56,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_170_signals.csv"
+    },
+    {
+      "fold": 171,
+      "train_start": "2024-05-14 07:00:00",
+      "train_end": "2025-05-14 07:00:00",
+      "test_start": "2025-05-14 07:00:00",
+      "test_end": "2025-06-13 07:00:00",
+      "signals": 51,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_171_signals.csv"
+    },
+    {
+      "fold": 172,
+      "train_start": "2024-06-13 07:00:00",
+      "train_end": "2025-06-13 07:00:00",
+      "test_start": "2025-06-13 07:00:00",
+      "test_end": "2025-07-13 07:00:00",
+      "signals": 45,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_172_signals.csv"
+    },
+    {
+      "fold": 173,
+      "train_start": "2024-07-13 07:00:00",
+      "train_end": "2025-07-13 07:00:00",
+      "test_start": "2025-07-13 07:00:00",
+      "test_end": "2025-08-12 07:00:00",
+      "signals": 56,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_173_signals.csv"
+    },
+    {
+      "fold": 174,
+      "train_start": "2024-08-12 07:00:00",
+      "train_end": "2025-08-12 07:00:00",
+      "test_start": "2025-08-12 07:00:00",
+      "test_end": "2025-09-11 07:00:00",
+      "signals": 48,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_174_signals.csv"
+    },
+    {
+      "fold": 175,
+      "train_start": "2024-09-11 07:00:00",
+      "train_end": "2025-09-11 07:00:00",
+      "test_start": "2025-09-11 07:00:00",
+      "test_end": "2025-10-11 07:00:00",
+      "signals": 59,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_175_signals.csv"
+    },
+    {
+      "fold": 176,
+      "train_start": "2024-10-11 07:00:00",
+      "train_end": "2025-10-11 07:00:00",
+      "test_start": "2025-10-11 07:00:00",
+      "test_end": "2025-11-10 07:00:00",
+      "signals": 36,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_176_signals.csv"
+    },
+    {
+      "fold": 177,
+      "train_start": "2024-11-10 07:00:00",
+      "train_end": "2025-11-10 07:00:00",
+      "test_start": "2025-11-10 07:00:00",
+      "test_end": "2025-12-10 07:00:00",
+      "signals": 46,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_177_signals.csv"
+    },
+    {
+      "fold": 178,
+      "train_start": "2024-12-10 07:00:00",
+      "train_end": "2025-12-10 07:00:00",
+      "test_start": "2025-12-10 07:00:00",
+      "test_end": "2026-01-09 07:00:00",
+      "signals": 47,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_178_signals.csv"
+    },
+    {
+      "fold": 179,
+      "train_start": "2025-01-09 07:00:00",
+      "train_end": "2026-01-09 07:00:00",
+      "test_start": "2026-01-09 07:00:00",
+      "test_end": "2026-02-08 07:00:00",
+      "signals": 41,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_179_signals.csv"
+    },
+    {
+      "fold": 180,
+      "train_start": "2025-02-08 07:00:00",
+      "train_end": "2026-02-08 07:00:00",
+      "test_start": "2026-02-08 07:00:00",
+      "test_end": "2026-03-10 07:00:00",
+      "signals": 30,
+      "csv": "outputs\\monthly180_aggressive_highdd_sweep_20260520\\risk_05_10_best_shape\\best_mt5\\fold_180_signals.csv"
+    }
+  ],
+  "total_signals": 7345
+}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from datetime import time as time_obj
 from pathlib import Path
@@ -377,6 +378,7 @@ def simulate_dynamic_concurrent_backtest(
     skipped_by_filters = 0
     skipped_no_slot = 0
     skipped_circuit_breaker = 0  # NEW: track circuit breaker blocks
+    skipped_risk_cap = 0
 
     balance_history: list[float] = [balance]
     max_concurrent_seen = 0
@@ -746,7 +748,16 @@ def simulate_dynamic_concurrent_backtest(
         _MAX_LOT_CAP = float(getattr(settings.risk, 'max_lot', 0.0))
         if _sl_dist > 0 and effective_bal > 0:
             _ideal_lot = (effective_bal * rf) / (_XAUUSD_OZ * _sl_dist)
-            _actual_lot = max(_MIN_LOT_SNAP, round(_ideal_lot / _MIN_LOT_SNAP) * _MIN_LOT_SNAP)
+            _max_risk_fraction = float(getattr(settings.risk, 'max_risk_fraction', 0.0))
+            _min_lot_risk_fraction = (_MIN_LOT_SNAP * _XAUUSD_OZ * _sl_dist) / effective_bal
+            if _max_risk_fraction > 0 and _min_lot_risk_fraction > _max_risk_fraction:
+                skipped_risk_cap += 1
+                balance_history.append(balance)
+                continue
+            if _ideal_lot < _MIN_LOT_SNAP:
+                _actual_lot = _MIN_LOT_SNAP
+            else:
+                _actual_lot = math.floor(_ideal_lot / _MIN_LOT_SNAP) * _MIN_LOT_SNAP
             if _MAX_LOT_CAP > 0:
                 _actual_lot = min(_actual_lot, _MAX_LOT_CAP)
             rf = (_actual_lot * _XAUUSD_OZ * _sl_dist) / effective_bal
@@ -892,6 +903,7 @@ def simulate_dynamic_concurrent_backtest(
         "signals_filtered_out": skipped_by_filters,
         "signals_no_slot": skipped_no_slot,
         "signals_circuit_breaker": skipped_circuit_breaker,
+        "signals_risk_cap": skipped_risk_cap,
         "signals_reentry_guard": skipped_reentry_guard,
         "signals_market_closed": skipped_market_closed,
         "max_concurrent_positions": max_concurrent_seen,

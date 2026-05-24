@@ -656,3 +656,40 @@ def wyckoff_effort_result(frame: pd.DataFrame, lookback: int = 14) -> pd.Series:
     score = direction * np.tanh((harmony - 1.0) * 2.0)
     return score.fillna(0).clip(-1, 1)
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# v7: Weekly-scale trend context (derived from D1 bars — no separate W1 frame needed)
+# Helps discriminate trending (fold 1, Nov-Dec 2023) vs consolidating (fold 3, Jan-Feb 2024)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def weekly_trend_metrics(d1_frame: pd.DataFrame) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """Three weekly-scale features from D1 bars.
+
+    Returns:
+        weekly_bias_d1     : (EMA5 - EMA20) / ATR14, clipped ±3. Positive = weekly uptrend.
+        weekly_range_tight : 5-day H-L range / 100-day rolling avg. Low (<0.6) = consolidation.
+        d1_run_length      : tanh(consecutive D1 closes above/below EMA20 / 10). ±0.76 at 10 days.
+    """
+    close = d1_frame["close"]
+    ema5 = ema(close, 5)
+    ema20 = ema(close, 20)
+    d1_atr = atr(d1_frame, 14).replace(0, np.nan)
+
+    weekly_bias = ((ema5 - ema20) / d1_atr).fillna(0.0).clip(-3.0, 3.0)
+
+    hi5 = d1_frame["high"].rolling(5, min_periods=3).max()
+    lo5 = d1_frame["low"].rolling(5, min_periods=3).min()
+    week_rng = (hi5 - lo5).replace(0, np.nan)
+    avg_rng = week_rng.rolling(100, min_periods=20).mean().replace(0, np.nan)
+    weekly_range_tight = (week_rng / avg_rng).fillna(1.0).clip(0.1, 3.0)
+
+    # Vectorized consecutive-close run length (above=+1, below=-1)
+    above = (close > ema20).astype(int) * 2 - 1
+    sign_changed = above.ne(above.shift(1)).fillna(True)
+    group_id = sign_changed.cumsum()
+    run_idx = above.groupby(group_id).cumcount() + 1
+    run_length_signed = above * run_idx
+    d1_run_length = np.tanh(run_length_signed / 10.0).fillna(0.0)
+
+    return weekly_bias, weekly_range_tight, d1_run_length
+

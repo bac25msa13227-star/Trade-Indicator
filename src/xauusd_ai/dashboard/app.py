@@ -1467,8 +1467,8 @@ def _render_dashboard_command_center() -> None:
         )
 
     focus_to_selector = {
-        "Acc 1": "Acc 1 — 270832477 (Exness-MT5Trial17)",
-        "Acc 2": "Acc 2 — 433326057 (Exness-MT5Trial7)",
+        "Acc 1": "Acc 1 — MT5_LOGIN (MT5_SERVER)",
+        "Acc 2": "Acc 2 — MT5_LOGIN_ACC2 (MT5_SERVER_ACC2)",
     }
     current_focus = st.session_state.get("cute_focus_account", "Acc 2")
     if current_focus in focus_to_selector:
@@ -1650,8 +1650,8 @@ def _render_live_tab() -> None:
                     unsafe_allow_html=True,
                 )
 
-    _auto_trade_panel(_ctrl_c1, "ACC1 — 270832477", "live_acc1.yaml", _at_acc1, "270832477", _regime_acc1, "acc1")
-    _auto_trade_panel(_ctrl_c2, "ACC2 — 433326057", "live_acc2.yaml", _at_acc2, "433326057", _regime_acc2, "acc2")
+    _auto_trade_panel(_ctrl_c1, "ACC1 — MT5_LOGIN", "live_acc1.yaml", _at_acc1, "MT5_LOGIN", _regime_acc1, "acc1")
+    _auto_trade_panel(_ctrl_c2, "ACC2 — MT5_LOGIN_ACC2", "live_acc2.yaml", _at_acc2, "MT5_LOGIN_ACC2", _regime_acc2, "acc2")
 
     # ── Retrain Countdown ─────────────────────────────────────────────────
     _retrain_state_path = OUTPUTS / "combo133_retrain_state.json"
@@ -1872,13 +1872,13 @@ def _render_live_tab() -> None:
         )
         ov1, ov2 = st.columns(2)
         with ov1:
-            _acc_summary_card("Acc 1 — Exness-MT5Trial17", _live_sigs, "270832477", "live_status_acc1.json")
+            _acc_summary_card("Acc 1 — MT5_SERVER", _live_sigs, "MT5_LOGIN", "live_status_acc1.json")
         with ov2:
-            _acc_summary_card("Acc 2 — Exness-MT5Trial7", _live_sigs_acc2, "433326057", "live_status_acc2.json")
+            _acc_summary_card("Acc 2 — MT5_SERVER_ACC2", _live_sigs_acc2, "MT5_LOGIN_ACC2", "live_status_acc2.json")
         st.divider()
 
     # ── Account selector ─────────────────────────────────────────────────
-    _acc_options = ["Acc 1 — 270832477 (Exness-MT5Trial17)", "Acc 2 — 433326057 (Exness-MT5Trial7)"]
+    _acc_options = ["Acc 1 — MT5_LOGIN (MT5_SERVER)", "Acc 2 — MT5_LOGIN_ACC2 (MT5_SERVER_ACC2)"]
     _sel_acc = st.radio("Xem chi tiết tài khoản:", _acc_options, horizontal=True, key="acc_selector")
     _selected_signals = _live_sigs if "Acc 1" in _sel_acc else _live_sigs_acc2
     _sel_thr  = _thr_acc2 if "Acc 2" in _sel_acc else _thr
@@ -2124,7 +2124,7 @@ def _render_live_tab() -> None:
 
         # ── Closed trades với kết quả win/loss ──────────────────────────
         _closed = _ltrades if "Acc 1" in _sel_acc else _ltrades_acc2
-        _acc_label_closed = "ACC1 (270832477)" if "Acc 1" in _sel_acc else "ACC2 (433326057)"
+        _acc_label_closed = "ACC1 (MT5_LOGIN)" if "Acc 1" in _sel_acc else "ACC2 (MT5_LOGIN_ACC2)"
         st.divider()
 
         # ── Filter controls (always render so both ACC1 & ACC2 show the section) ──
@@ -2223,7 +2223,7 @@ with tab_analysis:
         unsafe_allow_html=True,
     )
 
-    _ana_options = ["Acc 1 — 270832477", "Acc 2 — 433326057"]
+    _ana_options = ["Acc 1 — MT5_LOGIN", "Acc 2 — MT5_LOGIN_ACC2"]
     _ana_sel = st.radio("Tài khoản:", _ana_options, horizontal=True, key="ana_acc_selector")
     _analysis_signals = live_signals if "Acc 1" in _ana_sel else live_signals_acc2
     _ana_threshold = threshold_val_acc2 if "Acc 2" in _ana_sel else threshold_val
@@ -2667,8 +2667,8 @@ with tab_pnl:
 
     # ── Live Account P&L sub-tabs (ACC1 / ACC2 / So Sanh) ────────────────────
     _pnl_acc1, _pnl_acc2, _pnl_both = st.tabs([
-        "🏦 Live ACC1 — 270832477",
-        "🏦 Live ACC2 — 433326057",
+        "🏦 Live ACC1 — MT5_LOGIN",
+        "🏦 Live ACC2 — MT5_LOGIN_ACC2",
         "⚖️ So sánh 2 Tài khoản",
     ])
 
@@ -2749,10 +2749,10 @@ with tab_pnl:
                 st.area_chart(_bh["account_balance"].pipe(_ds), height=200)
 
     with _pnl_acc1:
-        _render_live_pnl(live_trades, live_signals, "ACC1 (270832477)")
+        _render_live_pnl(live_trades, live_signals, "ACC1 (MT5_LOGIN)")
 
     with _pnl_acc2:
-        _render_live_pnl(live_trades_acc2, live_signals_acc2, "ACC2 (433326057)")
+        _render_live_pnl(live_trades_acc2, live_signals_acc2, "ACC2 (MT5_LOGIN_ACC2)")
 
     with _pnl_both:
         st.subheader("⚖️ So sánh P&L 2 tài khoản")
@@ -2917,8 +2917,8 @@ with tab_learning:
 
     # Per-account learning sub-tabs
     _learn_acc1_tab, _learn_acc2_tab, _learn_both_tab = st.tabs([
-        "🤖 Học — ACC1 (270832477)",
-        "🤖 Học — ACC2 (433326057)",
+        "🤖 Học — ACC1 (MT5_LOGIN)",
+        "🤖 Học — ACC2 (MT5_LOGIN_ACC2)",
         "📊 So sánh & Tổng hợp",
     ])
 
@@ -3163,7 +3163,7 @@ with tab_learning:
     with _learn_both_tab:
         st.subheader("📊 So sánh tốc độ học 2 tài khoản")
         _lc_data = []
-        for _acc_lbl, _evs in [("ACC1 (270832477)", learn_events), ("ACC2 (433326057)", learn_events_acc2)]:
+        for _acc_lbl, _evs in [("ACC1 (MT5_LOGIN)", learn_events), ("ACC2 (MT5_LOGIN_ACC2)", learn_events_acc2)]:
             _sl = [e for e in _evs if e.get("event") in ("self_learn", "live_retrain", "loss_retrain")]
             if _sl:
                 _imp  = sum(1 for e in _sl if "improved" in e.get("status", ""))

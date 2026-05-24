@@ -23,7 +23,7 @@ app:
   log_level: INFO
 
 market:
-  symbol: XAUUSDm
+  symbol: XAUUSD
   training_symbol: GC=F
   training_data_source: csv_folder
   live_data_source: bridge
@@ -109,7 +109,7 @@ strategy:
 
 risk:
   mode: fixed_fractional
-  risk_per_trade: 0.030            # 🎯 TARGET100k FINAL: WF 29-fold → net $125k, lose 2, DD 19.42%, PF 3.07 (synced with WF)
+  risk_per_trade: 0.020            # $200 guardrail: cap per-trade risk at 2%
   risk_tier_floor: 0.02
   max_open_positions: 3             # COMBO #133: WF-synced
   stop_loss_atr_multiple: 1.5
@@ -119,19 +119,20 @@ risk:
   sideway_take_profit_rr: 2.5      # Sideways regime RR 1:2.5
   min_confidence: 0.70             # COMBO #133: WF-synced (was 0.78)
   fixed_lot: 0.01
-  max_risk_fraction: 0.08           # V14++
+  max_risk_fraction: 0.02           # Hard live cap: never exceed 2% per order
   sideway_risk_multiplier: 1.0
   normal_risk_multiplier: 1.0
   strong_volatility_risk_multiplier: 0.70
   kill_switch_enabled: true
-  daily_loss_limit_pct: 0.08        # V14++: daily loss limit enabled
+  daily_loss_limit_pct: 0.05        # Stop trading for the day after 5% realized loss
   max_drawdown_kill_pct: 0.15       # 🎯 TARGET100k: kill at 15% so concurrent-SL overshoot stays <20%
   consecutive_loss_pause_count: 3
   consecutive_loss_cooldown_bars: 12 # V14++: 1h cooldown
   anti_martingale_factor: 0.7       # V14++: sweep best
   anti_martingale_max_reductions: 2
   volatility_risk_scaling_enabled: false  # COMBO #133: TẮT — model wins during ATR spikes
-  max_total_exposure_pct: 0.30
+  max_total_exposure_pct: 0.06
+  max_spread_points: 1.5
   reentry_guard_enabled: true
   reentry_cooldown_bars_after_sl: 5
   reentry_min_distance_atr: 0.35
@@ -161,7 +162,8 @@ risk:
       hours_utc: [17, 18, 19, 20, 21]
   # Profit filter — skip low-profit trades to reduce transaction costs
   profit_filter_enabled: true        # ✅ ENABLED with WF-validated threshold
-  min_expected_profit: 15.0          # $15 optimal threshold (validated: 82.3% skip, +15,107% avg return/fold)
+  min_expected_profit: 0.0           # Disabled when min_expected_profit_r > 0
+  min_expected_profit_r: 2.5         # R-based sweep candidate for $200 account
   profit_filter_spread_pips: 0.5     # XAUUSD typical spread
 
 execution:
@@ -174,7 +176,7 @@ execution:
   magic_number: 20260325            # Unique for acc1
   comment: xauusd-ai-live-acc1-profit
   paper_trade_max_loops: 0          # 0 = run continuously until manually stopped
-  paper_data_source: mt5             # Paper test should follow live feed, not static CSV
+  paper_data_source: bridge           # MT5 bridge at localhost:5600
   close_opposite_on_signal: true
 
   trailing_sl:
@@ -240,9 +242,9 @@ integrations:
     login_env: MT5_LOGIN
     password_env: MT5_PASSWORD
     server_env: MT5_SERVER
-    login: 270832477
-    password: "07032001bB@"
-    server: "Exness-MT5Trial17"
+    login: null
+    password: null
+    server: null
     terminal_path: "C:\\Program Files\\MetaTrader 5\\terminal64.exe"
   telegram:
     token_env: TELEGRAM_BOT_TOKEN
@@ -250,15 +252,15 @@ integrations:
   news:
     enabled: true
     provider: forexfactory
-    minutes_before: 2         # Chặn 2 phút trước tin (tránh spread rộng lúc chờ)
-    minutes_after: 5          # Cửa sổ tín hiệu sau tin
+    minutes_before: 30
+    minutes_after: 30
     trade_before_news: false
-    trade_after_news: true    # Cho phép lệnh sau tin qua filter bình thường
+    trade_after_news: false
     high_impact_only: true
     currencies:
       - USD
     # --- News Trade Override: ép BUY/SELL ngay khi tin vừa ra ---
-    news_trade_override: true          # true = kích hoạt giao dịch theo tin
+    news_trade_override: false
     news_trade_window_minutes: 3       # Thực hiện trong 3 phút đầu sau khi tin ra
     news_trade_atr_sl_mult: 1.5        # SL = 1.5 × ATR (đủ rộng tránh spike)
     news_trade_atr_tp_mult: 3.5        # TP = 3.5 × ATR  →  RR ≈ 1:2.3
@@ -285,3 +287,4 @@ admin:
     bridge_feed_divergence_points: 80.0
     only_when_market_open: true
   regime_session_matrix_windows_days: [7, 30]
+

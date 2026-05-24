@@ -1,5 +1,5 @@
 # Minimal MLflow tracking server — built from local base (no Docker Hub pull)
-FROM xauusd-backend:latest
+FROM python:3.11-slim
 
 RUN pip install --no-cache-dir \
         mlflow==2.13.0 \

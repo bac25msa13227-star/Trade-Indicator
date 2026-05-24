@@ -266,6 +266,7 @@ class RiskSettings(StrictSettingsModel):
     # Filter out signals with expected profit < threshold to reduce transaction costs
     profit_filter_enabled: bool = False
     min_expected_profit: float = 15.0      # Minimum expected profit per trade (USD)
+    min_expected_profit_r: float = 0.0     # Minimum expected profit in R (0 = use USD threshold)
     profit_filter_spread_pips: float = 0.5  # XAUUSD spread for profit calculation
     # ── Entry Quality Filter ───────────────────────────────────────
     # Require multiple confirmations (ICT+Wyckoff+Volume+Trend+Momentum) to improve win rate

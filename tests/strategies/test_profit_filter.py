@@ -221,6 +221,70 @@ class TestMinimumProfitFilter:
         assert "profit_too_low" in reason
         assert "predicted=$-10.00" in reason
 
+    def test_r_based_threshold_takes_precedence(self):
+        """Test R-based threshold ignores fixed-dollar lot scaling."""
+        filter_obj = MinimumProfitFilter(
+            min_expected_profit=15.0,
+            min_expected_profit_r=2.5,
+        )
+
+        should_skip, reason = filter_obj.should_skip_trade(
+            predicted_profit=100.0,
+            predicted_profit_r=2.4,
+            lot_size=0.01,
+        )
+        assert should_skip is True
+        assert "profit_r_too_low" in reason
+
+        should_skip, reason = filter_obj.should_skip_trade(
+            predicted_profit=1.0,
+            predicted_profit_r=2.6,
+            lot_size=0.01,
+        )
+        assert should_skip is False
+        assert reason == "ok"
+
+    def test_r_based_threshold_requires_r_estimate(self):
+        """Test R-based mode fails closed if expected R is missing."""
+        filter_obj = MinimumProfitFilter(min_expected_profit_r=2.5)
+
+        should_skip, reason = filter_obj.should_skip_trade(predicted_profit=100.0)
+
+        assert should_skip is True
+        assert reason == "profit_r_missing"
+
+    def test_filter_signals_uses_r_column(self):
+        """Test DataFrame filtering can use expected R instead of dollars."""
+        filter_obj = MinimumProfitFilter(
+            min_expected_profit=15.0,
+            min_expected_profit_r=2.5,
+        )
+        signals = pd.DataFrame({
+            "predicted_profit": [1.0, 100.0, 8.0],
+            "predicted_profit_r": [2.6, 2.4, 3.0],
+            "lot_size": [0.01, 0.01, 0.01],
+        })
+
+        filtered_df, stats = filter_obj.filter_signals(signals)
+
+        assert stats["filtered_signals"] == 2
+        assert stats["skipped_signals"] == 1
+        assert list(filtered_df["predicted_profit_r"]) == [2.6, 3.0]
+
+    def test_filter_signals_r_mode_without_usd_column(self):
+        """Test R mode only requires predicted_profit_r."""
+        filter_obj = MinimumProfitFilter(min_expected_profit_r=2.5)
+        signals = pd.DataFrame({
+            "predicted_profit_r": [2.4, 2.6],
+            "lot_size": [0.01, 0.01],
+        })
+
+        filtered_df, stats = filter_obj.filter_signals(signals)
+
+        assert stats["filtered_signals"] == 1
+        assert stats["skipped_signals"] == 1
+        assert list(filtered_df["predicted_profit_r"]) == [2.6]
+
 
 if __name__ == "__main__":
     # Run tests
